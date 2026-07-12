@@ -61,3 +61,8 @@ logs/
 # WeChat mini program
 miniprogram/node_modules/
 project.private.config.json
+
+# Tool caches
+.codegraph/
+.cursor/
+.workbuddy/
