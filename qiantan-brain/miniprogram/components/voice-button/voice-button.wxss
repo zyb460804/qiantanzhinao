@@ -1,0 +1,10 @@
+.vb { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 250rpx; height: 250rpx; color: #fff; background: var(--green-800); border: 14rpx solid rgba(255,255,255,.78); border-radius: 50%; box-shadow: 0 18rpx 42rpx rgba(23,92,69,.3), 0 0 0 18rpx rgba(31,114,85,.08); transition: transform .15s ease; }
+.vb:active { transform: scale(.96); }
+.vb.listening { background: var(--red); box-shadow: 0 18rpx 42rpx rgba(217,82,74,.28), 0 0 0 18rpx rgba(217,82,74,.1); animation: pulse 1.35s ease-in-out infinite; }
+.vb.processing, .vb.uploading { color: var(--green-950); background: #f5bd59; box-shadow: 0 18rpx 42rpx rgba(243,168,59,.28), 0 0 0 18rpx rgba(243,168,59,.1); }
+.vb.success { background: var(--green-700); }
+.vb.error { background: var(--red); }
+.vb-symbol { display: flex; align-items: center; justify-content: center; width: 66rpx; height: 66rpx; color: currentColor; background: rgba(255,255,255,.14); border-radius: 22rpx; font-size: 38rpx; line-height: 1; font-weight: 850; }
+.vb-hint { margin-top: 17rpx; font-size: 29rpx; font-weight: 750; }
+.vb-sub { margin-top: 4rpx; color: rgba(255,255,255,.62); font-size: 20rpx; }
+@keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }

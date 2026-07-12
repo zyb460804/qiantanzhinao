@@ -1,0 +1,169 @@
+<!-- 库存总览 · 库存健康工作台 -->
+<view class="page-shell inv-page {{skinClass}}">
+
+  <!-- Hero -->
+  <view class="page-hero inv-hero">
+    <view class="hero-top">
+      <view class="hero-kick">STOCK HEALTH · 库存健康</view>
+      <view class="refresh-btn {{loading ? 'is-loading' : ''}}" bindtap="manualRefresh">
+        <icon name="refresh" size="sm" color="#fff"></icon>
+        <text>{{updatedAt}}</text>
+      </view>
+    </view>
+    <view class="hero-figures">
+      <view class="hero-figure">
+        <text class="hf-num">{{totalCategories}}</text>
+        <text class="hf-unit">记录品类</text>
+      </view>
+      <view class="hero-figure sub">
+        <text class="hf-num sm">{{inStockCount}}</text>
+        <text class="hf-unit">当前有库存</text>
+      </view>
+    </view>
+    <view class="hero-strip">
+      <view class="strip-item"><text class="si-num">{{attentionCount}}</text><text class="si-lab">余量较少</text></view>
+      <view class="strip-sep"></view>
+      <view class="strip-item"><text class="si-num">{{emptyCount}}</text><text class="si-lab">已售罄</text></view>
+      <view class="strip-sep"></view>
+      <view class="strip-item"><text class="si-num">{{expiringCount}}</text><text class="si-lab">临期批次</text></view>
+    </view>
+  </view>
+
+  <!-- 骨架屏 -->
+  <view wx:if="{{loading && inventoryItems.length === 0}}" class="skel-wrap">
+    <view class="skeleton-block card-line"></view>
+    <view class="skeleton-row">
+      <view class="skeleton-block sq"></view>
+      <view class="skeleton-block grow"></view>
+    </view>
+    <view class="skeleton-block card-line"></view>
+    <view class="skeleton-block card-line short"></view>
+  </view>
+
+  <block wx:else>
+    <!-- 小智洞察 -->
+    <view class="insight-card {{insightTone}}" wx:if="{{inventoryItems.length > 0}}">
+      <mascot size="sm" mood="{{insightTone === 'good' ? 'idle' : 'think'}}"></mascot>
+      <view class="insight-copy">
+        <text class="insight-kicker">小智库存提示</text>
+        <text class="insight-title">{{insightTitle}}</text>
+        <text class="insight-desc">{{insightText}}</text>
+      </view>
+      <view class="insight-action" bindtap="navigateToAdvisor">查看建议</view>
+    </view>
+
+    <!-- 临期提醒 -->
+    <view class="block" wx:if="{{expiryAlerts.length > 0}}">
+      <view class="section-head">
+        <view><text class="section-title">临期提醒</text><text class="tag tag-red">{{expiringCount}}</text></view>
+        <text class="section-caption">按紧急程度排序</text>
+      </view>
+      <view class="expiry-list">
+        <view wx:for="{{expiryAlerts}}" wx:key="batch_id" class="expiry-card {{item.tone}}">
+          <view class="expiry-badge {{item.tone}}">{{item.status_text}}</view>
+          <view class="expiry-copy">
+            <view class="expiry-title-line">
+              <text class="expiry-name">{{item.product_name}}</text>
+              <text class="expiry-qty">余 {{item.remaining_qty}} {{item.display_unit}}</text>
+            </view>
+            <text class="expiry-message">{{item.message || item.batch_label}}</text>
+            <view class="expiry-meta">
+              <text>{{item.time_text}}</text>
+              <text wx:if="{{item.discount}}" class="meta-disc">建议优惠 {{item.discount}}%</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 库存健康概览 -->
+    <view class="block">
+      <view class="section-head"><text class="section-title">库存数量概览</text><text class="section-caption">不跨单位相加</text></view>
+      <view class="health-grid">
+        <view class="health-item good">
+          <view class="health-icon"><icon name="check" size="sm" color="var(--green-600)"></icon></view>
+          <text class="health-num">{{healthyCount}}</text>
+          <text class="health-label">数量高于提示线</text>
+        </view>
+        <view class="health-item warn">
+          <view class="health-icon"><icon name="leaf" size="sm" color="var(--corn)"></icon></view>
+          <text class="health-num">{{attentionCount}}</text>
+          <text class="health-label">余量较少</text>
+        </view>
+        <view class="health-item empty">
+          <view class="health-icon"><icon name="cart" size="sm" color="var(--red)"></icon></view>
+          <text class="health-num">{{emptyCount}}</text>
+          <text class="health-label">已经售罄</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 不再展示跨单位的库存排行榜：斤、件、箱不能直接比较 -->
+
+    <!-- 全部商品 -->
+    <view class="block">
+      <view class="section-head product-head">
+        <view><text class="section-title">全部商品</text><text class="tag tag-green">{{filteredCount}} 项</text></view>
+        <text class="section-caption">实时流水汇总</text>
+      </view>
+
+      <view class="inv-tools" wx:if="{{inventoryItems.length > 0}}">
+        <view class="search-box">
+          <icon name="search" size="sm" color="var(--muted)"></icon>
+          <input value="{{searchKeyword}}" placeholder="搜索商品名称" confirm-type="search" bindinput="onSearchInput" />
+          <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="clearSearch">×</text>
+        </view>
+        <scroll-view scroll-x class="filter-scroll" show-scrollbar="{{false}}">
+          <view class="filter-list">
+            <view class="chip {{filterMode === 'all' ? 'active' : ''}}" data-mode="all" bindtap="changeFilter">全部 {{totalCategories}}</view>
+            <view class="chip {{filterMode === 'attention' ? 'active warn' : ''}}" data-mode="attention" bindtap="changeFilter">需关注 {{attentionCount + emptyCount}}</view>
+            <view class="chip {{filterMode === 'low' ? 'active warn' : ''}}" data-mode="low" bindtap="changeFilter">偏低 {{attentionCount}}</view>
+            <view class="chip {{filterMode === 'empty' ? 'active danger' : ''}}" data-mode="empty" bindtap="changeFilter">售罄 {{emptyCount}}</view>
+          </view>
+        </scroll-view>
+        <view class="sort-tabs">
+          <view class="sort-tab {{sortMode === 'qty' ? 'active' : ''}}" data-mode="qty" bindtap="changeSort">库存量</view>
+          <view class="sort-tab {{sortMode === 'low' ? 'active' : ''}}" data-mode="low" bindtap="changeSort">数量从少到多</view>
+          <view class="sort-tab {{sortMode === 'name' ? 'active' : ''}}" data-mode="name" bindtap="changeSort">按名称</view>
+        </view>
+      </view>
+
+      <view wx:if="{{inventoryItems.length === 0}}" class="empty-state card">
+        <mascot size="md" mood="idle"></mascot>
+        <text>还没有库存数据</text>
+        <button class="btn-primary" bindtap="navigateToVoice">去记第一笔</button>
+      </view>
+
+      <view wx:elif="{{displayItems.length === 0}}" class="empty-state card filter-empty">
+        <icon name="search" size="md" color="var(--muted)"></icon>
+        <text class="empty-title">没有匹配的商品</text>
+        <text class="empty-desc">换个关键词或切换库存状态试试</text>
+        <view class="reset-filter" bindtap="resetFilters">清除筛选并查看全部</view>
+      </view>
+
+      <view class="inv-list">
+        <view wx:for="{{displayItems}}" wx:key="product_id" class="inv-card {{item.status}}">
+          <view class="product-avatar">{{item.avatar_text}}</view>
+          <view class="product-content">
+            <view class="product-head">
+              <view class="product-title-wrap">
+                <view class="product-title-line">
+                  <text class="product-name">{{item.display_name}}</text>
+                  <text class="status-pill {{item.status}}">{{item.status_text}}</text>
+                </view>
+                <text class="product-meta" wx:if="{{item.avg_cost}}">均价 ¥{{item.avg_cost}} / {{item.unit}}</text>
+              </view>
+              <view class="qty-block">
+                <text class="qty-num {{item.status === 'healthy' ? 'green' : 'amber'}}">{{item.qty_value}}</text>
+                <text class="qty-unit">{{item.unit}}</text>
+              </view>
+            </view>
+            <view class="stock-caption stock-caption-simple"><text>{{item.status_hint}}</text></view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <view class="safe-bottom"></view>
+</view>

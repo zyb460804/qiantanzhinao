@@ -1,0 +1,45 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/voice/voice",
+    "pages/inventory/inventory",
+    "pages/advisor/advisor",
+    "pages/sandbox/sandbox",
+    "pages/dashboard/dashboard",
+    "pages/profile/profile",
+    "pages/vision/vision",
+    "pages/report/report",
+    "pages/purchase/purchase",
+    "pages/stocktake/stocktake",
+    "pages/pos/pos",
+    "pages/calendar/calendar",
+    "pages/styleguide/styleguide",
+    "pages/catalog/catalog",
+    "pages/ops/ops",
+    "pages/devices/devices",
+    "pages/finance/finance",
+    "pages/trace/trace"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#123D30",
+    "navigationBarTitleText": "千摊智脑",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#F5F1E6",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#7D8881",
+    "selectedColor": "#175C45",
+    "backgroundColor": "#FFFEFA",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/index/index", "text": "经营台", "iconPath": "images/tabbar/tab-home.png", "selectedIconPath": "images/tabbar/tab-home-active.png" },
+      { "pagePath": "pages/voice/voice", "text": "记一笔", "iconPath": "images/tabbar/tab-voice.png", "selectedIconPath": "images/tabbar/tab-voice-active.png" },
+      { "pagePath": "pages/inventory/inventory", "text": "库存", "iconPath": "images/tabbar/tab-inventory.png", "selectedIconPath": "images/tabbar/tab-inventory-active.png" },
+      { "pagePath": "pages/advisor/advisor", "text": "参谋", "iconPath": "images/tabbar/tab-advisor.png", "selectedIconPath": "images/tabbar/tab-advisor-active.png" },
+      { "pagePath": "pages/profile/profile", "text": "我的", "iconPath": "images/tabbar/tab-profile.png", "selectedIconPath": "images/tabbar/tab-profile-active.png" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

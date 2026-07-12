@@ -1,0 +1,80 @@
+<!-- AI参谋 · 先给结论，再解释依据与风险 (v2.2 生鲜元气) -->
+<wxs src="/utils/format.wxs" module="fmt" />
+<view class="page-shell advisor-page skin-{{skin}}">
+  <view class="page-hero advisor-hero">
+    <view class="advisor-hero-top">
+      <view>
+        <text class="eyebrow">DAILY ADVISOR · 今日参谋</text>
+        <text class="hero-title">今天怎么卖，更稳妥？</text>
+      </view>
+      <mascot size="lg" mood="idle" />
+    </view>
+    <text class="hero-desc">建议来自天气、星期、库存与经营偏好的综合判断。</text>
+    <view class="env-strip" wx:if="{{envSummary}}">
+      <view><text class="env-num">{{envSummary.temp_high}}°</text><text class="env-label">最高温</text></view>
+      <view><text class="env-num">{{envSummary.rainfall_prob}}%</text><text class="env-label">降雨概率</text></view>
+      <view><text class="env-num">{{envSummary.is_weekend ? '周末' : '工作日'}}</text><text class="env-label">客流节奏</text></view>
+    </view>
+  </view>
+
+  <!-- 小智主动推送（主动智能层） -->
+  <view class="section-head"><text class="section-title">小智主动推送</text><text class="section-caption">不等你问，先替你盯着</text></view>
+  <view class="push-stack">
+    <view wx:for="{{activePush}}" wx:key="id" class="push-card {{item.adopted ? 'done' : ''}}">
+      <view class="push-icon"><icon name="{{item.icon}}" size="38" color="{{item.tone==='warn' ? 'var(--corn)' : 'var(--green-800)'}}" /></view>
+      <view class="push-body">
+        <text class="push-title">{{item.title}}</text>
+        <text class="push-desc">{{item.desc}}</text>
+      </view>
+      <button wx:if="{{!item.adopted}}" class="push-cta" data-id="{{item.id}}" bindtap="adoptPush">{{item.cta}}</button>
+      <view wx:else class="push-done">✓ {{item.doneText}}</view>
+    </view>
+  </view>
+
+  <view class="section-head"><text class="section-title">优先行动</text><text class="section-caption">{{recommendations.length}} 条建议</text></view>
+
+  <!-- 打字中 + 流式口吻 -->
+  <view class="mascot-says" wx:if="{{saysText}}">
+    <mascot size="sm" mood="think" />
+    <text class="says-text">{{saysText}}<text class="caret">▍</text></text>
+  </view>
+
+  <view wx:if="{{recommendations.length === 0}}" class="loading-card"><view class="loading-line wide"></view><view class="loading-line"></view><view class="loading-line short"></view></view>
+
+  <view wx:for="{{recommendations}}" wx:key="product_id" class="advice-card">
+    <view class="advice-index">0{{index + 1}}</view>
+    <view class="advice-body">
+      <view class="advice-head"><text class="advice-product">{{item.product_name}}</text><text class="confidence {{item.confidence > 0.7 ? 'high' : ''}}">{{fmt.percent(item.confidence)}}% 把握</text></view>
+      <text class="advice-suggestion">{{item.suggestion}}</text>
+      <view class="basis-box" wx:if="{{item.basis.length > 0}}">
+        <text class="box-label">判断依据</text>
+        <view wx:for="{{item.basis}}" wx:key="factor" wx:for-item="b" class="basis-line"><text class="basis-factor">{{b.factor}}</text><text class="basis-value {{b.impact === '+' ? 'green' : b.impact === '-' ? 'red' : ''}}">{{b.value}}</text></view>
+      </view>
+      <view class="risk-note" wx:if="{{item.risk_warning}}"><text class="risk-symbol">!</text><text>{{item.risk_warning}}</text></view>
+    </view>
+  </view>
+
+  <view class="purchase-cta" wx:if="{{recommendations.length > 0}}">
+    <button class="btn-primary purchase-btn" bindtap="addToPurchase">把这些建议加入采购清单</button>
+  </view>
+
+  <view class="sandbox-banner" bindtap="toggleSim">
+    <icon name="spark" size="40" color="var(--corn)" />
+    <view class="sandbox-copy"><text class="sandbox-title">进货前，先算一遍</text><text class="sandbox-desc">模拟多进50斤后的销量、利润与损耗</text></view>
+    <text class="sandbox-arrow">{{showSim ? '收起' : '开始'}} ›</text>
+  </view>
+
+  <view class="sim-area" wx:if="{{showSim}}">
+    <sim-input products="{{simProducts}}" product-index="{{simProductIndex}}" purchase-qty="{{simPurchaseQty}}" unit-cost="{{simUnitCost}}" unit-price="{{simUnitPrice}}" loading="{{simLoading}}" bind:change="onSimField" bind:product-change="onSimProduct" bind:run="runSimulation" />
+    <view class="sim-result" wx:if="{{simResult}}">
+      <view class="result-head"><text class="section-title">试算结果</text><text class="tag {{simResult.comparison.improvement >= 0 ? 'tag-green' : 'tag-red'}}">{{simResult.comparison.verdict}}</text></view>
+      <view class="result-grid">
+        <view><text class="result-num">{{simResult.output.estimated_sales}}</text><text class="result-label">预计销量/斤</text></view>
+        <view><text class="result-num">¥{{simResult.output.estimated_revenue}}</text><text class="result-label">预计收入</text></view>
+        <view><text class="result-num green">¥{{simResult.output.net_profit}}</text><text class="result-label">净利润</text></view>
+        <view><text class="result-num yellow">{{fmt.percent(simResult.output.waste_rate)}}%</text><text class="result-label">损耗率</text></view>
+      </view>
+      <text class="result-rec">{{simResult.comparison.recommendation}}</text>
+    </view>
+  </view>
+</view>

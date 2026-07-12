@@ -1,0 +1,37 @@
+/* 审查页本地样式（令牌来自 app.wxss） */
+.sg-hero { margin-top: var(--s-2); }
+.sg-controls { margin: var(--s-3) 0; }
+.sg-control-title { font-size: var(--fs-sm); font-weight: 700; color: var(--ink-2); margin-bottom: var(--s-2); }
+
+/* 色彩 */
+.sg-swatch-head { font-size: var(--fs-xs); color: var(--muted); margin: var(--s-2) 0 var(--s-1); }
+.sg-swatches { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.sg-swatch { display: flex; flex-direction: column; align-items: center; gap: 8rpx; width: 120rpx; }
+.sg-swatch-color { width: 88rpx; height: 88rpx; border-radius: var(--r-md); box-shadow: var(--shadow-sm); }
+.sg-swatch-name { font-size: 18rpx; color: var(--ink-2); }
+
+/* 字体 */
+.sg-type-row { display: flex; align-items: baseline; gap: var(--s-3); padding: 14rpx 0; border-bottom: 1rpx solid var(--line-soft); }
+.sg-type-row:last-child { border-bottom: 0; }
+.sg-type-label { width: 110rpx; flex-shrink: 0; font-size: var(--fs-xs); color: var(--muted); }
+.sg-type-display { font-family: var(--font-display); font-size: var(--fs-2xl); }
+.sg-type-num { font-family: var(--font-num); font-size: var(--fs-xl); font-variant-numeric: tabular-nums; }
+.sg-type-body { font-family: var(--font-body); font-size: var(--fs-base); color: var(--ink-2); }
+
+/* 间距 / 圆角 */
+.sg-space-row { display: flex; align-items: center; gap: var(--s-2); padding: 8rpx 0; }
+.sg-space-name { width: 90rpx; flex-shrink: 0; font-size: var(--fs-xs); color: var(--muted); }
+.sg-space-bar { height: 22rpx; background: var(--green-200); border-radius: var(--r-pill); }
+.sg-radius-row { display: flex; gap: var(--s-2); margin-top: var(--s-2); }
+.sg-radius { flex: 1; height: 110rpx; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 12rpx; background: var(--green-100); color: var(--green-800); font-size: var(--fs-xs); font-weight: 700; }
+
+.sg-sub { font-size: var(--fs-sm); font-weight: 700; color: var(--ink-2); margin-bottom: var(--s-2); }
+
+/* 图标网格 */
+.sg-icon-grid { display: flex; flex-wrap: wrap; gap: var(--s-3); }
+.sg-icon-cell { display: flex; flex-direction: column; align-items: center; gap: 10rpx; width: 110rpx; }
+.sg-icon-name { font-size: 18rpx; color: var(--muted); }
+
+/* 小智 */
+.sg-mascot-row { display: flex; justify-content: space-around; align-items: flex-end; gap: var(--s-3); padding: var(--s-3) 0; }
+.sg-mascot-cell { display: flex; flex-direction: column; align-items: center; gap: 12rpx; color: var(--muted); font-size: var(--fs-xs); }

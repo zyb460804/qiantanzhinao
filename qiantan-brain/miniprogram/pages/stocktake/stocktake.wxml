@@ -1,0 +1,247 @@
+<!-- 库存盘点 · 核对实际库存，校准数字孪生 -->
+<view class="page-shell stocktake-page {{skinClass}}">
+
+  <!-- Tab 切换栏 -->
+  <view class="tab-bar">
+    <view class="tab-item {{activeTab === 'stocktake' ? 'active' : ''}}" data-tab="stocktake" bindtap="switchTab">开始盘点</view>
+    <view class="tab-item {{activeTab === 'history' ? 'active' : ''}}" data-tab="history" bindtap="switchTab">盘点历史</view>
+  </view>
+
+  <!-- ════════════════ 开始盘点 Tab ════════════════ -->
+  <block wx:if="{{activeTab === 'stocktake'}}">
+
+    <!-- ── 未开始盘点 ── -->
+    <block wx:if="{{!sessionId && !completed}}">
+      <view class="page-hero page-hero--breathing">
+        <text class="eyebrow">STOCKTAKE · 库存盘点</text>
+        <text class="hero-title">库存盘点</text>
+        <text class="hero-desc">核对实际库存，校准数字孪生</text>
+      </view>
+
+      <view class="start-card">
+        <view class="start-icon-wrap">
+          <text class="start-icon">⚖</text>
+        </view>
+        <text class="start-title">开始一次盘点</text>
+        <text class="start-desc">逐项核对货架实际数量，系统将自动计算差异并生成库存调整记录。</text>
+        <button class="btn-primary start-btn" bindtap="startStocktake" loading="{{loading}}">
+          {{loading ? '正在准备...' : '开始盘点'}}
+        </button>
+      </view>
+    </block>
+
+    <!-- ── 盘点进行中 ── -->
+    <block wx:if="{{sessionId && !completed}}">
+
+      <!-- 进度指示器 -->
+      <view class="progress-card">
+        <view class="progress-head">
+          <text class="progress-label">盘点进度</text>
+          <text class="progress-count">{{progressCount}} / {{stocktakeItems.length}}</text>
+        </view>
+        <view class="progress-track">
+          <view class="progress-fill" style="width: {{progressPercent}}%"></view>
+        </view>
+        <text class="progress-hint">已盘点 {{progressCount}} 件，共 {{stocktakeItems.length}} 件商品</text>
+      </view>
+
+      <!-- 商品盘点列表 -->
+      <view class="section-head">
+        <text class="section-title">商品盘点</text>
+        <text class="section-caption">逐项核对实际数量</text>
+      </view>
+
+      <view class="stocktake-list">
+        <view wx:for="{{stocktakeItems}}" wx:key="product_id" class="stocktake-card {{item.submitted ? 'submitted' : ''}}">
+
+          <!-- 商品头部 -->
+          <view class="item-head">
+            <view class="item-name-wrap">
+              <text class="item-name">{{item.product_name}}</text>
+              <view class="item-tag-row">
+                <text class="mini-tag tag-ghost">账面 {{item.book_qty}}{{item.unit}}</text>
+                <text class="tag {{item.submitted ? 'tag-green' : 'tag-amber'}}">{{item.submitted ? '已盘点' : '待盘点'}}</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 实际数量输入区 -->
+          <view class="qty-input-area">
+            <text class="qty-input-label">实际数量</text>
+            <view class="qty-input-row">
+              <input class="qty-input" type="digit" value="{{item.actual_qty}}" placeholder="输入数量" placeholder-class="qty-placeholder" data-index="{{index}}" bindinput="inputActualQty" />
+              <text class="qty-input-unit">{{item.unit}}</text>
+            </view>
+          </view>
+
+          <!-- 快捷调整按钮 -->
+          <view class="quick-btns">
+            <view class="quick-btn" data-index="{{index}}" data-offset="0" bindtap="quickAdjust">+0</view>
+            <view class="quick-btn" data-index="{{index}}" data-offset="-1" bindtap="quickAdjust">-1</view>
+            <view class="quick-btn" data-index="{{index}}" data-offset="-5" bindtap="quickAdjust">-5</view>
+            <view class="quick-btn" data-index="{{index}}" data-offset="-10" bindtap="quickAdjust">-10</view>
+          </view>
+
+          <!-- 差异显示区域 -->
+          <view class="variance-area" wx:if="{{item.variance !== null}}">
+            <view class="variance-row">
+              <text class="variance-label">差异</text>
+              <text class="variance-value {{item.variance > 0 ? 'gain' : (item.variance < 0 ? 'loss' : 'zero')}}">{{item.variance > 0 ? '+' : ''}}{{item.variance}} {{item.unit}}</text>
+              <text class="variance-text {{item.variance > 0 ? 'gain' : (item.variance < 0 ? 'loss' : 'zero')}}">{{item.variance > 0 ? '盘盈' : (item.variance < 0 ? '盘亏' : '一致')}}</text>
+            </view>
+          </view>
+          <view class="variance-area" wx:else>
+            <view class="variance-row">
+              <text class="variance-label">差异</text>
+              <text class="variance-pending">待盘点</text>
+            </view>
+          </view>
+
+          <!-- 差异原因选择器（仅有差异时显示） -->
+          <view class="reason-area" wx:if="{{item.variance !== null && item.variance !== 0}}">
+            <text class="reason-label">差异原因 {{item.submitted ? '· 已记录' : '· 选择后自动提交'}}</text>
+            <view class="reason-btns">
+              <view wx:for="{{reasons}}" wx:for-item="reason" wx:for-index="reasonIdx" wx:key="key" class="reason-btn {{item.reason === reason.key ? 'active' : ''}}" data-index="{{index}}" data-reason="{{reason.key}}" bindtap="selectReason">
+                {{reason.label}}
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 底部固定汇总栏 -->
+      <view class="bottom-bar safe-bottom">
+        <view class="bottom-summary">
+          <view class="bottom-stat">
+            <text class="bottom-stat-num">{{progressCount}}/{{stocktakeItems.length}}</text>
+            <text class="bottom-stat-label">已盘/总数</text>
+          </view>
+          <view class="bottom-divider"></view>
+          <view class="bottom-stat">
+            <text class="bottom-stat-num {{totalVariance < 0 ? 'loss' : (totalVariance > 0 ? 'gain' : '')}}">{{totalVariance > 0 ? '+' : ''}}{{totalVariance}}</text>
+            <text class="bottom-stat-label">总差异</text>
+          </view>
+          <view class="bottom-divider"></view>
+          <view class="bottom-stat">
+            <text class="bottom-stat-num muted">--</text>
+            <text class="bottom-stat-label">损耗金额</text>
+          </view>
+        </view>
+        <button class="btn-primary bottom-complete {{progressCount < stocktakeItems.length ? 'disabled' : ''}}" bindtap="completeStocktake" loading="{{completing}}">
+          {{completing ? '提交中...' : '完成盘点'}}
+        </button>
+      </view>
+      <view class="bottom-placeholder"></view>
+    </block>
+
+    <!-- ── 盘点完成结果 ── -->
+    <block wx:if="{{completed && result}}">
+      <view class="page-hero result-hero page-hero--breathing">
+        <text class="eyebrow">STOCKTAKE DONE · 盘点完成</text>
+        <text class="hero-title">盘点已完成</text>
+        <text class="hero-desc">已根据盘点结果更新库存数字孪生</text>
+      </view>
+
+      <!-- 盘点总结卡片 -->
+      <view class="result-card">
+        <view class="result-card-head">
+          <text class="section-title">盘点总结</text>
+        </view>
+        <view class="result-grid">
+          <view class="result-item">
+            <text class="result-num">{{result.total_book_qty}}</text>
+            <text class="result-label">总账面</text>
+          </view>
+          <view class="result-item">
+            <text class="result-num">{{result.total_actual_qty}}</text>
+            <text class="result-label">总实际</text>
+          </view>
+          <view class="result-item">
+            <text class="result-num {{result.total_variance < 0 ? 'loss' : (result.total_variance > 0 ? 'gain' : '')}}">{{result.total_variance > 0 ? '+' : ''}}{{result.total_variance}}</text>
+            <text class="result-label">总差异</text>
+          </view>
+          <view class="result-item">
+            <text class="result-num loss">¥{{result.total_loss_amount}}</text>
+            <text class="result-label">损耗金额</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 调整明细列表 -->
+      <view class="section-head">
+        <text class="section-title">调整明细</text>
+        <text class="section-caption">{{result.adjustments.length}} 项调整</text>
+      </view>
+
+      <view class="adjust-list" wx:if="{{result.adjustments.length > 0}}">
+        <view wx:for="{{result.adjustments}}" wx:key="product_id" class="adjust-card">
+          <view class="adjust-head">
+            <text class="adjust-name">{{item.product_name}}</text>
+            <text class="adjust-variance {{item.variance < 0 ? 'loss' : 'gain'}}">{{item.variance > 0 ? '+' : ''}}{{item.variance}} {{item.unit}}</text>
+          </view>
+          <view class="adjust-detail">
+            <text class="adjust-meta">账面 {{item.book_qty}}{{item.unit}} → 实际 {{item.actual_qty}}{{item.unit}}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="empty-state surface" wx:else>
+        <mascot size="md" mood="cheer" class="mascot-empty"/>
+        <text>本次盘点无差异，库存准确</text>
+      </view>
+
+      <!-- 操作按钮 -->
+      <view class="result-actions">
+        <button class="btn-secondary" bindtap="viewInventory">查看库存</button>
+        <button class="btn-primary" bindtap="goHome">返回首页</button>
+      </view>
+
+      <view class="new-stocktake-link" bindtap="startNewStocktake">再盘点一次</view>
+    </block>
+  </block>
+
+  <!-- ════════════════ 盘点历史 Tab ════════════════ -->
+  <block wx:if="{{activeTab === 'history'}}">
+      <view class="page-hero page-hero--breathing">
+        <text class="eyebrow">HISTORY · 盘点历史</text>
+      <text class="hero-title">盘点历史</text>
+      <text class="hero-desc">查看历次盘点记录与损耗情况</text>
+    </view>
+
+    <view class="history-list" wx:if="{{historyList.length > 0}}">
+      <view wx:for="{{historyList}}" wx:key="id" class="history-card">
+        <view class="history-head">
+          <text class="history-date">{{item.date_text}}</text>
+          <text class="tag {{item.status === 'completed' ? 'tag-green' : 'tag-amber'}}">{{item.status_text}}</text>
+        </view>
+        <view class="history-stats">
+          <view class="history-stat">
+            <text class="history-stat-num">{{item.total_book_qty}}</text>
+            <text class="history-stat-label">总账面</text>
+          </view>
+          <view class="history-stat">
+            <text class="history-stat-num">{{item.total_actual_qty}}</text>
+            <text class="history-stat-label">总实际</text>
+          </view>
+          <view class="history-stat">
+            <text class="history-stat-num {{item.is_loss ? 'loss' : (item.is_gain ? 'gain' : '')}}">{{item.variance_text}}</text>
+            <text class="history-stat-label">差异</text>
+          </view>
+          <view class="history-stat">
+            <text class="history-stat-num loss">{{item.loss_text}}</text>
+            <text class="history-stat-label">损耗</text>
+          </view>
+        </view>
+        <view class="history-notes" wx:if="{{item.notes}}">
+          <text class="history-notes-text">{{item.notes}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="empty-state surface" wx:else>
+      <mascot size="md" mood="idle" class="mascot-empty"/>
+      <text>暂无盘点记录</text>
+    </view>
+  </block>
+
+</view>

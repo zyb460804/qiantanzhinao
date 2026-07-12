@@ -1,0 +1,11 @@
+<!-- 语音主按钮 -->
+<view class="vb {{state}}" bindtouchstart="onTouchStart" bindtouchmove="onTouchMove" bindtouchend="onTouchEnd" bindtouchcancel="onTouchCancel">
+  <view class="vb-symbol">
+    <text wx:if="{{state === 'success'}}">✓</text>
+    <text wx:elif="{{state === 'error'}}">!</text>
+    <text wx:elif="{{state === 'processing' || state === 'uploading'}}">···</text>
+    <text wx:else>●</text>
+  </view>
+  <text class="vb-hint">{{state === 'idle' ? '按住说话' : state === 'listening' ? '正在听' : state === 'uploading' ? '正在上传' : state === 'processing' ? '正在理解' : state === 'success' ? '识别完成' : state === 'error' ? '请重试' : '按住说话'}}</text>
+  <text class="vb-sub" wx:if="{{showHint && state === 'idle'}}">松开后发送</text>
+</view>

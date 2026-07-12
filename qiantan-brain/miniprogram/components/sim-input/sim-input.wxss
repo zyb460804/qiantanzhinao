@@ -1,0 +1,9 @@
+.si { padding: 26rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.si-row { display: flex; align-items: center; justify-content: space-between; min-height: 92rpx; border-bottom: 1rpx solid var(--line); }
+.si-label, .si-help { display: block; }
+.si-label { color: var(--ink); font-size: 24rpx; font-weight: 680; }
+.si-help { margin-top: 2rpx; color: var(--muted); font-size: 18rpx; }
+.si-picker { color: var(--green-700); font-size: 24rpx; font-weight: 700; }
+.si-input { display: flex; align-items: center; justify-content: flex-end; width: 220rpx; padding: 12rpx 16rpx; color: var(--muted); background: var(--paper-2); border-radius: 14rpx; font-size: 21rpx; }
+.si-input .si-field { flex: 1; min-width: 0; color: var(--ink); text-align: right; font-size: 27rpx; font-weight: 700; }
+.si-run { display: flex; align-items: center; justify-content: center; min-height: 90rpx; margin-top: 24rpx; color: #fff; background: var(--green-800); border-radius: 19rpx; font-size: 27rpx; font-weight: 730; }

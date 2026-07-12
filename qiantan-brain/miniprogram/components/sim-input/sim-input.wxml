@@ -1,0 +1,8 @@
+<!-- 沙盘参数组件 -->
+<view class="si">
+  <view class="si-row"><view><text class="si-label">模拟商品</text><text class="si-help">从今日建议中选择</text></view><picker mode="selector" range="{{products}}" value="{{productIndex}}" bindchange="onProductChange"><text class="si-picker">{{products[productIndex] || '请选择'}} ›</text></picker></view>
+  <view class="si-row"><text class="si-label">进货量</text><view class="si-input"><input class="si-field" type="digit" value="{{purchaseQty}}" data-field="purchaseQty" bindinput="onFieldInput"/><text>斤</text></view></view>
+  <view class="si-row"><text class="si-label">进货单价</text><view class="si-input"><text>¥</text><input class="si-field" type="digit" value="{{unitCost}}" data-field="unitCost" bindinput="onFieldInput"/></view></view>
+  <view class="si-row"><text class="si-label">计划售价</text><view class="si-input"><text>¥</text><input class="si-field" type="digit" value="{{unitPrice}}" data-field="unitPrice" bindinput="onFieldInput"/></view></view>
+  <button class="si-run" bindtap="onRun" loading="{{loading}}">{{loading ? '正在模拟...' : runText}}</button>
+</view>

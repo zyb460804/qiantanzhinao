@@ -1,0 +1,26 @@
+.cat-page { padding-bottom:100rpx; }
+.tab-row { display:flex; gap:12rpx; margin:16rpx 0; overflow-x:auto; }
+.tab-chip { padding:14rpx 24rpx; color:var(--muted); background:var(--paper); border:2rpx solid var(--line); border-radius:99rpx; font-size:24rpx; font-weight:700; white-space:nowrap; flex:0 0 auto; }
+.tab-chip.active { color:#fff; background:var(--green-700); border-color:var(--green-700); }
+.cat-list { overflow:hidden; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); margin-bottom:20rpx; }
+.cat-item { display:flex; align-items:center; padding:20rpx 24rpx; border-bottom:1rpx solid var(--line); gap:12rpx; }
+.cat-item:last-child { border-bottom:none; }
+.cat-main { flex:1; min-width:0; }
+.cat-name { display:block; color:var(--ink); font-size:27rpx; font-weight:750; }
+.cat-meta { display:block; margin-top:4rpx; color:var(--muted); font-size:20rpx; }
+.cat-price { color:var(--green-800); font-family:var(--font-num); font-size:25rpx; font-weight:800; flex:0 0 auto; }
+.cat-balance { font-size:23rpx; font-weight:700; flex:0 0 auto; }
+.cat-balance.warn { color:#c0493d; }
+.cat-actions { display:flex; gap:8rpx; flex:0 0 auto; }
+.act-btn { padding:6rpx 14rpx; color:var(--green-800); background:var(--green-50); border-radius:99rpx; font-size:20rpx; }
+.act-btn:active { opacity:.7; }
+.act-btn.del { color:#c0493d; background:rgba(201,67,51,.08); }
+
+.picker-mask { position:fixed; inset:0; z-index:100; display:flex; align-items:flex-end; justify-content:center; background:rgba(0,0,0,.4); }
+.picker-sheet { width:100%; max-width:640rpx; max-height:1200rpx; overflow-y:auto; padding:36rpx 28rpx 52rpx; background:var(--paper); border-radius:32rpx 32rpx 0 0; }
+.picker-title { display:block; color:var(--ink); font-size:30rpx; font-weight:800; margin-bottom:20rpx; }
+.picker-actions { display:flex; gap:14rpx; margin-top:24rpx; }
+.picker-actions .btn-secondary,.picker-actions .btn-primary { flex:1; }
+.form-input { width:100%; height:72rpx; margin-bottom:14rpx; padding:0 20rpx; color:var(--ink); font-size:26rpx; background:var(--green-50); border:2rpx solid var(--line); border-radius:16rpx; box-sizing:border-box; }
+.link { color:var(--green-800); font-weight:700; }
+.empty-state { padding:38rpx; text-align:center; color:var(--muted); font-size:24rpx; }

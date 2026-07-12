@@ -1,0 +1,4 @@
+<!-- risk-gauge 风险雷达图 -->
+<view class="rg-wrap">
+  <canvas type="2d" id="rg-canvas" class="rg-canvas"></canvas>
+</view>

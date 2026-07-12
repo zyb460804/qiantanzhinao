@@ -1,0 +1,122 @@
+<!-- 商品管理 — SKU/别名/规格/单位/供应商 -->
+<view class="page-shell cat-page {{skin}}">
+  <view class="page-hero"><text class="eyebrow">CATALOG · 商品与供应商</text><text class="hero-title">商品管理</text></view>
+
+  <view class="tab-row">
+    <view wx:for="{{[{k:'skus',l:'SKU'},{k:'aliases',l:'别名'},{k:'specs',l:'规格'},{k:'units',l:'单位'},{k:'suppliers',l:'供应商'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
+  </view>
+
+  <!-- SKU列表 -->
+  <view wx:if="{{tab==='skus'}}">
+    <view class="section-head"><text class="section-title">商品SKU</text><text class="link" bindtap="openSkuForm">+ 新增</text></view>
+    <view class="cat-list">
+      <view wx:for="{{skus}}" wx:key="sku_id" class="cat-item">
+        <view class="cat-main"><text class="cat-name">{{item.name}}</text><text class="cat-meta">{{item.canonical_unit}} · {{item.shelf_life_hours}}h</text></view>
+        <text class="cat-price" wx:if="{{item.default_sale_price}}">¥{{item.default_sale_price}}</text>
+        <view class="cat-actions">
+          <text class="act-btn" data-id="{{item.sku_id}}" bindtap="loadAliases">别名</text>
+          <text class="act-btn" data-id="{{item.sku_id}}" bindtap="loadSpecs">规格</text>
+          <text class="act-btn" data-id="{{item.sku_id}}" bindtap="openSkuForm">编辑</text>
+          <text class="act-btn del" data-id="{{item.sku_id}}" bindtap="deleteSku">停用</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 别名 -->
+  <view wx:if="{{tab==='aliases'}}">
+    <view class="section-head"><text class="section-title">别名列表</text><text class="link" bindtap="openAliasForm">+ 新增</text></view>
+    <view class="cat-list"><view wx:for="{{aliases}}" wx:key="alias_id" class="cat-item"><text class="cat-name">{{item.alias}}</text><text class="act-btn del" data-id="{{item.alias_id}}" bindtap="removeAlias">删除</text></view></view>
+    <view wx:if="{{!aliases.length}}" class="empty-state"><text>暂无别名，点击"+ 新增"添加</text></view>
+  </view>
+
+  <!-- 规格 -->
+  <view wx:if="{{tab==='specs'}}">
+    <view class="section-head"><text class="section-title">规格列表</text><text class="link" bindtap="openSpecForm">+ 新增</text></view>
+    <view class="cat-list"><view wx:for="{{specs}}" wx:key="spec_id" class="cat-item"><text class="cat-name">{{item.name}}</text><text class="cat-price" wx:if="{{item.price_delta}}">{{item.price_delta>0?'+':''}}¥{{item.price_delta}}</text><text class="act-btn del" data-id="{{item.spec_id}}" bindtap="removeSpec">删除</text></view></view>
+  </view>
+
+  <!-- 单位 -->
+  <view wx:if="{{tab==='units'}}">
+    <view class="section-head"><text class="section-title">单位</text><text class="link" bindtap="openUnitForm">+ 新增</text></view>
+    <view class="cat-list"><view wx:for="{{units}}" wx:key="unit_id" class="cat-item"><text class="cat-name">{{item.name}}</text><text class="cat-meta">{{item.code}} · {{item.kind}}</text></view></view>
+    <view class="section-head"><text class="section-title">换算关系</text><text class="link" bindtap="openConvForm">+ 新增</text></view>
+    <view class="cat-list"><view wx:for="{{conversions}}" wx:key="id" class="cat-item"><text class="cat-name">{{item.from_unit}}→{{item.to_unit}}</text><text class="cat-meta">x{{item.factor}}</text><text class="act-btn del" data-id="{{item.id}}" bindtap="deleteConv">删除</text></view></view>
+  </view>
+
+  <!-- 供应商 -->
+  <view wx:if="{{tab==='suppliers'}}">
+    <view class="section-head"><text class="section-title">供应商</text><text class="link" bindtap="openSupForm">+ 新增</text></view>
+    <view class="cat-list">
+      <view wx:for="{{suppliers}}" wx:key="supplier_id" class="cat-item">
+        <view class="cat-main"><text class="cat-name">{{item.name}}</text><text class="cat-meta" wx:if="{{item.contact}}">{{item.contact}}</text></view>
+        <text class="cat-balance {{item.current_balance > 0 ? 'warn' : ''}}">{{item.current_balance > 0 ? '欠¥'+item.current_balance.toFixed(0) : '已结清'}}</text>
+        <view class="cat-actions">
+          <text class="act-btn" data-id="{{item.supplier_id}}" bindtap="viewStatement">对账</text>
+          <text class="act-btn" data-id="{{item.supplier_id}}" bindtap="openSupForm">编辑</text>
+          <text class="act-btn del" data-id="{{item.supplier_id}}" bindtap="deleteSup">停用</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- SKU Form Modal -->
+  <view wx:if="{{showSkuForm}}" class="picker-mask" bindtap="closeSkuForm">
+    <view class="picker-sheet" catchtap="">
+      <text class="picker-title">{{editSkuId ? '编辑' : '新增'}}SKU</text>
+      <input class="form-input" placeholder="名称" value="{{skuForm.name}}" data-field="name" bindinput="onSkuField"/>
+      <input class="form-input" placeholder="分类" value="{{skuForm.category_group}}" data-field="category_group" bindinput="onSkuField"/>
+      <input class="form-input" placeholder="标准单位" value="{{skuForm.canonical_unit}}" data-field="canonical_unit" bindinput="onSkuField"/>
+      <input class="form-input" type="number" placeholder="保质期(小时)" value="{{skuForm.shelf_life_hours}}" data-field="shelf_life_hours" bindinput="onSkuField"/>
+      <input class="form-input" type="digit" placeholder="默认售价" value="{{skuForm.default_sale_price}}" data-field="default_sale_price" bindinput="onSkuField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeSkuForm">取消</button><button class="btn-primary" bindtap="saveSku">保存</button></view>
+    </view>
+  </view>
+
+  <!-- Alias Modal -->
+  <view wx:if="{{showAliasForm}}" class="picker-mask" bindtap="closeAliasForm">
+    <view class="picker-sheet" catchtap="">
+      <text class="picker-title">添加别名</text>
+      <input class="form-input" placeholder="如: 西红柿、洋柿子" value="{{aliasForm.alias}}" data-field="alias" bindinput="onAliasField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeAliasForm">取消</button><button class="btn-primary" bindtap="saveAlias">保存</button></view>
+    </view>
+  </view>
+
+  <!-- Spec Modal -->
+  <view wx:if="{{showSpecForm}}" class="picker-mask" bindtap="closeSpecForm">
+    <view class="picker-sheet" catchtap="">
+      <text class="picker-title">添加规格</text>
+      <input class="form-input" placeholder="如: 精品大果" value="{{specForm.name}}" data-field="name" bindinput="onSpecField"/>
+      <input class="form-input" type="digit" placeholder="加价(元)" value="{{specForm.price_delta}}" data-field="price_delta" bindinput="onSpecField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeSpecForm">取消</button><button class="btn-primary" bindtap="saveSpec">保存</button></view>
+    </view>
+  </view>
+
+  <!-- Unit/Conversion modals -->
+  <view wx:if="{{showUnitForm}}" class="picker-mask" bindtap="closeUnitForm">
+    <view class="picker-sheet" catchtap=""><text class="picker-title">新增单位</text>
+      <input class="form-input" placeholder="代码 如: 筐" value="{{unitForm.code}}" data-field="code" bindinput="onUnitField"/>
+      <input class="form-input" placeholder="名称 如: 筐" value="{{unitForm.name}}" data-field="name" bindinput="onUnitField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeUnitForm">取消</button><button class="btn-primary" bindtap="saveUnit">保存</button></view>
+    </view>
+  </view>
+
+  <view wx:if="{{showConvForm}}" class="picker-mask" bindtap="closeConvForm">
+    <view class="picker-sheet" catchtap=""><text class="picker-title">新增换算</text>
+      <input class="form-input" placeholder="从(如:筐)" value="{{convForm.from_unit}}" data-field="from_unit" bindinput="onConvField"/>
+      <input class="form-input" placeholder="到(如:斤)" value="{{convForm.to_unit}}" data-field="to_unit" bindinput="onConvField"/>
+      <input class="form-input" type="digit" placeholder="因子(如:50)" value="{{convForm.factor}}" data-field="factor" bindinput="onConvField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeConvForm">取消</button><button class="btn-primary" bindtap="saveConv">保存</button></view>
+    </view>
+  </view>
+
+  <!-- Supplier Modal -->
+  <view wx:if="{{showSupForm}}" class="picker-mask" bindtap="closeSupForm">
+    <view class="picker-sheet" catchtap=""><text class="picker-title">{{editSupId ? '编辑' : '新增'}}供应商</text>
+      <input class="form-input" placeholder="名称" value="{{supForm.name}}" data-field="name" bindinput="onSupField"/>
+      <input class="form-input" placeholder="联系方式" value="{{supForm.contact}}" data-field="contact" bindinput="onSupField"/>
+      <input class="form-input" type="number" placeholder="到货周期(小时)" value="{{supForm.lead_time_hours}}" data-field="lead_time_hours" bindinput="onSupField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeSupForm">取消</button><button class="btn-primary" bindtap="saveSup">保存</button></view>
+    </view>
+  </view>
+</view>

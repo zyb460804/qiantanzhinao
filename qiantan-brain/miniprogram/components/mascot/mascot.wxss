@@ -1,0 +1,19 @@
+.mascot { display: inline-flex; align-items: center; justify-content: center; }
+.mascot-img { width: 100%; height: 100%; display: block; }
+.mascot--sm { width: 56rpx; height: 56rpx; }
+.mascot--md { width: 96rpx; height: 96rpx; }
+.mascot--lg { width: 160rpx; height: 160rpx; }
+
+/* 表情动效（减少动效时自动降级） */
+.mascot--idle .mascot-img { animation: float-y 3.4s var(--ease-out) infinite; }
+.mascot--think .mascot-img { animation: mascot-tilt 1.1s var(--ease-spring) infinite; transform-origin: 60% 80%; }
+.mascot--cheer .mascot-img { animation: mascot-hop 0.7s var(--ease-spring) infinite; }
+
+@keyframes mascot-tilt {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes mascot-hop {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  40% { transform: translateY(-14rpx) rotate(-4deg); }
+}

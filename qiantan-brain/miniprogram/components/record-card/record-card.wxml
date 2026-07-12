@@ -1,0 +1,18 @@
+<wxs src="/utils/format.wxs" module="fmt" />
+<view class="rc" wx:if="{{record}}">
+  <block wx:if="{{compact}}">
+    <view class="rc-compact"><text class="rc-mini-mark">{{record.event_type === 'purchase' ? '进' : record.event_type === 'sale' ? '售' : record.event_type === 'waste' ? '损' : '记'}}</text><text class="rc-product">{{record.product}}</text><text class="rc-qty">{{record.quantity}}{{record.unit || '斤'}}</text><text class="rc-amount" wx:if="{{record.total_amount}}">¥{{record.total_amount}}</text></view>
+  </block>
+  <block wx:else>
+    <view class="rc-head"><view><text class="rc-eyebrow">STRUCTURED RECORD</text><text class="rc-title">请核对这笔账</text></view><text class="rc-confidence {{record.confidence >= 0.8 ? 'good' : ''}}">{{fmt.percent(record.confidence)}}% 准确</text></view>
+    <view class="rc-summary"><view class="summary-mark">{{record.event_type === 'purchase' ? '进' : record.event_type === 'sale' ? '售' : record.event_type === 'waste' ? '损' : '记'}}</view><view><text class="summary-title">{{record.product || '待补充商品'}}</text><text class="summary-type">{{record.event_type === 'purchase' ? '采购进货' : record.event_type === 'sale' ? '销售出货' : record.event_type === 'waste' ? '损耗报废' : '经营记录'}}</text></view><text class="summary-amount" wx:if="{{record.total_amount}}">¥{{record.total_amount}}</text></view>
+    <view class="rc-fields">
+      <view class="rc-row" wx:if="{{record.quantity}}"><text>数量</text><text class="rc-val">{{record.quantity}} {{record.unit || '斤'}}</text></view>
+      <view class="rc-row" wx:if="{{record.unit_cost && record.event_type === 'purchase'}}"><text>进货单价</text><text class="rc-val">¥{{record.unit_cost}}/{{record.unit || '斤'}}</text></view>
+      <view class="rc-row" wx:if="{{record.unit_price && record.event_type === 'sale'}}"><text>销售单价</text><text class="rc-val">¥{{record.unit_price}}/{{record.unit || '斤'}}</text></view>
+      <view class="rc-row missing" wx:if="{{record.missing_fields && record.missing_fields.length > 0}}"><text>还需补充</text><text class="rc-val">{{fmt.join(record.missing_fields, '、')}}</text></view>
+    </view>
+    <view class="rc-actions" wx:if="{{showActions}}"><button class="rc-btn secondary" bindtap="onCorrect">修改内容</button><button class="rc-btn primary" bindtap="onConfirm">确认入账</button></view>
+    <view class="rc-actions" wx:if="{{showVoidAction}}"><button class="rc-btn secondary" bindtap="onEdit">修改记录</button><button class="rc-btn rc-btn-void" bindtap="onVoid">撤销记录</button></view>
+  </block>
+</view>

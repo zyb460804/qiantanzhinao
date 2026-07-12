@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "经营看板",
+  "usingComponents": {
+    "risk-gauge": "/components/risk-gauge/risk-gauge",
+    "stock-chart": "/components/stock-chart/stock-chart"
+  },
+  "navigationBarBackgroundColor": "#123D30",
+  "navigationBarTextStyle": "white"
+}

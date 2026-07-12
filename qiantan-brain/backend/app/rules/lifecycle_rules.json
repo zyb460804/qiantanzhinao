@@ -1,0 +1,103 @@
+{
+  "version": "1.0",
+  "categories": {
+    "叶菜类": {
+      "products": ["白菜", "菠菜", "生菜", "青菜", "韭菜", "芹菜", "空心菜"],
+      "shelf_life_hours": 72,
+      "storage_temp_min": 0,
+      "storage_temp_max": 8,
+      "waste_rate_base": 0.15,
+      "temp_sensitivity": "high",
+      "lifecycle_stages": {
+        "fresh":    {"hours_from": 0,  "hours_to": 36, "color": "green",  "discount": 0},
+        "attention":{"hours_from": 36, "hours_to": 54, "color": "yellow", "discount": 0.1},
+        "expiring": {"hours_from": 54, "hours_to": 72, "color": "red",    "discount": 0.3},
+        "spoiled":  {"hours_from": 72, "hours_to": -1,  "color": "gray",  "action": "dispose"}
+      }
+    },
+    "根茎类": {
+      "products": ["土豆", "萝卜", "胡萝卜", "红薯", "洋葱", "山药", "莲藕"],
+      "shelf_life_hours": 168,
+      "storage_temp_min": 0,
+      "storage_temp_max": 15,
+      "waste_rate_base": 0.08,
+      "temp_sensitivity": "low",
+      "lifecycle_stages": {
+        "fresh":    {"hours_from": 0,   "hours_to": 84,  "color": "green",  "discount": 0},
+        "attention":{"hours_from": 84,  "hours_to": 126, "color": "yellow", "discount": 0.1},
+        "expiring": {"hours_from": 126, "hours_to": 168, "color": "red",    "discount": 0.25},
+        "spoiled":  {"hours_from": 168, "hours_to": -1,   "color": "gray",  "action": "dispose"}
+      }
+    },
+    "豆制品": {
+      "products": ["豆腐", "豆皮", "豆干", "豆芽"],
+      "shelf_life_hours": 24,
+      "storage_temp_min": 0,
+      "storage_temp_max": 6,
+      "waste_rate_base": 0.25,
+      "temp_sensitivity": "very_high",
+      "lifecycle_stages": {
+        "fresh":    {"hours_from": 0,  "hours_to": 12, "color": "green",  "discount": 0},
+        "attention":{"hours_from": 12, "hours_to": 18, "color": "yellow", "discount": 0.15},
+        "expiring": {"hours_from": 18, "hours_to": 24, "color": "red",    "discount": 0.4},
+        "spoiled":  {"hours_from": 24, "hours_to": -1,  "color": "gray",  "action": "dispose"}
+      }
+    },
+    "瓜果类": {
+      "products": ["黄瓜", "番茄", "辣椒", "茄子", "冬瓜", "南瓜", "苦瓜", "丝瓜"],
+      "shelf_life_hours": 96,
+      "storage_temp_min": 4,
+      "storage_temp_max": 15,
+      "waste_rate_base": 0.12,
+      "temp_sensitivity": "medium",
+      "lifecycle_stages": {
+        "fresh":    {"hours_from": 0,  "hours_to": 48, "color": "green",  "discount": 0},
+        "attention":{"hours_from": 48, "hours_to": 72, "color": "yellow", "discount": 0.1},
+        "expiring": {"hours_from": 72, "hours_to": 96, "color": "red",    "discount": 0.3},
+        "spoiled":  {"hours_from": 96, "hours_to": -1,  "color": "gray",  "action": "dispose"}
+      }
+    },
+    "水果类": {
+      "products": ["西瓜", "苹果", "香蕉", "橙子", "葡萄", "草莓", "桃子", "梨"],
+      "shelf_life_hours": 120,
+      "storage_temp_min": 0,
+      "storage_temp_max": 10,
+      "waste_rate_base": 0.10,
+      "temp_sensitivity": "medium",
+      "lifecycle_stages": {
+        "fresh":    {"hours_from": 0,   "hours_to": 60,  "color": "green",  "discount": 0},
+        "attention":{"hours_from": 60,  "hours_to": 90,  "color": "yellow", "discount": 0.1},
+        "expiring": {"hours_from": 90,  "hours_to": 120, "color": "red",    "discount": 0.3},
+        "spoiled":  {"hours_from": 120, "hours_to": -1,   "color": "gray",  "action": "dispose"}
+      }
+    },
+    "肉类": {
+      "products": ["猪肉", "牛肉", "鸡肉", "鸭肉", "鸡蛋"],
+      "shelf_life_hours": 48,
+      "storage_temp_min": 0,
+      "storage_temp_max": 4,
+      "waste_rate_base": 0.20,
+      "temp_sensitivity": "high",
+      "lifecycle_stages": {
+        "fresh":    {"hours_from": 0,  "hours_to": 24, "color": "green",  "discount": 0},
+        "attention":{"hours_from": 24, "hours_to": 36, "color": "yellow", "discount": 0.15},
+        "expiring": {"hours_from": 36, "hours_to": 48, "color": "red",    "discount": 0.35},
+        "spoiled":  {"hours_from": 48, "hours_to": -1,  "color": "gray",  "action": "dispose"}
+      }
+    },
+    "粮油类": {
+      "products": ["大米", "面粉", "食用油"],
+      "shelf_life_hours": 2160,
+      "storage_temp_min": 0,
+      "storage_temp_max": 30,
+      "waste_rate_base": 0.01,
+      "temp_sensitivity": "low",
+      "lifecycle_stages": {
+        "fresh":    {"hours_from": 0,    "hours_to": 720,  "color": "green",  "discount": 0},
+        "attention":{"hours_from": 720,  "hours_to": 1440, "color": "yellow", "discount": 0.05},
+        "expiring": {"hours_from": 1440, "hours_to": 2160, "color": "red",    "discount": 0.15},
+        "spoiled":  {"hours_from": 2160, "hours_to": -1,    "color": "gray",  "action": "dispose"}
+      }
+    }
+  }
+}

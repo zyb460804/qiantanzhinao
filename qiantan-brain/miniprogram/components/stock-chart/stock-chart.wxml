@@ -1,0 +1,5 @@
+<!-- stock-chart 库存水平条形图 -->
+<view class="sc-wrap {{compact ? 'is-compact' : ''}}">
+  <text class="sc-title" wx:if="{{title}}">{{title}}</text>
+  <canvas type="2d" id="sc-canvas" class="sc-canvas"></canvas>
+</view>

@@ -1,0 +1,178 @@
+<!-- 拍照识货 · 拍一张照片，智能识别商品 -->
+<view class="page-shell vision-page {{skinClass}}">
+
+  <!-- Hero -->
+  <view class="page-hero vision-hero page-hero--breathing">
+    <text class="eyebrow">VISION · 智能识货</text>
+    <text class="hero-title">拍照识货</text>
+    <text class="hero-desc">拍一张照片，智能识别商品</text>
+  </view>
+
+  <!-- 操作区 -->
+  <view class="action-area">
+    <view class="action-row">
+      <view class="big-btn big-btn-primary" bindtap="takePhoto">
+        <view class="big-btn-symbol"><text class="big-btn-symbol-text">拍</text></view>
+        <text class="big-btn-label">拍照识别</text>
+      </view>
+      <view class="big-btn big-btn-secondary" bindtap="chooseFromAlbum">
+        <view class="big-btn-symbol big-btn-symbol-light"><text class="big-btn-symbol-text">册</text></view>
+        <text class="big-btn-label">相册选择</text>
+      </view>
+    </view>
+
+    <view class="demo-toggle">
+      <view class="demo-toggle-info">
+        <text class="demo-toggle-label">演示模式</text>
+        <text class="demo-toggle-desc">真实识别未部署，使用模拟数据</text>
+      </view>
+      <switch class="demo-switch" checked="{{demoMode}}" bindchange="toggleDemoMode" color="#175c45"/>
+    </view>
+  </view>
+
+  <!-- 空状态 -->
+    <view class="card empty-card" wx:if="{{!imagePath && !recognizing}}">
+      <mascot size="md" mood="idle" class="mascot-empty"/>
+      <text class="empty-title">还没有图片</text>
+      <text class="empty-desc">点击上方按钮，拍一张商品照片开始识别</text>
+    </view>
+
+  <!-- 图片预览 -->
+  <view class="card preview-card" wx:if="{{imagePath}}">
+    <view class="preview-wrap">
+      <image class="preview-image" src="{{imagePath}}" mode="aspectFit"/>
+      <view class="preview-overlay" wx:if="{{recognizing}}">
+        <view class="loading-spinner"></view>
+        <text class="loading-text">正在识别…</text>
+      </view>
+    </view>
+    <view class="preview-actions" wx:if="{{!recognizing && !submitted}}">
+      <text class="link-btn" bindtap="reset">重新选择</text>
+    </view>
+  </view>
+
+  <!-- 识别失败 -->
+  <view class="card fail-card" wx:if="{{recognizeFailed}}">
+    <view class="fail-mark">!</view>
+    <text class="fail-title">识别失败</text>
+    <text class="fail-desc">无法识别该图片，请重试或手动选择商品</text>
+    <view class="fail-btns">
+      <view class="btn-secondary btn-mid" bindtap="recognizeImage">重新识别</view>
+      <view class="btn-primary btn-mid" bindtap="manualSelectProduct">转手动录入</view>
+    </view>
+  </view>
+
+  <!-- 识别结果 + 入库表单 -->
+  <block wx:if="{{recognized && detections.length > 0 && !submitted}}">
+
+    <view class="section-head">
+      <text class="section-title">识别结果</text>
+      <text class="section-caption">置信度 {{recognizedConfidencePercent}}%</text>
+    </view>
+
+    <!-- 主识别结果 -->
+    <view class="card main-result-card">
+      <text class="result-name">{{recognizedName}}</text>
+      <view class="confidence-row">
+        <view class="confidence-bar-wrap">
+          <view class="confidence-bar-fill confidence-{{confidenceTag}}" style="width:{{recognizedConfidencePercent}}%"></view>
+        </view>
+        <view class="tag tag-{{confidenceTag}}">{{recognizedConfidencePercent}}%</view>
+      </view>
+      <view class="result-meta-row">
+        <view class="tag tag-green" wx:if="{{source}}">{{source}}</view>
+        <text class="result-meta-text" wx:if="{{processingTime}}">耗时 {{processingTime}}ms</text>
+      </view>
+    </view>
+
+    <!-- 候选商品 -->
+    <view class="card" wx:if="{{detections.length > 1}}">
+      <text class="candidates-title">候选商品（点击切换）</text>
+      <view class="candidate-list">
+        <view class="candidate-item {{selectedIndex === index ? 'active' : ''}}"
+              wx:for="{{detections}}" wx:key="product_id"
+              data-index="{{index}}" bindtap="selectCandidate">
+          <view class="candidate-info">
+            <text class="candidate-name">{{item.name}}</text>
+            <text class="candidate-id">ID: {{item.product_id}}</text>
+          </view>
+          <view class="tag tag-{{item.confidenceTag}}">{{item.confidencePercent}}%</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 手动选择入口 -->
+    <view class="manual-link" bindtap="manualSelectProduct">
+      <text class="manual-link-text">识别不对？手动选择 ›</text>
+    </view>
+
+    <!-- 入库信息 -->
+    <view class="section-head">
+      <text class="section-title">入库信息</text>
+    </view>
+    <view class="card form-card">
+      <view class="form-row">
+        <text class="form-label">类型</text>
+        <view class="type-toggle">
+          <view class="type-btn {{event_type === 'purchase' ? 'active' : ''}}" data-type="purchase" bindtap="onEventTypeChange">采购入库</view>
+          <view class="type-btn {{event_type === 'sale' ? 'active' : ''}}" data-type="sale" bindtap="onEventTypeChange">销售出库</view>
+        </view>
+      </view>
+      <view class="form-row">
+        <text class="form-label">数量</text>
+        <input class="form-input" type="digit" placeholder="输入数量" value="{{quantity}}" bindinput="onQuantityInput"/>
+      </view>
+      <view class="form-row">
+        <text class="form-label">单位</text>
+        <input class="form-input" type="text" placeholder="单位" value="{{unit}}" bindinput="onUnitInput"/>
+      </view>
+      <view class="form-row">
+        <text class="form-label">{{event_type === 'purchase' ? '成本' : '单价'}}（元）</text>
+        <input class="form-input" type="digit" placeholder="0.00" value="{{unitCost}}" bindinput="onUnitCostInput"/>
+      </view>
+    </view>
+
+    <view class="btn-primary big-action-btn {{submitting ? 'btn-disabled' : ''}}" bindtap="confirmStockIn">
+      {{submitting ? '提交中…' : '确认入库'}}
+    </view>
+  </block>
+
+  <!-- 入库成功 -->
+  <view class="card success-card" wx:if="{{submitted}}">
+    <view class="success-circle"></view>
+    <text class="success-title">入库成功</text>
+    <text class="success-desc">{{submitResult.product}} · {{submitResult.quantity}}{{submitResult.unit}}</text>
+    <text class="success-meta" wx:if="{{submitResult.event_type}}">{{submitResult.event_type === 'purchase' ? '采购入库' : '销售出库'}}</text>
+    <view class="btn-primary big-action-btn" bindtap="reset">继续识别</view>
+  </view>
+
+  <view class="safe-bottom"></view>
+
+  <!-- 商品选择弹层 -->
+  <view class="picker-mask" wx:if="{{showProductPicker}}" bindtap="closeProductPicker">
+    <view class="picker-panel" catchtap="noop">
+      <view class="picker-header">
+        <text class="picker-title">选择商品</text>
+        <text class="picker-close" bindtap="closeProductPicker">×</text>
+      </view>
+      <view class="picker-search-wrap">
+        <input class="picker-search-input" placeholder="搜索商品名称" value="{{productPickerFilter}}" bindinput="onProductFilterInput"/>
+      </view>
+      <scroll-view class="picker-list" scroll-y="true">
+        <view class="picker-empty" wx:if="{{filteredCategories.length === 0}}">
+          <text class="picker-empty-text">没有匹配的商品</text>
+        </view>
+        <view class="picker-item" wx:for="{{filteredCategories}}" wx:key="product_id"
+              data-id="{{item.product_id}}" data-name="{{item.name}}" data-unit="{{item.unit}}"
+              bindtap="selectProductFromList">
+          <view class="picker-item-info">
+            <text class="picker-item-name">{{item.name}}</text>
+            <text class="picker-item-meta">{{item.category_group}} · {{item.unit}}</text>
+          </view>
+          <text class="picker-item-arrow">›</text>
+        </view>
+      </scroll-view>
+    </view>
+  </view>
+
+</view>

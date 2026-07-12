@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.env
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Alembic artifacts (generated at runtime)
+__pycache__/
+
+# Ruff / Mypy / Pytest caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Node
+node_modules/
+
+# Docker
+docker-compose.override.yml
+
+# Environment files (contains secrets)
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Uploaded media (dev)
+uploads/
+audio/
+
+# Database files (dev)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# WeChat mini program
+miniprogram/node_modules/
+project.private.config.json

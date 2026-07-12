@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "temperature": {
+    "base_range": {"min": 15, "max": 30},
+    "hot": {
+      "threshold": 30,
+      "groups": {
+        "cooling_demand": {
+          "products": ["西瓜", "黄瓜", "番茄"],
+          "coefficient": 1.20
+        },
+        "heat_sensitive": {
+          "products": ["叶菜类", "豆制品"],
+          "coefficient": 0.85
+        },
+        "default": {"coefficient": 1.00}
+      }
+    },
+    "cold": {
+      "threshold": 10,
+      "groups": {
+        "warm_demand": {
+          "products": ["肉类"],
+          "coefficient": 1.15
+        },
+        "default": {"coefficient": 1.00}
+      }
+    }
+  },
+  "rainfall": {
+    "brackets": [
+      {"range": [0, 30],    "coefficient": 1.00},
+      {"range": [30, 50],   "coefficient": 0.90},
+      {"range": [50, 70],   "coefficient": 0.75},
+      {"range": [70, 100],  "coefficient": 0.60}
+    ]
+  },
+  "weekend": {
+    "saturday": 1.12,
+    "sunday": 1.15,
+    "weekday": 1.00
+  },
+  "holidays": {
+    "spring_festival_3d_before":  {"coefficient": 1.35, "description": "春节前3天"},
+    "spring_festival_1d_after":   {"coefficient": 0.60, "description": "春节后1天"},
+    "national_holiday":           {"coefficient": 1.20, "description": "国定假日"},
+    "holiday_eve":                {"coefficient": 1.10, "description": "假日前1天"},
+    "post_holiday":               {"coefficient": 0.80, "description": "假日后1天"}
+  }
+}

@@ -1,0 +1,21 @@
+# 千摊智脑边缘端开机自启服务 (Raspberry Pi OS / systemd)
+# 安装:
+#   sudo cp qiantan-edge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now qiantan-edge
+[Unit]
+Description=QianTan Brain Edge Controller
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/qiantan-brain/edge
+ExecStart=/usr/bin/python3 -m main
+Restart=on-failure
+RestartSec=5
+User=pi
+Environment=PYTHONPATH=/home/pi/qiantan-brain/edge
+Environment=HX711_SIMULATE=0
+
+[Install]
+WantedBy=multi-user.target

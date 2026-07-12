@@ -1,0 +1,10 @@
+{
+  "navigationBarTitleText": "库存盘点",
+  "navigationBarBackgroundColor": "#123D30",
+  "navigationBarTextStyle": "white",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "icon": "/components/icon/icon",
+    "mascot": "/components/mascot/mascot"
+  }
+}

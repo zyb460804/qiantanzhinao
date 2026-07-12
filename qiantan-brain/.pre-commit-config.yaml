@@ -1,0 +1,25 @@
+# 千摊智脑 · pre-commit 质量门禁
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: local
+    hooks:
+      - id: wxss-lint
+        name: WXSS 兼容性扫描
+        entry: python scripts/wxss_lint.py
+        language: system
+        files: \.wxss$
+
+      - id: no-large-binary
+        name: 大文件与敏感文件检查
+        entry: python scripts/check_large_files.py
+        language: system
+        pass_filenames: true
+        exclude: (^|/)\.env\.example$

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- 嫩芽 -->
+  <path d="M60 30c0-10 8-16 16-14-1 9-7 15-16 14z" fill="#2fa06e"/>
+  <path d="M60 30c0-10-8-16-16-14 1 9 7 15 16 14z" fill="#23916a"/>
+  <rect x="57" y="28" width="6" height="15" rx="3" fill="#1e7a57"/>
+  <!-- 身体 -->
+  <rect x="26" y="40" width="68" height="62" rx="30" fill="#2fa06e"/>
+  <ellipse cx="60" cy="80" rx="22" ry="19" fill="#bfe6d4" opacity="0.5"/>
+  <!-- 脸蛋（番茄红） -->
+  <circle cx="44" cy="74" r="7" fill="#e2503e"/>
+  <circle cx="76" cy="74" r="7" fill="#e2503e"/>
+  <!-- 眼睛 -->
+  <circle cx="48" cy="64" r="6" fill="#18221d"/>
+  <circle cx="72" cy="64" r="6" fill="#18221d"/>
+  <circle cx="50" cy="62" r="2" fill="#fff"/>
+  <circle cx="74" cy="62" r="2" fill="#fff"/>
+  <!-- 微笑 -->
+  <path d="M50 82q10 10 20 0" stroke="#18221d" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+</svg>

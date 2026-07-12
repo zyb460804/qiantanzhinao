@@ -1,0 +1,6 @@
+<view
+  class="ui-icon ui-icon--{{size}} ui-icon--{{name}}"
+  style="{{color ? 'background-color:' + color : ''}}"
+  role="img"
+  aria-label="{{name}}"
+></view>

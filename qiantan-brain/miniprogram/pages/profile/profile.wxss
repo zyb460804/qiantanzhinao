@@ -1,0 +1,38 @@
+.profile-page { padding-top: 22rpx; }
+.profile-hero { display: flex; align-items: center; gap: 24rpx; background: var(--green-950); }
+.merchant-avatar { position: relative; z-index: 2; display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 108rpx; height: 108rpx; color: var(--green-950); background: #f6ca78; border: 8rpx solid rgba(255,255,255,.1); border-radius: 32rpx; font-size: 40rpx; font-weight: 850; }
+.merchant-copy { position: relative; z-index: 2; flex: 1; }
+.setting-card { overflow: hidden; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.setting-row { display: flex; align-items: center; gap: 20rpx; min-height: 128rpx; padding: 22rpx 24rpx; border-bottom: 1rpx solid var(--line); }
+.setting-row:last-child { border-bottom: 0; }
+.setting-icon { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 64rpx; height: 64rpx; border-radius: 18rpx; font-size: 23rpx; font-weight: 800; }
+.green-bg { color: var(--green-800); background: var(--green-100); }
+.amber-bg { color: var(--corn-ink); background: var(--amber-soft); }
+.setting-copy { flex: 1; min-width: 0; }
+.setting-label { display: block; color: var(--muted); font-size: 20rpx; }
+.setting-input { width: 100%; margin-top: 5rpx; color: var(--ink); font-size: 29rpx; font-weight: 650; }
+.picker-display { display: flex; justify-content: space-between; margin-top: 5rpx; color: var(--ink); font-size: 29rpx; font-weight: 650; }
+.picker-display > text { color: var(--muted); }
+.risk-options { display: flex; flex-direction: column; gap: 14rpx; }
+.risk-option { display: flex; align-items: center; gap: 16rpx; min-height: 116rpx; padding: 20rpx 22rpx; background: var(--paper); border: 2rpx solid transparent; border-radius: var(--radius-lg); box-shadow: 0 8rpx 22rpx rgba(25,48,38,.05); }
+.risk-option.selected { border-color: var(--green-700); background: #fbfffc; }
+.risk-option radio { transform: scale(.82); }
+.risk-option > view { flex: 1; }
+.risk-title, .risk-desc { display: block; }
+.risk-title { color: var(--ink); font-size: 27rpx; font-weight: 720; }
+.risk-desc { margin-top: 3rpx; color: var(--muted); font-size: 20rpx; }
+.risk-badge { display: flex; align-items: center; justify-content: center; width: 54rpx; height: 54rpx; color: var(--green-700); background: var(--green-50); border-radius: 16rpx; font-size: 20rpx; font-weight: 800; }
+.save-button { display: flex; align-items: center; justify-content: center; min-height: 98rpx; margin-top: 28rpx; color: #fff; background: var(--green-800); border-radius: 22rpx; font-size: 29rpx; font-weight: 750; box-shadow: 0 12rpx 26rpx rgba(23,92,69,.22); }
+.about-card { display: flex; align-items: center; gap: 18rpx; margin-top: 36rpx; padding: 24rpx; color: var(--ink-2); background: rgba(255,255,255,.48); border: 1rpx solid rgba(18,61,48,.07); border-radius: var(--radius-lg); }
+.about-logo { display: flex; align-items: center; justify-content: center; width: 62rpx; height: 62rpx; color: #fff; background: var(--green-950); border-radius: 18rpx; font-size: 25rpx; font-weight: 800; }
+.about-title, .about-desc { display: block; }
+.about-title { color: var(--ink); font-size: 24rpx; font-weight: 700; }
+.about-desc { margin-top: 4rpx; color: var(--muted); font-size: 19rpx; }
+.entry-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16rpx; margin-top: 8rpx; }
+.entry-item { display: flex; flex-direction: column; align-items: center; gap: 12rpx; padding: 26rpx 12rpx; background: var(--paper); border: 1rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.entry-item:active { transform: translateY(1rpx); box-shadow: none; }
+.entry-icon { display: flex; align-items: center; justify-content: center; width: 80rpx; height: 80rpx; border-radius: 24rpx; font-size: 30rpx; font-weight: 800; }
+.entry-icon.green { color: var(--green-800); background: var(--green-100); }
+.entry-icon.blue { color: #2e6685; background: #e0eff7; }
+.entry-icon.corn { color: var(--corn-ink); background: var(--amber-soft); }
+.entry-name { color: var(--ink-2); font-size: 21rpx; font-weight: 650; }

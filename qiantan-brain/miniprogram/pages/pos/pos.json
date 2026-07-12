@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "收款台",
+  "usingComponents": {
+    "icon": "/components/icon/icon",
+    "mascot": "/components/mascot/mascot"
+  },
+  "navigationBarBackgroundColor": "#123D30",
+  "navigationBarTextStyle": "white"
+}

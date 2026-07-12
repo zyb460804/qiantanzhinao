@@ -1,0 +1,62 @@
+<!-- 批次追溯页 — 消费者扫码查看 -->
+<view class="page-shell trace-page {{skinClass}}">
+  <!-- Loading -->
+  <view wx:if="{{loading}}" class="trace-loading">
+    <view class="trace-spinner"></view>
+    <text class="loading-text">正在查询批次信息…</text>
+  </view>
+
+  <!-- Error -->
+  <view wx:elif="{{error}}" class="trace-error">
+    <view class="error-icon">⚠</view>
+    <text class="error-title">无法查询</text>
+    <text class="error-desc">{{error}}</text>
+    <button class="retry-btn" bindtap="loadTrace" data-code="{{traceCode}}">重新查询</button>
+  </view>
+
+  <!-- Trace Data -->
+  <view wx:else class="trace-result">
+    <!-- Status banner -->
+    <view class="trace-banner {{statusColor()}}">
+      <text class="banner-icon">{{isSafe() ? '✓' : '⚠'}}</text>
+      <text class="banner-label">{{statusLabel()}}</text>
+      <text wx:if="{{trace.is_recalled}}" class="banner-warn">该批次已被召回，请勿购买</text>
+    </view>
+
+    <!-- Basic info -->
+    <view class="trace-card">
+      <view class="trace-card-title">商品信息</view>
+      <view class="trace-row"><text class="trace-key">商品名称</text><text class="trace-val">{{trace.product_name || '—'}}</text></view>
+      <view class="trace-row"><text class="trace-key">批次编号</text><text class="trace-val">{{trace.batch_label || '—'}}</text></view>
+      <view class="trace-row"><text class="trace-key">产地</text><text class="trace-val">{{trace.origin || '—'}}</text></view>
+      <view class="trace-row"><text class="trace-key">供应商</text><text class="trace-val">{{trace.supplier_name || '—'}}</text></view>
+      <view class="trace-row"><text class="trace-key">采购日期</text><text class="trace-val">{{trace.purchase_date || '—'}}</text></view>
+      <view wx:if="{{trace.expiry_date}}" class="trace-row"><text class="trace-key">保质期至</text><text class="trace-val">{{trace.expiry_date}}</text></view>
+    </view>
+
+    <!-- Safety info -->
+    <view class="trace-card">
+      <view class="trace-card-title">安全信息</view>
+      <view class="trace-row">
+        <text class="trace-key">快检结果</text>
+        <text class="trace-val {{trace.inspection_result === 'pass' ? 'text-green' : trace.inspection_result === 'fail' ? 'text-red' : ''}}">
+          {{trace.inspection_result === 'pass' ? '✓ 合格' : trace.inspection_result === 'fail' ? '✗ 不合格' : '未检测'}}
+        </text>
+      </view>
+      <view wx:if="{{certList().length}}" class="trace-row">
+        <text class="trace-key">证照凭证</text>
+        <view class="trace-val certs">
+          <text wx:for="{{certList()}}" wx:key="name" class="cert-tag">{{item.name || item}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- Trace code -->
+    <view class="trace-footer">
+      <text class="trace-code-label">追溯码</text>
+      <text class="trace-code" bindtap="copyCode">{{traceCode}}</text>
+      <text class="trace-hint">点击复制追溯码</text>
+      <text class="trace-meta">由千摊智脑提供 · {{trace.generated_at || ''}}</text>
+    </view>
+  </view>
+</view>

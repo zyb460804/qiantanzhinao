@@ -1,0 +1,72 @@
+<!-- 财务管理 -->
+<wxs src="/utils/format.wxs" module="fmt" />
+<view class="page-shell fin-page {{skin}}">
+  <view class="page-hero"><text class="eyebrow">FINANCE · 财务</text><text class="hero-title">财务管理</text></view>
+  <view class="tab-row">
+    <view wx:for="{{[{k:'expenses',l:'费用'},{k:'report',l:'月报'},{k:'invoices',l:'发票'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
+  </view>
+
+  <!-- 费用 -->
+  <block wx:if="{{tab==='expenses'}}">
+    <view class="section-head"><text class="section-title">经营费用</text><text class="link" bindtap="openExpForm">+ 记录</text></view>
+    <view wx:if="{{!expenses.length}}" class="empty-state"><text>暂无费用记录</text></view>
+    <view wx:else class="cat-list">
+      <view wx:for="{{expenses}}" wx:key="id" class="cat-item">
+        <view class="cat-main"><text class="cat-name">{{item.category==='rent'?'租金':item.category==='utility'?'水电':item.category==='labor'?'人工':item.category==='fee'?'手续费':'其他'}}</text><text class="cat-meta">{{item.description||''}} · {{item.expense_date}}</text></view>
+        <text class="cat-amount">¥{{fmt.fixed(item.amount,2)}}</text>
+        <text class="act-btn del" data-id="{{item.id}}" bindtap="deleteExpense">删</text>
+      </view>
+    </view>
+  </block>
+
+  <!-- 月报 -->
+  <block wx:if="{{tab==='report'}}">
+    <view class="section-head"><text class="section-title">月度报表</text></view>
+    <input class="form-input month-input" type="text" value="{{month}}" bindchange="changeMonth" placeholder="YYYY-MM"/>
+    <view wx:if="{{monthlyReport}}" class="report-card">
+      <view class="report-row"><text>收入</text><text class="ok">¥{{fmt.fixed(monthlyReport.revenue,2)}}</text></view>
+      <view class="report-row"><text>采购成本</text><text>¥{{fmt.fixed(monthlyReport.purchase_cost,2)}}</text></view>
+      <view class="report-row total"><text>毛利</text><text>¥{{fmt.fixed(monthlyReport.gross_profit,2)}}</text></view>
+      <view class="report-row"><text>费用</text><text>¥{{fmt.fixed(monthlyReport.expenses,2)}}</text></view>
+      <view class="report-row total net"><text>净利润</text><text>¥{{fmt.fixed(monthlyReport.net_profit,2)}}</text></view>
+      <view wx:if="{{monthlyReport.expense_breakdown.length}}" class="report-breakdown">
+        <text class="report-sub">费用明细</text>
+        <view wx:for="{{monthlyReport.expense_breakdown}}" wx:key="category" class="report-row sm"><text>{{item.category}}</text><text>¥{{fmt.fixed(item.amount,2)}}</text></view>
+      </view>
+    </view>
+  </block>
+
+  <!-- 发票 -->
+  <block wx:if="{{tab==='invoices'}}">
+    <view class="section-head"><text class="section-title">发票归档</text><text class="link" bindtap="openInvForm">+ 归档</text></view>
+    <view wx:if="{{!invoices.length}}" class="empty-state"><text>暂无发票</text></view>
+    <view wx:else class="cat-list">
+      <view wx:for="{{invoices}}" wx:key="id" class="cat-item">
+        <view class="cat-main"><text class="cat-name">{{item.invoice_number}}</text><text class="cat-meta">{{item.supplier_name||''}} · {{item.invoice_date}}</text></view>
+        <text class="cat-amount">¥{{fmt.fixed(item.amount,2)}}</text>
+      </view>
+    </view>
+  </block>
+
+  <!-- Expense modal -->
+  <view wx:if="{{showExpForm}}" class="picker-mask" bindtap="closeExpForm">
+    <view class="picker-sheet" catchtap=""><text class="picker-title">记录费用</text>
+      <view class="type-row"><view wx:for="{{[{k:'rent',l:'租金'},{k:'utility',l:'水电'},{k:'labor',l:'人工'},{k:'fee',l:'手续费'},{k:'other',l:'其他'}]}}" wx:key="k" class="type-chip {{expForm.category===item.k?'active':''}}" data-field="category" data-val="{{item.k}}" bindtap="onExpField">{{item.l}}</view></view>
+      <input class="form-input" type="digit" placeholder="金额" value="{{expForm.amount}}" data-field="amount" bindinput="onExpField"/>
+      <input class="form-input" placeholder="描述" value="{{expForm.description}}" data-field="description" bindinput="onExpField"/>
+      <input class="form-input" type="text" placeholder="日期 YYYY-MM-DD" value="{{expForm.expense_date}}" data-field="expense_date" bindinput="onExpField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeExpForm">取消</button><button class="btn-primary" bindtap="saveExpense">保存</button></view>
+    </view>
+  </view>
+
+  <!-- Invoice modal -->
+  <view wx:if="{{showInvForm}}" class="picker-mask" bindtap="closeInvForm">
+    <view class="picker-sheet" catchtap=""><text class="picker-title">发票归档</text>
+      <input class="form-input" placeholder="发票号码" value="{{invForm.invoice_number}}" data-field="invoice_number" bindinput="onInvField"/>
+      <input class="form-input" placeholder="开票方" value="{{invForm.supplier_name}}" data-field="supplier_name" bindinput="onInvField"/>
+      <input class="form-input" type="digit" placeholder="金额" value="{{invForm.amount}}" data-field="amount" bindinput="onInvField"/>
+      <input class="form-input" type="text" placeholder="日期 YYYY-MM-DD" value="{{invForm.invoice_date}}" data-field="invoice_date" bindinput="onInvField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeInvForm">取消</button><button class="btn-primary" bindtap="saveInvoice">归档</button></view>
+    </view>
+  </view>
+</view>

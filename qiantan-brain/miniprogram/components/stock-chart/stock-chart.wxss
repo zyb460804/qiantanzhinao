@@ -1,0 +1,4 @@
+.sc-wrap { width: 100%; }
+.sc-title { display: block; margin-bottom: 14rpx; color: var(--ink); font-size: 28rpx; font-weight: 720; }
+.sc-canvas { width: 100%; height: 560rpx; }
+.is-compact .sc-canvas { height: 360rpx; }

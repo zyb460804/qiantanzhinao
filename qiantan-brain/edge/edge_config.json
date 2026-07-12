@@ -1,0 +1,17 @@
+{
+  "merchant_id": "00000000-0000-0000-0000-000000000000",
+  "camera": {
+    "camera_id": 0,
+    "width": 640,
+    "height": 480
+  },
+  "hx711": {
+    "dout_pin": 5,
+    "pd_sck_pin": 6,
+    "known_weight_g": 200.0
+  },
+  "sync": {
+    "interval_s": 30,
+    "max_retries": 3
+  }
+}

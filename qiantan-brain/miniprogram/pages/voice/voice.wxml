@@ -1,0 +1,75 @@
+<!-- 记账页 · 降低操作门槛，突出主任务 (v2.2 生鲜元气) -->
+<view class="page-shell voice-page skin-{{skin}}">
+  <view class="page-hero voice-hero">
+    <view class="voice-hero-top">
+      <view>
+        <text class="eyebrow">SMART LEDGER · 智能流水</text>
+        <text class="hero-title">今天发生了什么？</text>
+      </view>
+      <mascot size="md" mood="{{state==='listening' ? 'think' : 'idle'}}" />
+    </view>
+    <text class="hero-desc">按住说话，或直接打字。小智会整理成商品、数量和金额。</text>
+    <view class="today-chip"><text class="chip-number">{{todayCount}}</text><text>今日已记</text></view>
+  </view>
+
+  <view class="mode-switch">
+    <view class="mode-option {{mode === 'voice' ? 'active' : ''}}" bindtap="switchToVoice">
+      <icon name="mic" size="34" color="{{mode==='voice' ? 'var(--green-950)' : 'var(--muted)'}}" /><text>语音记账</text>
+    </view>
+    <view class="mode-option {{mode === 'text' ? 'active' : ''}}" bindtap="switchToText">
+      <icon name="leaf" size="34" color="{{mode==='text' ? 'var(--green-950)' : 'var(--muted)'}}" /><text>文字记账</text>
+    </view>
+  </view>
+
+  <block wx:if="{{mode === 'voice'}}">
+    <view class="voice-stage">
+      <!-- 声波纹（录音态跳动） -->
+      <view class="wave-wrap {{state==='listening' ? 'on' : ''}}">
+        <view class="wave-bar" wx:for="{{waveBars}}" wx:key="*this" style="--i:{{index}}"></view>
+      </view>
+      <view class="voice-rings"><voice-button state="{{state}}" bind:start="onStart" bind:end="onEnd" bind:cancel="onCancel" /></view>
+      <text class="stage-tip" wx:if="{{state === 'idle'}}">例如：“今天进了白菜50斤，三毛一斤”</text>
+      <text class="stage-tip active" wx:elif="{{state === 'listening'}}">正在记录，松开后自动识别</text>
+      <text class="stage-tip active" wx:else>正在把你的话整理成账目</text>
+    </view>
+  </block>
+
+  <block wx:if="{{mode === 'text'}}">
+    <view class="text-panel">
+      <view class="input-head"><text>输入一笔经营流水</text><text class="input-count">{{textInput.length || 0}}/200</text></view>
+      <textarea class="text-input" value="{{textInput}}" placeholder="例如：卖了西瓜20斤，两块钱一斤" bindinput="onTextInput" maxlength="200" auto-height="{{true}}" />
+      <button class="btn-primary submit-text" bindtap="submitText" disabled="{{!textInput}}">识别并整理</button>
+    </view>
+  </block>
+
+  <!-- 流式字幕（逐字打印） -->
+  <view class="subtitle" wx:if="{{streamingText}}">
+    <mascot size="sm" mood="think" />
+    <text class="subtitle-text">{{streamingText}}<text class="caret">▍</text></text>
+  </view>
+
+  <view class="asr-card" wx:if="{{asrText}}">
+    <view class="asr-head"><text class="asr-dot"></text><text>识别原文</text></view>
+    <text class="asr-text">“{{asrText}}”</text>
+  </view>
+
+  <record-card wx:if="{{parsed}}" record="{{parsed}}" show-actions="{{state === 'success' || state === 'confirm_needed'}}" bind:confirm="confirmRecord" bind:correct="correctAndConfirm" />
+
+  <view class="error-panel" wx:if="{{state === 'error'}}">
+    <icon name="bulb" size="40" color="var(--red)" />
+    <view class="error-copy"><text class="error-title">这次没有听清</text><text class="error-desc">换个安静的地方，或改用文字输入。</text></view>
+    <button class="retry-btn" bindtap="sayAgain">重试</button>
+  </view>
+
+  <view class="section-head" wx:if="{{recentLogs.length > 0}}"><text class="section-title">最近说过</text><text class="section-caption">可撤销已记账</text></view>
+  <view class="recent-list" wx:if="{{recentLogs.length > 0}}">
+    <view wx:for="{{recentLogs}}" wx:key="id" class="recent-item">
+      <text class="recent-index">0{{index + 1}}</text>
+      <text class="recent-text">{{item.asr_text}}</text>
+      <view class="recent-status">
+        <text class="recent-tag {{item.status === 'confirmed' ? 'tag-green' : item.status === 'voided' ? 'tag-red' : 'tag-amber'}}">{{item.status === 'confirmed' ? '已记账' : item.status === 'voided' ? '已撤销' : '待确认'}}</text>
+        <text class="void-btn" wx:if="{{item.status === 'confirmed'}}" bindtap="voidRecord" data-id="{{item.id}}">撤销</text>
+      </view>
+    </view>
+  </view>
+</view>

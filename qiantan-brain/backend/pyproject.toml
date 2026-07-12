@@ -1,0 +1,65 @@
+# 千摊智脑 · 后端代码质量配置
+#
+# 本文件承载 ruff（ lint + 格式化 ）与 mypy（类型检查）配置。
+# 这是团队代码质量提升方案中「自动化质量门禁」的核心约定，
+# 配套的 scripts/check.sh 与 .pre-commit-config.yaml 会自动读取这里的规则。
+#
+# 设计原则：
+#   - 起步阶段以「不阻塞现有代码」为底线，先启用高信噪比规则（E/F/I/B/UP），
+#     让团队在低噪音下建立习惯；后续可按需逐步开启 SIM/C4/ARG 等。
+#   - mypy 默认 non-strict（只查明显类型错误），避免一上来几百条报错劝退团队。
+
+[tool.ruff]
+# 同步小程序 API 基础地址里出现的长字符串，放宽行宽到 100 减少无谓换行
+line-length = 100
+target-version = "py312"
+src = ["app"]
+# 排除缓存 / 虚拟环境 / 构建产物，避免扫描器在读这些目录时报 E902 io-error
+# 而漏掉真实源码问题（CI 也应扫 backend/app 而非整个 backend 根）。
+exclude = [
+    ".venv",
+    "__pycache__",
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    "node_modules",
+    "*.pyc",
+]
+
+[tool.ruff.lint]
+# 规则集说明（按价值排序）：
+#   E   pycodestyle 风格（空格/空行）—— 统一团队排版
+#   F   Pyflakes —— 抓未使用导入、未定义变量、重复参数（高价值，能发现真 bug）
+#   I   导入排序 —— 代码评审不再纠结 import 顺序
+#   B   flake8-bugbear —— 反模式与潜在 bug（如可变默认参数）
+#   UP  pyupgrade —— 提示更现代的写法（与 team-code-quality-guidance 对齐）
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    # 允许函数参数中的可变默认参数提示被忽略（我们统一在 service 层用 None + 重建）
+    "B006",
+    # FastAPI 惯用法：Depends(get_merchant_id) 写在默认参数里会触发 B008，
+    # 这是官方推荐写法，非 bug，整体忽略（如需个别保留可加 # noqa: B008）。
+    "B008",
+    # Pinned mypy 1.11 requires conventional Generic[T] syntax.
+    "UP046",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试目录放宽「未使用变量 / 未使用导入」规则，测试可读性优先
+"tests/*" = ["F401", "F811", "F841"]
+# 自动生成的迁移脚本不检查风格
+"migrations/*" = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+lines-after-imports = 2
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+ignore_missing_imports = true
+# 起步阶段不开启 strict，避免噪音。后续团队稳定后可逐步加：
+# disallow_untyped_defs = true
+# warn_return_any = true
+no_implicit_optional = true
+

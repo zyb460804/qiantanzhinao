@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.egg
+.venv/
+venv/
+env/
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.env
+docker-compose.override.yml
+
+# Database
+*.db
+*.sqlite3
+
+# Models
+*.onnx
+*.pt
+*.pth
+edge/vision/model/*.onnx
+!edge/vision/model/.gitkeep
+
+# Uploads
+uploads/
+audio/
+
+# Environment
+.env
+.env.local
+
+# WeChat Mini Program
+miniprogram/project.private.config.json

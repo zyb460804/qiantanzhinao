@@ -1,0 +1,32 @@
+<!-- 商户设置 · 让画像与偏好更易理解 -->
+<view class="page-shell profile-page {{skinClass}}">
+  <view class="page-hero profile-hero page-hero--breathing">
+    <view class="merchant-avatar">摊</view>
+    <view class="merchant-copy"><text class="eyebrow">STORE SETTINGS · 摊位设置</text><text class="hero-title">{{merchantName || '我的摊位'}}</text><text class="hero-desc">管理摊位名称、语音习惯和建议偏好。</text></view>
+  </view>
+
+  <view class="section-head"><text class="section-title">基本信息</text><text class="section-caption">基础偏好保存在当前设备</text></view>
+  <view class="setting-card">
+    <view class="setting-row"><view class="setting-icon green-bg">名</view><view class="setting-copy"><text class="setting-label">摊位名称</text><input class="setting-input" value="{{merchantName}}" bindinput="onNameChange" placeholder="输入摊位名称" /></view></view>
+    <view class="setting-row"><view class="setting-icon amber-bg">话</view><view class="setting-copy"><text class="setting-label">常用方言</text><picker mode="selector" range="{{dialects}}" value="{{dialectIndex}}" bindchange="onDialectChange"><view class="picker-display">{{dialects[dialectIndex]}}<text>›</text></view></picker></view></view>
+  </view>
+
+  <view class="section-head"><text class="section-title">建议偏好</text><text class="section-caption">用于调整建议强度，不代表风险承诺</text></view>
+  <radio-group class="risk-options" bindchange="onRiskChange">
+    <label class="risk-option {{riskProfile === 'conservative' ? 'selected' : ''}}"><radio value="conservative" checked="{{riskProfile === 'conservative'}}" color="#175C45"/><view><text class="risk-title">稳健经营</text><text class="risk-desc">少压货、优先控制损耗</text></view><text class="risk-badge">稳</text></label>
+    <label class="risk-option {{riskProfile === 'neutral' ? 'selected' : ''}}"><radio value="neutral" checked="{{riskProfile === 'neutral'}}" color="#175C45"/><view><text class="risk-title">平衡经营</text><text class="risk-desc">兼顾销量、利润与风险</text></view><text class="risk-badge">衡</text></label>
+    <label class="risk-option {{riskProfile === 'aggressive' ? 'selected' : ''}}"><radio value="aggressive" checked="{{riskProfile === 'aggressive'}}" color="#175C45"/><view><text class="risk-title">进取经营</text><text class="risk-desc">接受波动，争取更多销量</text></view><text class="risk-badge">进</text></label>
+  </radio-group>
+
+  <button class="save-button" bindtap="saveProfile">保存我的经营偏好</button>
+
+  <view class="section-head"><text class="section-title">全部工具</text><text class="section-caption">低频模块统一收纳</text></view>
+  <view class="entry-grid">
+    <view class="entry-item" wx:for="{{entries}}" wx:key="page" data-page="{{item.page}}" bindtap="goDeep">
+      <view class="entry-icon {{item.tone}}">{{item.glyph}}</view>
+      <text class="entry-name">{{item.name}}</text>
+    </view>
+  </view>
+
+  <view class="about-card"><view class="about-logo">千</view><view><text class="about-title">千摊智脑</text><text class="about-desc">面向小微商户的经营记录、库存与决策辅助工具</text></view></view>
+</view>

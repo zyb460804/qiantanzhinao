@@ -1,0 +1,10 @@
+{
+  "name": "qiantan-offline-sync-reference",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "千摊智脑离线记账队列/同步引擎/端上解析器 参考实现（教学样例）。仅用于学习与原地单测，勿直接发布到小程序。",
+  "scripts": {
+    "test": "node --test"
+  }
+}

@@ -1,0 +1,3 @@
+<view class="mascot mascot--{{size}} mascot--{{mood}}">
+  <image class="mascot-img" src="/images/mascot.svg" mode="aspectFit" aria-label="小智" />
+</view>

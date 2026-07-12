@@ -1,0 +1,204 @@
+<!-- 经营报告 — 每日/每周/月度经营状况与 AI 总结 -->
+<view class="page-shell report-page {{skinClass}}">
+
+  <!-- 顶部 hero -->
+  <view class="page-hero report-hero">
+    <view class="hero-kick">BUSINESS REPORT · 经营报告</view>
+    <text class="hero-title">经营报告</text>
+    <text class="hero-desc">{{rangeLabel}} · 更新于 {{refreshTime}}</text>
+
+    <!-- 时间范围切换 -->
+    <view class="range-tabs">
+      <view class="range-tab {{activeTab === 'daily' ? 'active' : ''}}" data-tab="daily" bindtap="switchTab">今日</view>
+      <view class="range-tab {{activeTab === 'weekly' ? 'active' : ''}}" data-tab="weekly" bindtap="switchTab">近7日</view>
+      <view class="range-tab {{activeTab === 'monthly' ? 'active' : ''}}" data-tab="monthly" bindtap="switchTab">近30日</view>
+    </view>
+  </view>
+
+  <!-- 加载骨架屏 -->
+  <block wx:if="{{loading}}">
+    <view class="kpi-grid">
+      <view class="card kpi-skel" wx:for="{{[1,2,3,4]}}" wx:key="*this">
+        <view class="skeleton-block line w40"></view>
+        <view class="skeleton-block line w70"></view>
+        <view class="skeleton-block line w50"></view>
+      </view>
+    </view>
+    <view class="card">
+      <view class="skeleton-block line w100"></view>
+      <view class="skeleton-block line w80"></view>
+      <view class="skeleton-block line w60"></view>
+    </view>
+    <view class="loading-state"><view class="loading-spinner"></view><text>正在生成经营报告</text></view>
+  </block>
+
+  <!-- 空数据状态 -->
+  <view wx:elif="{{!hasData}}" class="empty-state card">
+    <mascot size="md" mood="idle"></mascot>
+    <text>暂无经营数据</text>
+    <text class="empty-tip">开始记账后即可查看报告</text>
+  </view>
+
+  <!-- 数据内容 -->
+  <block wx:else>
+
+    <!-- 核心指标卡 -->
+    <view class="kpi-grid">
+      <view class="kpi kpi-green">
+        <view class="kpi-top"><icon name="scan" size="sm" color="var(--green-700)"></icon><text class="kpi-label">营业额</text></view>
+        <text class="kpi-value">{{metrics.revenueDisplay}}</text>
+        <view class="kpi-change {{metrics.revenueChangePct > 0 ? 'up' : (metrics.revenueChangePct < 0 ? 'down' : '')}}" wx:if="{{metrics.revenueChangePct !== null}}">
+          <text class="change-arrow">{{metrics.revenueChangePct > 0 ? '↑' : (metrics.revenueChangePct < 0 ? '↓' : '—')}}</text>
+          <text>{{metrics.revenueChangeAbs}}</text>
+        </view>
+      </view>
+
+      <view class="kpi kpi-amber">
+        <view class="kpi-top"><icon name="cart" size="sm" color="var(--corn-deep, #9a6b00)"></icon><text class="kpi-label">采购成本</text></view>
+        <text class="kpi-value">{{metrics.costDisplay}}</text>
+        <view class="kpi-sub" wx:if="{{activeTab === 'daily' && dailyData}}">销量 {{dailyData.sale_qty}} 件</view>
+      </view>
+
+      <view class="kpi kpi-blue">
+        <view class="kpi-top"><icon name="chart" size="sm" color="var(--blue)"></icon><text class="kpi-label">毛利润</text></view>
+        <text class="kpi-value">{{metrics.profitDisplay}}</text>
+        <view class="kpi-sub" wx:if="{{metrics.profitMargin !== null}}">利润率 {{metrics.profitMargin}}</view>
+      </view>
+
+      <view class="kpi kpi-red">
+        <view class="kpi-top"><icon name="bulb" size="sm" color="var(--red)"></icon><text class="kpi-label">损耗金额</text></view>
+        <text class="kpi-value">{{metrics.wasteDisplay}}</text>
+        <view class="kpi-sub" wx:if="{{activeTab === 'daily' && dailyData}}">临期 {{dailyData.expiring_count}} 项</view>
+      </view>
+    </view>
+
+    <!-- 趋势图表 -->
+    <view class="block">
+      <view class="section-head">
+        <text class="section-title">营业趋势</text>
+        <text class="section-caption">{{activeTab === 'daily' ? '近7日走势' : (activeTab === 'weekly' ? '本周走势' : '近30日走势')}}</text>
+      </view>
+      <view class="card chart-card">
+        <view class="chart-legend">
+          <text class="legend-item legend-revenue">营业额</text>
+          <text class="legend-item legend-profit">利润</text>
+          <text class="legend-item legend-aov">客单价</text>
+        </view>
+        <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
+      </view>
+    </view>
+
+    <!-- 销量排行榜 -->
+    <view class="block">
+      <view class="section-head">
+        <text class="section-title">销量排行榜</text>
+        <text class="section-caption">{{salesRanking.length}} 个商品</text>
+      </view>
+      <view class="card rank-card" wx:if="{{salesRanking.length > 0}}">
+        <view class="rank-row" wx:for="{{salesRanking}}" wx:key="product_id" wx:for-index="idx">
+          <view class="rank-num rank-{{idx < 3 ? idx + 1 : 'normal'}}">{{idx + 1}}</view>
+          <view class="rank-info">
+            <view class="rank-name">{{item.product_name}}</view>
+            <view class="rank-meta">
+              <text>销量 {{item.qty}} 件</text>
+              <text class="rank-revenue">¥{{item.revenueDisplay}}</text>
+            </view>
+            <view class="rank-bar-track">
+              <view class="rank-bar-fill rank-bar-{{idx < 3 ? idx + 1 : 'normal'}}" style="width: {{item.qty / maxRankQty * 100}}%"></view>
+            </view>
+          </view>
+        </view>
+      </view>
+      <view wx:else class="empty-state card">
+        <mascot size="sm" mood="idle"></mascot>
+        <text>暂无销量数据</text>
+      </view>
+    </view>
+
+    <!-- 损耗 / 滞销 -->
+    <view class="block">
+      <view class="section-head">
+        <text class="section-title">{{activeTab === 'daily' ? '滞销预警' : '损耗排行'}}</text>
+        <text class="section-caption">{{wasteList.length}} 项</text>
+      </view>
+      <view class="card waste-card" wx:if="{{wasteList.length > 0}}">
+        <view class="waste-row" wx:for="{{wasteList}}" wx:key="product_id">
+          <view class="waste-mark">{{activeTab === 'daily' ? '滞' : '损'}}</view>
+          <view class="waste-info">
+            <text class="waste-name">{{item.product_name}}</text>
+            <text class="waste-detail">{{activeTab === 'daily' ? '库存 ' + item.stock_qty + ' 件' : '损耗 ' + item.qty + ' 件 · ¥' + item.amountDisplay}}</text>
+          </view>
+          <text class="tag tag-amber" wx:if="{{activeTab === 'daily'}}">关注</text>
+          <text class="tag tag-red" wx:else>损耗</text>
+        </view>
+      </view>
+      <view wx:else class="empty-state card">
+        <text>✅</text>
+        <text>{{activeTab === 'daily' ? '暂无滞销商品' : '暂无损耗记录'}}</text>
+      </view>
+    </view>
+
+    <!-- AI 总结 -->
+    <view class="block">
+      <view class="section-head">
+        <text class="section-title">AI 经营总结</text>
+        <text class="section-caption">小智智能分析</text>
+      </view>
+      <view class="card ai-card">
+        <view class="ai-head">
+          <mascot size="sm" mood="think"></mascot>
+          <view class="ai-head-copy"><text class="ai-name">小智</text><text class="ai-role">经营参谋</text></view>
+        </view>
+
+        <!-- 健康评分（周报模式） -->
+        <view class="health-section" wx:if="{{activeTab === 'weekly' && weeklyData}}">
+          <view class="health-ring" style="background:conic-gradient(var(--green-600) {{weeklyData.health_score}}%, var(--green-100) 0)">
+            <text class="health-score">{{weeklyData.health_score}}</text>
+            <text class="health-unit">分</text>
+          </view>
+          <view class="health-desc">
+            <text class="health-title">经营健康度</text>
+            <text class="health-tip">{{healthLevel}}</text>
+          </view>
+        </view>
+
+        <!-- AI 文本总结 -->
+        <view class="ai-summary" wx:if="{{aiSummary}}">{{aiSummary}}</view>
+
+        <!-- 行动清单（今日模式） -->
+        <view class="action-section" wx:if="{{activeTab === 'daily' && actionItems.length > 0}}">
+          <view class="action-title">建议行动</view>
+          <view class="action-list">
+            <view class="action-item" wx:for="{{actionItems}}" wx:key="*this" wx:for-index="idx">
+              <view class="action-bullet">{{idx + 1}}</view>
+              <text class="action-text">{{item}}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 采纳情况 -->
+        <view class="adoption-section" wx:if="{{showAdoption}}">
+          <view class="adoption-row">
+            <text class="adoption-label">建议采纳</text>
+            <text class="adoption-value">{{adoptionAdopted}} / {{adoptionTotal}}</text>
+          </view>
+          <view class="adoption-bar-track">
+            <view class="adoption-bar-fill" style="width: {{adoptionRate}}%"></view>
+          </view>
+          <text class="adoption-rate">采纳率 {{adoptionRate}}%</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 语音记账入口 -->
+    <view class="card voice-entry-card" wx:if="{{activeTab === 'daily' && dailyData}}">
+      <view class="voice-entry-info">
+        <text class="voice-entry-title">今日语音记账</text>
+        <text class="voice-entry-desc">共 {{dailyData.voice_count}} 条语音记录</text>
+      </view>
+      <view class="btn-secondary voice-btn" bindtap="goVoice">去记账</view>
+    </view>
+
+    <view class="safe-bottom"></view>
+  </block>
+</view>

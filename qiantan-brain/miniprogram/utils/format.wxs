@@ -1,0 +1,32 @@
+// 千摊智脑 WXS 格式化工具
+// WXML 中无法调用 .toFixed() / .join() 等方法,统一在此处理
+//
+// 用法:
+//   <wxs src="/utils/format.wxs" module="fmt" />
+//   {{fmt.percent(record.confidence)}}%
+//   {{fmt.join(arr, '、')}}
+
+/** 小数转百分比整数: 0.78 → "78" */
+var percent = function (val) {
+  if (val === undefined || val === null || val === '') return '0';
+  return Math.round(val * 100);
+};
+
+/** 数组连接为字符串 */
+var join = function (arr, sep) {
+  if (!arr || arr.length === 0) return '';
+  return arr.join(sep || '、');
+};
+
+/** 保留指定位小数: 3.14159, 2 → "3.14" (WXS 无 toFixed,手动实现) */
+var fixed = function (val, digits) {
+  if (val === undefined || val === null) return '0';
+  var m = Math.pow(10, digits || 0);
+  return Math.round(val * m) / m;
+};
+
+module.exports = {
+  percent: percent,
+  join: join,
+  fixed: fixed,
+};

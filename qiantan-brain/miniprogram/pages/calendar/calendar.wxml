@@ -1,0 +1,44 @@
+<!-- 经营日历 · 时令 + 星期策略 (v2.2 生鲜元气) -->
+<view class="page-shell calendar-page skin-{{skin}}">
+  <view class="page-hero cal-hero">
+    <text class="eyebrow">SEASONAL CALENDAR · 时令经营</text>
+    <text class="hero-title">今天卖什么，看节气</text>
+    <text class="hero-desc">把节气、星期和天气，变成能直接做的备货与营销。</text>
+    <view class="today-pill"><icon name="calendar" size="30" color="var(--corn)" /><text>{{solarTerm}} · {{weekdayText}}</text></view>
+  </view>
+
+  <!-- 星期条 -->
+  <view class="week-strip">
+    <view wx:for="{{week}}" wx:key="d" class="week-cell {{item.today ? 'today' : ''}}">
+      <text class="week-d">{{item.d}}</text>
+      <text class="week-tag" wx:if="{{item.tag}}">{{item.tag}}</text>
+      <view class="week-dot" wx:if="{{item.hot}}"></view>
+    </view>
+  </view>
+
+  <!-- 时令卡 -->
+  <view class="section-head"><text class="section-title">本节气经营要点</text><text class="section-caption">{{solarTerm}}·{{termRange}}</text></view>
+  <view class="term-card">
+    <view class="term-head">
+      <view class="term-badge"><icon name="leaf" size="40" color="var(--green-800)" /></view>
+      <view class="term-meta"><text class="term-name">{{solarTerm}}</text><text class="term-range">{{termRange}} · 当令：{{inSeason}}</text></view>
+    </view>
+    <view class="term-row" wx:for="{{termAdvice}}" wx:key="label">
+      <view class="term-ic {{item.tone}}"><icon name="{{item.icon}}" size="34" color="{{item.tone==='warn' ? 'var(--corn)' : item.tone==='hot' ? 'var(--red)' : 'var(--green-800)'}}" /></view>
+      <view class="term-body"><text class="term-label">{{item.label}}</text><text class="term-text">{{item.text}}</text></view>
+    </view>
+  </view>
+
+  <!-- 未来几天策略 -->
+  <view class="section-head"><text class="section-title">未来几天怎么备</text><text class="section-caption">小智按天气推演</text></view>
+  <view class="plan-list">
+    <view wx:for="{{plans}}" wx:key="day" class="plan-card">
+      <view class="plan-date"><text class="plan-d">{{item.day}}</text><text class="plan-w">{{item.week}}</text></view>
+      <view class="plan-body">
+        <text class="plan-weather">{{item.weather}} · {{item.temp}}</text>
+        <text class="plan-tip">{{item.tip}}</text>
+      </view>
+      <icon name="{{item.hot ? 'spark' : 'leaf'}}" size="36" color="{{item.hot ? 'var(--red)' : 'var(--green-700)'}}" />
+    </view>
+  </view>
+</view>

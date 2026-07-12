@@ -1,0 +1,11 @@
+{
+  "navigationBarTitleText": "记一笔",
+  "usingComponents": {
+    "voice-button": "/components/voice-button/voice-button",
+    "record-card": "/components/record-card/record-card",
+    "icon": "/components/icon/icon",
+    "mascot": "/components/mascot/mascot"
+  },
+  "navigationBarBackgroundColor": "#123D30",
+  "navigationBarTextStyle": "white"
+}

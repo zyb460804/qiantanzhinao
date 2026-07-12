@@ -1,0 +1,28 @@
+{
+  "description": "千摊智脑微信小程序",
+  "miniprogramRoot": "./",
+  "compileType": "miniprogram",
+  "appid": "touristappid",
+  "projectname": "qiantan-brain",
+  "setting": {
+    "useCompilerPlugins": false,
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": false,
+    "minifyWXML": true,
+    "checkSiteMap": false,
+    "coverView": false,
+    "lazyloadPlaceholderEnable": false,
+    "skylineRenderEnable": false,
+    "preloadBackgroundData": false,
+    "useStaticServer": true,
+    "disableSWC": true,
+    "useLanDebug": true,
+    "bigPackageSizeSupport": false
+  },
+  "simulatorType": "wechat",
+  "libVersion": "3.15.2",
+  "condition": {}
+}

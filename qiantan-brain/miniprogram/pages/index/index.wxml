@@ -1,0 +1,74 @@
+<!-- 经营台：真实指标、今日待办、高频工作入口 -->
+<view class="page-shell index-page skin-{{skin}}">
+  <view class="skeleton-wrap" wx:if="{{showSkeleton}}">
+    <view class="sk-hero"><view class="sk-line w60"></view><view class="sk-line w40"></view><view class="sk-ring"></view></view>
+    <view class="sk-grid"><view class="sk-card"></view><view class="sk-card"></view></view>
+    <view class="sk-card tall"></view>
+  </view>
+
+  <block wx:else>
+    <view class="page-hero home-hero">
+      <view class="hero-topline">
+        <view><text class="eyebrow">QIANTAN · 今日经营台</text><text class="hero-title">{{greeting}}，{{merchantName}}</text></view>
+        <view class="skin-seg">
+          <view class="skin-opt {{skin==='morning'?'on':''}}" data-skin="morning" bindtap="onSkinChange">早市</view>
+          <view class="skin-opt {{skin==='noon'?'on':''}}" data-skin="noon" bindtap="onSkinChange">午市</view>
+          <view class="skin-opt {{skin==='evening'?'on':''}}" data-skin="evening" bindtap="onSkinChange">晚市</view>
+        </view>
+      </view>
+      <text class="hero-desc">先处理待办，再记流水、看库存和安排采购。</text>
+      <view class="hero-profit home-profit-simple">
+        <view class="hero-profit-main">
+          <text class="hero-profit-label">今日毛利</text>
+          <text class="hero-profit-value">¥{{todayProfit}}</text>
+          <text class="profit-note">收入 ¥{{todayRevenue}} · 成本 ¥{{todayCost}}</text>
+        </view>
+        <view class="weather-pill home-weather" wx:if="{{weather}}">
+          <icon name="leaf" size="28" color="var(--corn)" />
+          <text class="weather-temp">{{weather.temp_high}}°</text><text>{{weather.weather_type}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="section-head"><text class="section-title">今日待办</text><text class="section-caption">只展示基于当前数据的提醒</text></view>
+    <view class="task-stack">
+      <view wx:for="{{todayTasks}}" wx:key="id" class="task-card {{item.tone}}" data-route="{{item.route}}" bindtap="handleTask">
+        <view class="task-glyph">{{item.glyph}}</view>
+        <view class="task-copy"><text class="task-title">{{item.title}}</text><text class="task-desc">{{item.desc}}</text></view>
+        <text class="task-action">{{item.action}} ›</text>
+      </view>
+    </view>
+
+    <view class="section-head"><text class="section-title">常用工作</text><text class="section-caption">按一天的经营顺序排列</text></view>
+    <view class="action-grid work-grid">
+      <button class="action-card action-primary" bindtap="navigateToVoice"><icon name="mic" size="46" color="#fff"/><text class="action-title">记经营流水</text><text class="action-desc">进货、销售、损耗</text></button>
+      <button class="action-card" bindtap="navigateToPos"><icon name="cart" size="46" color="var(--green-800)"/><text class="action-title">收银开单</text><text class="action-desc">商品、支付与日结</text></button>
+      <button class="action-card" bindtap="navigateToPurchase"><icon name="box" size="46" color="var(--corn)"/><text class="action-title">采购清单</text><text class="action-desc">建议、编辑、确认入库</text></button>
+      <button class="action-card" bindtap="navigateToStocktake"><icon name="scan" size="46" color="var(--blue)"/><text class="action-title">库存盘点</text><text class="action-desc">核对账面与实际数量</text></button>
+    </view>
+
+    <view class="section-head"><text class="section-title">库存状态</text><text class="section-link" bindtap="navigateToInventory">查看全部 ›</text></view>
+    <view class="status-card inventory-summary" bindtap="navigateToInventory">
+      <view class="summary-stat"><text class="summary-num">{{inventoryCategoryCount}}</text><text class="summary-label">记录品类</text></view>
+      <view class="summary-divider"></view>
+      <view class="summary-stat"><text class="summary-num green">{{inStockCount}}</text><text class="summary-label">当前有库存</text></view>
+      <view class="summary-divider"></view>
+      <view class="summary-stat"><text class="summary-num {{expiringCount > 0 ? 'red' : ''}}">{{expiringCount}}</text><text class="summary-label">临期批次</text></view>
+    </view>
+    <text class="data-note">不同商品单位不可直接相加，因此首页按品类和风险展示，不再汇总成“总斤数”。</text>
+
+    <view class="section-head"><text class="section-title">分析与工具</text><text class="section-caption">低频功能集中在这里</text></view>
+    <view class="tool-row">
+      <view class="tool-chip" bindtap="navigateToAdvisor"><icon name="bulb" size="30" color="var(--corn)"/><text>今日建议</text></view>
+      <view class="tool-chip" bindtap="navigateToDashboard"><icon name="mirror" size="30" color="var(--green-800)"/><text>经营镜像</text></view>
+      <view class="tool-chip" bindtap="navigateToReport"><icon name="chart" size="30" color="var(--blue)"/><text>经营报告</text></view>
+      <view class="tool-chip" bindtap="navigateToVision"><icon name="camera" size="30" color="var(--green-800)"/><text>拍照识货</text></view>
+    </view>
+
+    <view class="section-head"><text class="section-title">最近记录</text><text class="section-link" bindtap="navigateToVoice">再记一笔 ›</text></view>
+    <view class="record-list" wx:if="{{recentRecords.length > 0}}">
+      <view wx:for="{{recentRecords}}" wx:key="id" class="record-item"><view class="record-bullet"></view><text class="record-text">{{item.display_text}}</text></view>
+    </view>
+    <view class="empty-state surface" wx:else><mascot size="sm" mood="idle"/><text>还没有经营记录。先记一笔，利润、库存和建议才会逐步准确。</text></view>
+  </block>
+</view>

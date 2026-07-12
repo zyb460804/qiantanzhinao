@@ -1,0 +1,27 @@
+.rc { margin-top: 20rpx; padding: 28rpx; background: var(--paper); border: 1rpx solid rgba(18,61,48,.07); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.rc-compact { display: flex; align-items: center; gap: 12rpx; }
+.rc-mini-mark { display: flex; align-items: center; justify-content: center; width: 42rpx; height: 42rpx; color: var(--green-800); background: var(--green-50); border-radius: 12rpx; font-size: 18rpx; font-weight: 800; }
+.rc-product { flex: 1; color: var(--ink); font-weight: 700; }
+.rc-qty { color: var(--muted); font-size: 23rpx; }
+.rc-amount { color: var(--green-700); font-weight: 750; }
+.rc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18rpx; }
+.rc-eyebrow, .rc-title { display: block; }
+.rc-eyebrow { color: var(--muted); font-size: 17rpx; letter-spacing: 2rpx; }
+.rc-title { margin-top: 4rpx; color: var(--ink); font-size: 31rpx; font-weight: 760; }
+.rc-confidence { flex: 0 0 auto; padding: 8rpx 13rpx; color: #915809; background: var(--amber-soft); border-radius: 999rpx; font-size: 19rpx; }
+.rc-confidence.good { color: var(--green-800); background: var(--green-100); }
+.rc-summary { display: flex; align-items: center; gap: 16rpx; margin-top: 23rpx; padding: 20rpx; background: #f5f6f1; border-radius: 18rpx; }
+.summary-mark { display: flex; align-items: center; justify-content: center; width: 58rpx; height: 58rpx; color: #fff; background: var(--green-700); border-radius: 17rpx; font-size: 22rpx; font-weight: 800; }
+.summary-title, .summary-type { display: block; }
+.summary-title { color: var(--ink); font-size: 28rpx; font-weight: 740; }
+.summary-type { margin-top: 2rpx; color: var(--muted); font-size: 20rpx; }
+.summary-amount { margin-left: auto; color: var(--green-700); font-size: 31rpx; font-weight: 800; }
+.rc-fields { margin-top: 15rpx; }
+.rc-row { display: flex; justify-content: space-between; padding: 14rpx 4rpx; border-bottom: 1rpx solid var(--line); color: var(--muted); font-size: 23rpx; }
+.rc-row .rc-val { color: var(--ink); font-weight: 650; }
+.rc-row.missing .rc-val { color: var(--red); }
+.rc-actions { display: grid; grid-template-columns: 1fr 1.3fr; gap: 14rpx; margin-top: 24rpx; }
+.rc-btn { display: flex; align-items: center; justify-content: center; min-height: 88rpx; border-radius: 19rpx; font-size: 27rpx; font-weight: 720; }
+.rc-btn.secondary { color: var(--ink-2); background: #efefe9; }
+.rc-btn.primary { color: #fff; background: var(--green-800); }
+.rc-btn.rc-btn-void { color: var(--red); background: var(--red-soft); }

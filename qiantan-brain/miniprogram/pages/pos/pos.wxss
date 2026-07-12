@@ -1,0 +1,98 @@
+.pos-page { padding-bottom: 80rpx; }
+.pos-hero { padding-bottom: 34rpx; }
+.pos-top { display:flex; align-items:center; justify-content:space-between; }
+.pos-label,.pos-sub { display:block; color:rgba(255,255,255,.78); font-size:24rpx; }
+.pos-amount { display:block; margin-top:8rpx; color:#fff; font-family:var(--font-num); font-size:64rpx; font-weight:800; }
+.status-strip { display:flex; justify-content:space-between; margin:20rpx 0; padding:20rpx 24rpx; color:#8a4d00; background:#fff1d6; border-radius:18rpx; font-size:24rpx; }
+.link { color:var(--green-800); font-weight:700; }
+.product-scroll { width:100%; white-space:nowrap; }
+.product-row { display:inline-flex; gap:18rpx; padding:6rpx 4rpx 16rpx; }
+.product-card { position:relative; display:flex; flex-direction:column; width:220rpx; min-height:170rpx; padding:22rpx; background:var(--paper); border:2rpx solid var(--line); border-radius:24rpx; box-shadow:var(--shadow-sm); }
+.product-card:active { transform:scale(.97); border-color:var(--green-300); }
+.product-name { overflow:hidden; color:var(--ink); font-size:29rpx; font-weight:750; text-overflow:ellipsis; }
+.product-stock { margin-top:10rpx; color:var(--muted); font-size:22rpx; }
+.product-price { margin-top:auto; padding-top:18rpx; color:var(--green-800); font-family:var(--font-num); font-size:28rpx; font-weight:800; }
+.estimate { position:absolute; top:14rpx; right:12rpx; padding:4rpx 8rpx; color:#8a5a00; background:#fff1d6; border-radius:9rpx; font-size:17rpx; }
+.cart { overflow:hidden; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
+.cart-item { display:flex; align-items:center; gap:18rpx; padding:22rpx; border-bottom:1rpx solid var(--line); }
+.cart-main { flex:1; min-width:0; }
+.cart-name,.cart-price { display:block; }
+.cart-name { color:var(--ink); font-size:27rpx; font-weight:750; }
+.cart-price { margin-top:6rpx; color:var(--muted); font-size:21rpx; }
+.qty { display:flex; align-items:center; gap:10rpx; }
+.qty button { width:58rpx; min-width:58rpx; height:52rpx; padding:0; line-height:50rpx; color:var(--green-800); background:var(--green-50); }
+.qty text { min-width:92rpx; text-align:center; color:var(--ink); font-family:var(--font-num); font-size:24rpx; font-weight:700; }
+.summary-line { display:flex; justify-content:space-between; padding:16rpx 24rpx; color:var(--muted); font-size:24rpx; }
+.summary-line.discount { color:var(--corn); }
+.summary-line.total { padding-top:20rpx; color:var(--ink); border-top:1rpx dashed var(--line); font-size:31rpx; font-weight:800; }
+
+/* 支付 */
+.payment-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12rpx; }
+.payment-chip { padding:22rpx 8rpx; text-align:center; color:var(--muted); background:var(--paper); border:2rpx solid var(--line); border-radius:18rpx; font-size:24rpx; font-weight:700; }
+.payment-chip.active { color:#fff; background:var(--green-700); border-color:var(--green-700); }
+
+/* 组合支付 */
+.multi-pay { overflow:hidden; background:var(--paper); border:2rpx solid var(--green-200); border-radius:20rpx; }
+.split-row { display:flex; justify-content:space-between; align-items:center; padding:20rpx 24rpx; border-bottom:1rpx solid var(--line); }
+.split-row:last-child { border-bottom:none; }
+.split-label { color:var(--ink); font-size:26rpx; font-weight:700; }
+.split-amount { color:var(--green-800); font-family:var(--font-num); font-size:28rpx; font-weight:800; padding:6rpx 14rpx; background:var(--green-50); border-radius:12rpx; }
+.split-hint { display:block; padding:14rpx 24rpx; color:var(--muted); font-size:20rpx; text-align:center; }
+
+/* 操作按钮行 */
+.action-row { display:flex; gap:14rpx; margin-top:24rpx; }
+.hold-btn { flex:0 0 160rpx; color:var(--green-800); background:var(--green-50); border:2rpx solid var(--green-200); border-radius:22rpx; font-size:26rpx; font-weight:750; }
+.hold-btn[disabled] { color:var(--muted); background:#e4e4df; border-color:#e4e4df; }
+.checkout { flex:1; color:#fff; background:var(--corn); border-radius:22rpx; font-size:30rpx; font-weight:800; box-shadow:0 12rpx 26rpx rgba(243,168,59,.3); }
+.checkout[disabled] { color:var(--muted); background:#e4e4df; box-shadow:none; }
+
+/* 挂单列表 */
+.held-head { margin-top:28rpx; }
+.held-list { overflow:hidden; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
+.held-empty { padding:38rpx; text-align:center; color:var(--muted); font-size:24rpx; }
+.held-item { display:flex; align-items:center; justify-content:space-between; padding:20rpx 24rpx; border-bottom:1rpx solid var(--line); }
+.held-item:active { background:var(--green-50); }
+.held-main { flex:1; min-width:0; }
+.held-no { display:block; color:var(--ink); font-size:24rpx; font-weight:700; }
+.held-time { display:block; margin-top:4rpx; color:var(--muted); font-size:19rpx; }
+.held-right { text-align:right; }
+.held-amount { display:block; color:var(--ink); font-family:var(--font-num); font-size:25rpx; font-weight:800; }
+.held-items { display:block; margin-top:4rpx; color:var(--green-700); font-size:19rpx; }
+
+/* 日结 */
+.close-day { margin-top:20rpx; color:var(--green-800); background:var(--green-50); border:2rpx solid var(--green-200); border-radius:20rpx; font-weight:750; }
+.settlement-card { margin-top:28rpx; padding:24rpx; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
+.settlement-title { display:block; color:var(--ink); font-size:28rpx; font-weight:800; }
+.settlement-grid { display:grid; grid-template-columns:1fr 1fr; gap:12rpx; margin-top:18rpx; color:var(--muted); font-size:23rpx; }
+.diff { display:block; margin-top:18rpx; font-weight:800; }
+.diff.ok { color:var(--green-700); }.diff.warn { color:#c0493d; }
+.settlement-extra { display:block; margin-top:12rpx; color:var(--green-800); font-size:22rpx; font-weight:700; }
+
+/* 订单列表 */
+.record-list { overflow:hidden; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
+.pos-record { display:flex; align-items:center; justify-content:space-between; padding:20rpx 24rpx; border-bottom:1rpx solid var(--line); }
+.pos-record:active { background:var(--green-50); }
+.rec-body { flex:1; min-width:0; }.rec-title,.rec-time,.rec-amount,.rec-status { display:block; }
+.rec-title { color:var(--ink); font-size:24rpx; font-weight:700; }.rec-time { overflow:hidden; max-width:420rpx; margin-top:4rpx; color:var(--muted); font-size:19rpx; text-overflow:ellipsis; white-space:nowrap; }
+.rec-amount { text-align:right; color:var(--ink); font-family:var(--font-num); font-size:25rpx; font-weight:800; }
+.rec-status { margin-top:4rpx; text-align:right; color:var(--green-700); font-size:19rpx; }
+.rec-status.refunded { color:#c0493d; }
+.empty-state { padding:38rpx; text-align:center; color:var(--muted); background:var(--paper); border:2rpx dashed var(--line); border-radius:22rpx; font-size:24rpx; }
+
+/* 退款弹窗 */
+.refund-mask { position:fixed; inset:0; z-index:1000; display:flex; align-items:flex-end; justify-content:center; background:rgba(0,0,0,.45); }
+.refund-modal { width:100%; max-width:640rpx; padding:36rpx 28rpx 52rpx; background:var(--paper); border-radius:32rpx 32rpx 0 0; }
+.refund-title { display:block; color:var(--ink); font-size:30rpx; font-weight:800; }
+.refund-amount { display:block; margin-top:6rpx; color:var(--corn); font-family:var(--font-num); font-size:38rpx; font-weight:800; }
+.refund-field { margin-top:28rpx; }
+.refund-label { display:block; color:var(--muted); font-size:24rpx; }
+.refund-input { margin-top:10rpx; padding:18rpx 20rpx; background:var(--green-50); border:2rpx solid var(--line); border-radius:16rpx; font-size:26rpx; }
+.refund-toggle { display:flex; justify-content:space-between; align-items:center; margin-top:24rpx; padding:14rpx 0; font-size:26rpx; color:var(--ink); font-weight:700; }
+.toggle { width:100rpx; height:56rpx; border-radius:28rpx; display:flex; align-items:center; padding:4rpx; transition:background .2s; }
+.toggle.on { background:var(--green-600); justify-content:flex-end; }
+.toggle.off { background:#c4c4c4; justify-content:flex-start; }
+.toggle-knob { width:48rpx; height:48rpx; border-radius:50%; background:#fff; box-shadow:0 2rpx 6rpx rgba(0,0,0,.15); }
+.refund-actions { display:flex; gap:16rpx; margin-top:32rpx; }
+.refund-cancel { flex:1; color:var(--muted); background:var(--paper); border:2rpx solid var(--line); border-radius:20rpx; font-size:26rpx; font-weight:700; }
+.refund-confirm { flex:2; color:#fff; background:#c0493d; border-radius:20rpx; font-size:26rpx; font-weight:800; }
+.refund-confirm[disabled] { opacity:.5; }

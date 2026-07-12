@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "采购清单",
+  "usingComponents": {
+    "mascot": "/components/mascot/mascot"
+  },
+  "navigationBarBackgroundColor": "#123D30",
+  "navigationBarTextStyle": "white",
+  "enablePullDownRefresh": true
+}

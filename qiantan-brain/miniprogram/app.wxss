@@ -1,0 +1,399 @@
+/* =============================================================
+ * 千摊智脑 · 设计系统地基 v2.2  ——「市井烟火 × 生鲜元气」
+ * 暖纸中性(非纯白) + 生鲜叶绿主导 + 番茄红/玉米金点缀
+ * 本文件为全局令牌与通用组件类，所有页面/组件依赖它。
+ * 已在 v1 令牌基础上扩展，旧类名(.card/.btn-primary/.tag/.page-hero…)全部保留向后兼容。
+ * 单位统一使用 rpx（750rpx = 屏幕宽，约 1px≈2rpx）。
+ * ============================================================= */
+
+page {
+  /* ---------- 中性 · 暖纸（非纯白纯黑） ---------- */
+  --paper: #fffdf5;          /* 卡片纸面 */
+  --paper-2: #fbf8ef;        /* 次级纸面 / 凹陷 */
+  --canvas: #f5f1e6;        /* 页面底色 */
+  --ink: #18221d;            /* 主文字 */
+  --ink-2: #4e5a52;         /* 次级文字 */
+  --muted: #8a938b;          /* 辅助/占位 */
+  --line: #e8e5da;          /* 分隔线 */
+  --line-soft: #f0ede3;      /* 更浅分隔 */
+  --ring: rgba(18, 61, 48, 0.10);  /* 1.5rpx 自信描边色 */
+
+  /* ---------- 品牌 · 生鲜叶绿（主导 60%） ---------- */
+  --green-950: #123a2c;
+  --green-800: #175c45;
+  --green-700: #1e7a57;
+  --green-600: #23916a;
+  --green-500: #2fa06e;
+  --green-200: #bfe6d4;
+  --green-300: #6fbf8f;
+  --green-100: #dcf0e6;
+  --green-50:  #edf7f1;
+
+  /* ---------- 点缀 · 番茄红（语音 / AI 高亮，约 15%） ---------- */
+  --tomato: #e2503e;
+  --tomato-600: #c8412f;
+  --tomato-soft: #fbe4df;
+  --tomato-ink: #9c3324;
+
+  /* ---------- 点缀 · 玉米金（利润 / 目标提醒，约 15%） ---------- */
+  --corn: #f2a93b;
+  --corn-600: #d98f1f;
+  --corn-soft: #fcefd8;
+  --corn-ink: #8a5a08;
+
+  /* ---------- 时段皮肤（由根视图 .skin-* 覆盖；默认午市） ---------- */
+  --skin-accent: var(--green-700);
+  --skin-glow: rgba(47, 160, 110, 0.18);
+  --skin-ambient: rgba(47, 160, 110, 0.10);
+  --skin-label: "午市";
+
+  /* ---------- 圆角 ---------- */
+  --r-xl: 36rpx;
+  --r-lg: 28rpx;
+  --r-md: 20rpx;
+  --r-sm: 14rpx;
+  --r-pill: 999rpx;
+
+  /* ---------- 阴影（克制，靠描边立层次） ---------- */
+  --shadow-sm: 0 4rpx 14rpx rgba(20, 40, 30, 0.06);
+  --shadow:    0 14rpx 34rpx rgba(20, 40, 30, 0.08);
+  --shadow-lg: 0 24rpx 60rpx rgba(20, 40, 30, 0.12);
+
+  /* ---------- 间距（4px 基准 → rpx） ---------- */
+  --s-1: 8rpx;
+  --s-2: 16rpx;
+  --s-3: 24rpx;
+  --s-4: 32rpx;
+  --s-6: 48rpx;
+  --s-8: 64rpx;
+  --s-12: 96rpx;
+  --s-16: 128rpx;
+
+  /* ---------- 字体策略（得意黑 / Space Grotesk / Noto 回退系统字体） ---------- */
+  --font-display: "Smiley Sans", "得意黑", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-num: "Space Grotesk", "DIN Alternate", -apple-system, "PingFang SC", sans-serif;
+  --font-body: "Noto Sans SC", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* 启用网络字体：把字体文件放入 /fonts/ 并取消下方注释即可
+  @font-face { font-family: "Smiley Sans"; src: url("https://cdn.jsdelivr.net/npm/cn-fontsource-smiley-sans-oblique/fonts/ttf/SmileySans-Oblique.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "Space Grotesk"; src: url("https://cdn.jsdelivr.net/npm/@fontsource/space-grotesk/files/space-grotesk-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+  */
+
+  /* ---------- 字号 ---------- */
+  --fs-xs: 20rpx;
+  --fs-sm: 23rpx;
+  --fs-base: 28rpx;
+  --fs-lg: 32rpx;
+  --fs-xl: 38rpx;
+  --fs-2xl: 46rpx;
+  --fs-3xl: 58rpx;
+  --fs-hero: 84rpx;   /* 经营台大数字跳级 */
+
+  /* ---------- 动效 ---------- */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur-fast: 0.2s;
+  --dur-normal: 0.3s;
+  --dur: 0.32s;
+  --dur-slow: 0.6s;
+
+  /* ---------- 层级 ---------- */
+  --z-base: 1;
+  --z-sticky: 50;
+  --z-fab: 80;
+  --z-drawer: 90;
+  --z-toast: 100;
+
+  min-height: 100%;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+view, text, button, input, textarea, picker, canvas, scroll-view, image { box-sizing: border-box; }
+button { margin: 0; padding: 0; line-height: normal; }
+button::after { border: 0; }
+
+/* =============================================================
+ * 布局骨架
+ * ============================================================= */
+.page-shell { min-height: 100%; padding: var(--s-3) var(--s-3) calc(var(--s-8) + env(safe-area-inset-bottom)); }
+.page-pad { padding-left: var(--s-3); padding-right: var(--s-3); }
+.safe-bottom { padding-bottom: calc(var(--s-4) + env(safe-area-inset-bottom)); }
+.divider { height: 1rpx; background: var(--line); margin: var(--s-2) 0; }
+.row { display: flex; align-items: center; }
+.row-between { display: flex; align-items: center; justify-content: space-between; }
+.col { display: flex; flex-direction: column; }
+.grow { flex: 1; }
+
+/* =============================================================
+ * 卡片 / 表面（纸纹质感：极浅渐变 + 描边，拒绝玻璃拟态）
+ * ============================================================= */
+.card {
+  position: relative;
+  margin: var(--s-2) 0;
+  padding: var(--s-3);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0)) ,
+    var(--paper);
+  border: 1.5rpx solid var(--ring);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+}
+.card--pad { padding: var(--s-4); }
+.card--flush { padding: 0; overflow: hidden; }
+.surface { background: var(--paper); border-radius: var(--r-lg); border: 1.5rpx solid var(--ring); }
+.card--tap:active, .surface--tap:active { transform: scale(0.985); }
+
+/* =============================================================
+ * 按钮（≥44px 触控目标，回弹反馈）
+ * ============================================================= */
+.btn-primary, .btn-secondary, .btn-ghost, .btn-tomato {
+  display: flex; align-items: center; justify-content: center; gap: var(--s-1);
+  min-height: 92rpx; padding: 0 var(--s-3);
+  border-radius: 22rpx; font-size: var(--fs-lg); font-weight: 700;
+  transition: transform var(--dur-fast) var(--ease-spring), opacity var(--dur-fast), box-shadow var(--dur-fast);
+}
+.btn-primary { color: #fff; background: var(--green-800); box-shadow: 0 12rpx 24rpx rgba(23, 92, 69, 0.22); }
+.btn-tomato { color: #fff; background: var(--tomato); box-shadow: 0 12rpx 24rpx rgba(226, 80, 62, 0.24); }
+.btn-secondary { color: var(--green-800); background: var(--green-50); }
+.btn-ghost { color: var(--ink-2); background: var(--paper-2); }
+.btn-sm { min-height: 64rpx; padding: 0 var(--s-2); border-radius: 16rpx; font-size: var(--fs-sm); }
+.btn-block { width: 100%; }
+.btn-row { display: flex; gap: var(--s-2); }
+.btn-row .btn-primary, .btn-row .btn-secondary, .btn-row .btn-ghost, .btn-row .btn-tomato { flex: 1; }
+.btn-primary:active, .btn-tomato:active { transform: scale(0.97); opacity: 0.94; }
+.btn-secondary:active, .btn-ghost:active { transform: scale(0.98); opacity: 0.9; }
+.btn[disabled], .btn-primary[disabled], .btn-tomato[disabled] { opacity: 0.5; pointer-events: none; }
+
+/* =============================================================
+ * 标签 / 芯片 / 胶囊
+ * ============================================================= */
+.tag { display: inline-flex; align-items: center; min-height: 44rpx; padding: 0 var(--s-2); border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 700; line-height: 1; }
+.tag-green { color: var(--green-800); background: var(--green-100); }
+.tag-tomato { color: var(--tomato-ink); background: var(--tomato-soft); }
+.tag-corn { color: var(--corn-ink); background: var(--corn-soft); }
+.tag-ink { color: var(--ink-2); background: var(--paper-2); }
+.chip { display: inline-flex; align-items: center; gap: 8rpx; padding: 10rpx 20rpx; border-radius: var(--r-pill); font-size: var(--fs-sm); font-weight: 600; background: var(--paper); border: 1.5rpx solid var(--ring); color: var(--ink-2); }
+.chip--on { background: var(--green-50); color: var(--green-800); border-color: var(--green-200); }
+.pill { display: inline-flex; align-items: center; gap: 8rpx; padding: 8rpx 18rpx; border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 600; }
+.pill-soft { background: var(--skin-ambient); color: var(--skin-accent); }
+
+/* 语义色工具类（向后兼容旧 .green/.red/.yellow） */
+.green, .color-green { color: var(--green-700) !important; }
+.red, .color-red, .color-tomato { color: var(--tomato) !important; }
+.yellow, .color-yellow, .color-corn { color: var(--corn-600) !important; }
+
+/* =============================================================
+ * 页头 Hero（含「呼吸增长环」变体）
+ * ============================================================= */
+.page-hero {
+  position: relative; overflow: hidden;
+  padding: 40rpx 36rpx; color: #fff;
+  background: linear-gradient(135deg, var(--green-950), var(--green-800));
+  border-radius: var(--r-xl);
+  box-shadow: 0 18rpx 42rpx rgba(18, 61, 48, 0.22);
+}
+.page-hero::after {
+  content: ""; position: absolute; right: -70rpx; bottom: -90rpx;
+  width: 260rpx; height: 260rpx;
+  border: 40rpx solid rgba(255, 255, 255, 0.06); border-radius: 50%;
+}
+.page-hero--breathing::before {
+  content: ""; position: absolute; right: 28rpx; top: 28rpx;
+  width: 120rpx; height: 120rpx; border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, var(--skin-glow), transparent 70%);
+  animation: breathe 4.5s var(--ease-out) infinite;
+}
+.eyebrow { display: block; margin-bottom: 8rpx; color: rgba(255,255,255,0.7); font-size: var(--fs-xs); letter-spacing: 3rpx; }
+.hero-title { display: block; font-family: var(--font-display); font-size: var(--fs-2xl); line-height: 1.2; font-weight: 700; }
+.hero-desc { display: block; margin-top: 10rpx; color: rgba(255,255,255,0.78); font-size: var(--fs-sm); }
+
+/* =============================================================
+ * 区块标题
+ * ============================================================= */
+.section-head { display: flex; align-items: center; justify-content: space-between; margin: var(--s-4) 4rpx var(--s-2); }
+.section-title { color: var(--ink); font-size: var(--fs-xl); font-weight: 700; font-family: var(--font-display); }
+.section-caption { color: var(--muted); font-size: var(--fs-sm); }
+.section-link { color: var(--green-700); font-size: var(--fs-sm); font-weight: 700; }
+.section-link:active, .tag:active, .chip:active { opacity: 0.66; }
+
+/* =============================================================
+ * KPI / 数字（等宽数字，金额一眼读清）
+ * ============================================================= */
+.kpi { display: flex; flex-direction: column; gap: 4rpx; }
+.kpi-value { font-family: var(--font-num); font-weight: 700; font-size: var(--fs-2xl); line-height: 1.05; letter-spacing: -0.5rpx; font-variant-numeric: tabular-nums; }
+.kpi-value.is-tomato { color: var(--tomato); }
+.kpi-value.is-corn { color: var(--corn-600); }
+.kpi-value.is-green { color: var(--green-600); }
+.kpi-label { color: var(--muted); font-size: var(--fs-xs); }
+.kpi-sub { color: var(--ink-2); font-size: var(--fs-xs); }
+
+/* =============================================================
+ * 骨架屏（流光，首次进入用，不烦人）
+ * ============================================================= */
+.skeleton { position: relative; overflow: hidden; background: var(--paper-2); border-radius: var(--r-md); }
+.skeleton::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.65) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: shimmer 1.25s infinite;
+}
+.sk-line { height: 22rpx; margin: 14rpx 0; border-radius: 8rpx; }
+.sk-block { height: 200rpx; border-radius: var(--r-lg); }
+.sk-circle { border-radius: 50%; }
+
+/* =============================================================
+ * 浮动语音按钮（FAB） + 涟漪
+ * ============================================================= */
+.fab {
+  position: fixed; z-index: var(--z-fab);
+  right: var(--s-4); bottom: calc(var(--s-8) + env(safe-area-inset-bottom));
+  display: flex; align-items: center; justify-content: center;
+  width: 128rpx; height: 128rpx; border-radius: 50%;
+  background: var(--tomato); color: #fff;
+  box-shadow: 0 18rpx 40rpx rgba(226, 80, 62, 0.4);
+  transition: transform var(--dur-fast) var(--ease-spring);
+}
+.fab:active { transform: scale(0.92); }
+.fab--pulse::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(226, 80, 62, 0.45);
+  animation: fab-pulse 2.4s var(--ease-out) infinite;
+}
+
+/* =============================================================
+ * 空状态
+ * ============================================================= */
+.empty-state { padding: var(--s-12) var(--s-4); text-align: center; color: var(--muted); }
+.empty-icon { display: block; margin: 0 auto var(--s-2); }
+.empty-title { color: var(--ink-2); font-size: var(--fs-lg); font-weight: 700; }
+.empty-desc { margin-top: 8rpx; font-size: var(--fs-sm); line-height: 1.6; }
+
+/* =============================================================
+ * Toast / 轻提示
+ * ============================================================= */
+.toast-mask { position: fixed; inset: 0; z-index: var(--z-toast); display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.toast-box {
+  max-width: 70%; padding: var(--s-2) var(--s-3);
+  background: rgba(24, 34, 29, 0.92); color: #fff;
+  border-radius: var(--r-md); font-size: var(--fs-sm); text-align: center;
+  box-shadow: var(--shadow-lg); animation: pop-in var(--dur) var(--ease-spring);
+}
+
+/* =============================================================
+ * 主动洞察卡（小智今日洞察）
+ * ============================================================= */
+.insight {
+  display: flex; gap: var(--s-2); padding: var(--s-3);
+  background: linear-gradient(135deg, var(--green-50), var(--paper));
+  border: 1.5rpx solid var(--green-200); border-radius: var(--r-lg);
+}
+.insight + .insight { margin-top: var(--s-2); }
+.insight-body { flex: 1; }
+.insight-title { font-size: var(--fs-base); font-weight: 700; color: var(--ink); }
+.insight-desc { margin-top: 6rpx; font-size: var(--fs-sm); color: var(--ink-2); line-height: 1.55; }
+.insight-accept { align-self: center; }
+
+/* =============================================================
+ * 时段皮肤（根视图加 .skin-*；背景光晕平滑过渡）
+ * ============================================================= */
+.skin-morning {
+  --skin-accent: #2f9e8a; --skin-glow: rgba(74, 196, 170, 0.20);
+  --skin-ambient: rgba(74, 196, 170, 0.12); --skin-label: "早市";
+}
+.skin-noon {
+  --skin-accent: var(--green-700); --skin-glow: rgba(47, 160, 110, 0.18);
+  --skin-ambient: rgba(47, 160, 110, 0.10); --skin-label: "午市";
+}
+.skin-evening {
+  --skin-accent: #d98f1f; --skin-glow: rgba(242, 169, 59, 0.22);
+  --skin-ambient: rgba(242, 169, 59, 0.14); --skin-label: "晚市";
+}
+/* 时段氛围层：贴在根视图底部的柔光 */
+.skin-ambient-layer {
+  position: fixed; left: 0; right: 0; top: 0; height: 420rpx; z-index: 0;
+  background: radial-gradient(120% 80% at 50% -10%, var(--skin-glow), transparent 70%);
+  pointer-events: none; transition: background var(--dur-slow) var(--ease-out);
+}
+
+/* =============================================================
+ * 深色模式（明度分层，非反相）
+ * ============================================================= */
+.ui-dark {
+  --paper: #1c211c;
+  --paper-2: #161a16;
+  --canvas: #11140f;
+  --ink: #e9efe9;
+  --ink-2: #aab4ab;
+  --muted: #6f7a71;
+  --line: #2c332c;
+  --line-soft: #232a23;
+  --ring: rgba(220, 240, 230, 0.10);
+  --green-50: #16302420;
+  --green-100: #1d3a2c;
+  --tomato-soft: #3a201b;
+  --corn-soft: #3a2e16;
+  --shadow-sm: 0 4rpx 14rpx rgba(0,0,0,0.4);
+  --shadow: 0 14rpx 34rpx rgba(0,0,0,0.5);
+  --shadow-lg: 0 24rpx 60rpx rgba(0,0,0,0.6);
+}
+.ui-dark .page-hero { background: linear-gradient(135deg, #0e2a20, #14503a); }
+.ui-dark .card, .ui-dark .surface { background: var(--paper); }
+.ui-dark .skeleton { background: var(--paper-2); }
+
+/* =============================================================
+ * 关键帧
+ * ============================================================= */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes breathe { 0%,100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.14); opacity: 1; } }
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+@keyframes fab-pulse { 0% { box-shadow: 0 0 0 0 rgba(226,80,62,0.45); } 70% { box-shadow: 0 0 0 26rpx rgba(226,80,62,0); } 100% { box-shadow: 0 0 0 0 rgba(226,80,62,0); } }
+@keyframes pop-in { 0% { opacity: 0; transform: scale(0.9) translateY(8rpx); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes float-y { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8rpx); } }
+@keyframes count-pulse { 0% { transform: scale(1); } 40% { transform: scale(1.06); } 100% { transform: scale(1); } }
+
+/* 屏内错落入场（子元素加 .stagger 顺序上浮） */
+.stagger { opacity: 0; transform: translateY(16rpx); animation: pop-in var(--dur) var(--ease-expo) forwards; }
+.stagger:nth-child(1) { animation-delay: 0.04s; }
+.stagger:nth-child(2) { animation-delay: 0.10s; }
+.stagger:nth-child(3) { animation-delay: 0.16s; }
+.stagger:nth-child(4) { animation-delay: 0.22s; }
+.stagger:nth-child(5) { animation-delay: 0.28s; }
+.stagger:nth-child(6) { animation-delay: 0.34s; }
+
+/* =============================================================
+ * 动效偏好降级（无障碍）
+ * 注：WXSS 不支持 @media；也不支持 * 通配选择器，改用常见标签枚举。
+ * 使用方式：在 page 节点加 class="reduce-motion" 即可关闭动效。
+ * ============================================================= */
+.reduce-motion view, .reduce-motion view::before, .reduce-motion view::after,
+.reduce-motion text, .reduce-motion text::before, .reduce-motion text::after,
+.reduce-motion button, .reduce-motion image, .reduce-motion input,
+.reduce-motion textarea, .reduce-motion scroll-view, .reduce-motion swiper,
+.reduce-motion canvas, .reduce-motion cover-view, .reduce-motion cover-image {
+  animation: none !important; transition: none !important;
+}
+
+/* =============================================================
+ * 向后兼容别名层（现有 11 页 / 4 组件仍引用旧名，勿删）
+ * 新页面请直接用 v2.2 新令牌（--corn/--tomato/--r-* 等）。
+ * ============================================================= */
+page {
+  --amber: var(--corn);
+  --amber-soft: var(--corn-soft);
+  --red: var(--tomato);
+  --red-soft: var(--tomato-soft);
+  --blue: #39779c;
+  --radius-xl: var(--r-xl);
+  --radius-lg: var(--r-lg);
+  --radius-md: var(--r-md);
+  --radius-sm: var(--r-sm);
+}
+.tag-amber { color: var(--corn-ink); background: var(--corn-soft); }
+.tag-red { color: var(--tomato-ink); background: var(--tomato-soft); }

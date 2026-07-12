@@ -1,0 +1,8 @@
+{
+  "navigationBarBackgroundColor": "#123D30",
+  "navigationBarTextStyle": "white",
+  "navigationBarTitleText": "拍照识货",
+  "usingComponents": {
+    "mascot": "/components/mascot/mascot"
+  }
+}

@@ -1,0 +1,86 @@
+<!-- 数字孪生 · 经营、库存、风险的统一镜像 -->
+<view class="page-shell dashboard-page {{skinClass}}">
+  <view class="page-hero twin-hero page-hero--breathing" wx:if="{{dashboard}}">
+    <text class="eyebrow">DIGITAL TWIN · 经营镜像</text>
+    <view class="twin-head">
+      <view class="twin-head-main"><text class="hero-title">摊位实时状态</text><text class="hero-desc">把经营流水变成能看懂的趋势与风险。</text></view>
+      <view class="twin-aside">
+        <view class="live-chip"><text></text>数据已同步</view>
+        <view class="hero-ring" style="background:conic-gradient(var(--green-600) {{healthScore}}%, var(--green-100) 0)">
+          <text class="hero-ring-score">{{healthScore}}</text>
+          <text class="hero-ring-unit">健康度</text>
+        </view>
+      </view>
+    </view>
+    <view class="hero-kpis">
+      <view><text class="hero-kpi-label">今日收入</text><text class="hero-kpi-value">¥{{dashboard.today_revenue}}</text></view>
+      <view><text class="hero-kpi-label">今日毛利</text><text class="hero-kpi-value">¥{{dashboard.today_profit}}</text></view>
+      <view><text class="hero-kpi-label">综合风险</text><text class="hero-kpi-value">{{dashboard.risk_score}}<text>分</text></text></view>
+    </view>
+  </view>
+
+  <view class="mirror-tabs">
+    <view wx:for="{{tabs}}" wx:key="key" class="mirror-tab {{activeTab === item.key ? 'active' : ''}}" data-key="{{item.key}}" bindtap="onTabChange"><text class="tab-mark">{{item.icon}}</text><text>{{item.label}}镜像</text></view>
+  </view>
+
+  <view wx:if="{{activeTab === 'inventory'}}">
+    <view class="section-head"><text class="section-title">品类库存分布</text><text class="section-caption">当前库存结构</text></view>
+    <view class="chart-card"><stock-chart items="{{inventoryChartItems}}" compact="{{true}}" /></view>
+    <view class="category-card" wx:if="{{inventoryMirror && inventoryMirror.by_category}}">
+      <view wx:for="{{inventoryMirror.by_category}}" wx:key="category" class="category-row">
+        <view class="category-head"><text>{{item.category}}</text><text>{{item.total_qty}}斤</text></view>
+        <view class="bar-track"><view class="bar-fill" style="width: {{item.total_qty / 200 * 100 > 100 ? 100 : item.total_qty / 200 * 100}}%"></view></view>
+      </view>
+    </view>
+
+    <view class="heatmap-card" wx:if="{{heatmapRows && heatmapRows.length}}">
+      <view class="section-head"><text class="section-title">库存生命周期热力图</text><text class="section-caption">按剩余时间分布</text></view>
+      <view class="heatmap-grid">
+        <view class="heatmap-corner"></view>
+        <view wx:for="{{heatmapBuckets}}" wx:key="*this" class="heatmap-col-head">{{item}}</view>
+      </view>
+      <view wx:for="{{heatmapRows}}" wx:key="product_name" class="heatmap-grid heatmap-row">
+        <view class="heatmap-row-name">{{item.product_name}}</view>
+        <view wx:for="{{item.cells}}" wx:for-item="cell" wx:key="index" class="heatmap-cell" style="{{cell.style}}">
+          <text wx:if="{{cell.remaining_qty !== null}}">{{cell.remaining_qty}}</text>
+        </view>
+      </view>
+      <view class="heatmap-legend">
+        <text class="hl red">临期</text>
+        <text class="hl yellow">关注</text>
+        <text class="hl green">安全</text>
+        <text class="hl gray">无库存</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{activeTab === 'business'}}">
+    <view class="segmented">
+      <view class="seg {{bizRange === '7d' ? 'active' : ''}}" data-range="7d" bindtap="onBizRangeChange">近7日</view>
+      <view class="seg {{bizRange === '30d' ? 'active' : ''}}" data-range="30d" bindtap="onBizRangeChange">近30日</view>
+    </view>
+    <view class="section-head"><text class="section-title">{{bizRange === '30d' ? '近30日经营走势' : '近7日经营走势'}}</text><text class="section-caption">收入 · 毛利 · 客单价</text></view>
+    <view class="chart-card"><view class="chart-legend"><text class="revenue">收入</text><text class="profit">毛利</text><text class="aov">客单价</text></view><canvas type="2d" id="chartCanvas" class="business-chart"></canvas></view>
+    <view class="section-head"><text class="section-title">每日明细</text></view>
+    <view class="day-list" wx:if="{{bizSales && bizSales.length}}">
+      <view wx:for="{{bizSales}}" wx:key="date" wx:for-item="day" class="day-row"><text class="day-date">{{day.date}}</text><view class="day-money"><text>收 ¥{{day.revenue}}</text><text>支 ¥{{day.cost}}</text><text class="{{day.profit >= 0 ? 'green' : 'red'}}">利 ¥{{day.profit}}</text><text class="aov">客 ¥{{day.customer_price}}</text></view></view>
+    </view>
+  </view>
+
+  <view wx:if="{{activeTab === 'risk'}}">
+    <view class="section-head"><text class="section-title">风险雷达</text><text class="section-caption">越靠外风险越高</text></view>
+    <view class="chart-card"><risk-gauge risks="{{riskGaugeData}}" /></view>
+    <view class="risk-card" wx:if="{{riskMirror}}">
+      <view class="risk-row"><view class="risk-name"><text class="risk-mark amber">库</text><text>库存风险</text></view><view class="bar-track"><view class="bar-fill amber" style="width:{{riskMirror.inventory_risk}}%"></view></view><text class="risk-score">{{riskMirror.inventory_risk}}</text></view>
+      <view class="risk-row"><view class="risk-name"><text class="risk-mark blue">天</text><text>天气风险</text></view><view class="bar-track"><view class="bar-fill blue" style="width:{{riskMirror.weather_risk}}%"></view></view><text class="risk-score">{{riskMirror.weather_risk}}</text></view>
+      <view class="risk-row"><view class="risk-name"><text class="risk-mark red-bg">损</text><text>损耗风险</text></view><view class="bar-track"><view class="bar-fill red-fill" style="width:{{riskMirror.waste_risk}}%"></view></view><text class="risk-score">{{riskMirror.waste_risk}}</text></view>
+      <view class="risk-row"><view class="risk-name"><text class="risk-mark green">客</text><text>客流风险</text></view><view class="bar-track"><view class="bar-fill green" style="width:{{riskMirror.customer_flow_risk}}%"></view></view><text class="risk-score">{{riskMirror.customer_flow_risk}}</text></view>
+      <view class="risk-row"><view class="risk-name"><text class="risk-mark corn">资</text><text>资本风险</text></view><view class="bar-track"><view class="bar-fill corn" style="width:{{riskMirror.capital_risk}}%"></view></view><text class="risk-score">{{riskMirror.capital_risk}}</text></view>
+      <view class="risk-row"><view class="risk-name"><text class="risk-mark violet">集</text><text>品类集中</text></view><view class="bar-track"><view class="bar-fill violet" style="width:{{riskMirror.category_concentration_risk}}%"></view></view><text class="risk-score">{{riskMirror.category_concentration_risk}}</text></view>
+    </view>
+  </view>
+
+  <view class="loading-state" wx:if="{{loading}}"><view class="loading-spinner"></view><text>正在同步经营镜像</text></view>
+</view>
+
+

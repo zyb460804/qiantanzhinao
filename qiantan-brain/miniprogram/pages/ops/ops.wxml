@@ -1,0 +1,121 @@
+<!-- 经营管理 — 报损·临期·客户·导出 -->
+<view class="page-shell ops-page {{skin}}">
+  <view class="page-hero"><text class="eyebrow">OPERATIONS · 日常经营</text><text class="hero-title">经营管理</text></view>
+
+  <view class="tab-row">
+    <view wx:for="{{[{k:'waste',l:'报损'},{k:'clearance',l:'临期清货'},{k:'customers',l:'客户赊账'},{k:'export',l:'导出'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
+  </view>
+
+  <!-- ====== 报损 ====== -->
+  <block wx:if="{{tab==='waste'}}">
+    <view class="section-head"><text class="section-title">记录报损</text><text class="link" bindtap="openWasteForm">+ 记录</text></view>
+    <view class="cat-list" wx:if="{{wasteRecords.length}}">
+      <view wx:for="{{wasteRecords}}" wx:key="record_id" class="cat-item">
+        <view class="cat-main"><text class="cat-name">商品{{item.product_id}}</text><text class="cat-meta">{{item.notes}}</text></view>
+        <text class="cat-amount warn">-{{item.quantity}}{{item.unit}}</text>
+      </view>
+    </view>
+    <view wx:else class="empty-state"><text>暂无报损记录</text></view>
+  </block>
+
+  <!-- 报损表单弹窗 -->
+  <view wx:if="{{showWasteForm}}" class="picker-mask" bindtap="closeWasteForm">
+    <view class="picker-sheet" catchtap="">
+      <text class="picker-title">记录报损</text>
+      <text class="form-label" wx:if="{{wasteForm.product_name}}">商品: {{wasteForm.product_name}}</text>
+      <view wx:else class="prod-pick-list"><view wx:for="{{products}}" wx:key="product_id" class="prod-pick-item" data-index="{{index}}" bindtap="pickWasteProduct">{{item.sku_name || item.product_name}} · 余{{item.current_qty}}{{item.unit}}</view></view>
+      <input class="form-input" type="digit" placeholder="报损数量" value="{{wasteForm.quantity}}" data-field="quantity" bindinput="onWasteField"/>
+      <text class="form-label">报损原因</text>
+      <view class="reason-grid">
+        <view wx:for="{{wasteReasons}}" wx:key="*this" class="reason-chip {{wasteForm.reason === item ? 'active' : ''}}" data-reason="{{item}}" bindtap="pickWasteReason">{{item}}</view>
+      </view>
+      <input class="form-input" placeholder="备注" value="{{wasteForm.notes}}" data-field="notes" bindinput="onWasteField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeWasteForm">取消</button><button class="btn-primary" bindtap="submitWaste">确认报损</button></view>
+    </view>
+  </view>
+
+  <!-- ====== 临期清货 ====== -->
+  <block wx:if="{{tab==='clearance'}}">
+    <view class="section-head"><text class="section-title">临期清货</text></view>
+    <view class="hours-row">
+      <view wx:for="{{[{h:8,l:'8h'},{h:24,l:'24h'},{h:48,l:'48h'},{h:72,l:'72h'}]}}" wx:key="h" class="hours-chip {{clearanceHours===item.h?'active':''}}" data-h="{{item.h}}" bindtap="changeClearanceHours">{{item.l}}</view>
+    </view>
+    <view wx:if="{{!clearanceItems.length}}" class="empty-state"><text>{{clearanceHours}}小时内无临期商品 ✓</text></view>
+    <view wx:else class="clearance-list">
+      <view wx:for="{{clearanceItems}}" wx:key="batch_id" class="clear-card">
+        <view class="clear-head">
+          <text class="clear-name">{{item.product_name}}</text>
+          <text class="risk-tag {{item.risk}}">{{item.risk==='high'?'高风险':item.risk==='medium'?'中风险':'低风险'}}</text>
+        </view>
+        <view class="clear-stats">
+          <text>剩余 {{item.remaining_qty}} · {{item.hours_left}}h</text>
+          <text wx:if="{{item.current_price}}">现价 ¥{{item.current_price}}</text>
+        </view>
+        <view wx:if="{{item.suggested_price}}" class="clear-suggest">
+          <text>建议降价至 ¥{{item.suggested_price.toFixed(2)}}</text>
+          <text class="act-btn" data-index="{{index}}" bindtap="quickDiscount">立即改价</text>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <!-- ====== 客户赊账 ====== -->
+  <block wx:if="{{tab==='customers'}}">
+    <view class="section-head"><text class="section-title">赊账客户</text></view>
+    <view wx:if="{{!customers.length}}" class="empty-state"><text>暂无赊账客户</text></view>
+    <view wx:else class="cat-list">
+      <view wx:for="{{customers}}" wx:key="customer_name" class="cat-item">
+        <view class="cat-main">
+          <text class="cat-name">{{item.customer_name}}</text>
+          <text class="cat-meta" wx:if="{{item.is_overdue}}">逾期{{item.overdue_days}}天!</text>
+          <text class="cat-meta" wx:elif="{{item.last_transaction}}">最近: {{item.last_transaction}}</text>
+        </view>
+        <text class="cat-balance {{item.balance > 0 ? 'warn' : ''}}">{{item.balance > 0 ? '欠¥'+item.balance.toFixed(0) : '已结清'}}</text>
+        <view class="cat-actions">
+          <text class="act-btn" data-name="{{item.customer_name}}" bindtap="viewCustomerLedger">明细</text>
+          <text class="act-btn" wx:if="{{item.balance > 0}}" data-name="{{item.customer_name}}" bindtap="openRepay">回款</text>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <!-- 客户明细弹窗 -->
+  <view wx:if="{{showCustomerLedger && customerLedger}}" class="picker-mask" bindtap="closeLedger">
+    <view class="picker-sheet statement-sheet" catchtap="">
+      <text class="picker-title">{{ledgerName}} · 赊账明细</text>
+      <view class="statement-summary">
+        <view class="stmt-stat"><text class="stmt-num">¥{{customerLedger.total_charge.toFixed(0)}}</text><text class="stmt-label">赊账总额</text></view>
+        <view class="stmt-stat"><text class="stmt-num">¥{{customerLedger.total_repay.toFixed(0)}}</text><text class="stmt-label">已回款</text></view>
+        <view class="stmt-stat"><text class="stmt-num {{customerLedger.balance > 0 ? 'warn' : ''}}">¥{{customerLedger.balance.toFixed(0)}}</text><text class="stmt-label">当前欠款</text></view>
+      </view>
+      <view class="statement-list"><view wx:for="{{customerLedger.items}}" wx:key="id" class="stmt-item">
+        <view class="stmt-left"><text class="stmt-dir">{{item.direction==='charge'?'赊账':'回款'}}</text><text class="stmt-note">{{item.note||''}}</text></view>
+        <text class="stmt-amount {{item.direction==='repay'?'ok':''}}">{{item.direction==='repay'?'-':'+'}}¥{{item.amount.toFixed(2)}}</text>
+      </view></view>
+      <button class="picker-close" bindtap="closeLedger">关闭</button>
+    </view>
+  </view>
+
+  <!-- 回款弹窗 -->
+  <view wx:if="{{showRepayForm}}" class="picker-mask" bindtap="closeRepay">
+    <view class="picker-sheet" catchtap=""><text class="picker-title">{{repayForm.customer_name}} · 回款</text>
+      <input class="form-input" type="digit" placeholder="金额" value="{{repayForm.amount}}" data-field="amount" bindinput="onRepayField"/>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeRepay">取消</button><button class="btn-primary" bindtap="submitRepay">确认回款</button></view>
+    </view>
+  </view>
+
+  <!-- ====== 导出 ====== -->
+  <block wx:if="{{tab==='export'}}">
+    <view class="section-head"><text class="section-title">数据导出</text></view>
+    <view class="export-card">
+      <text class="form-label">日期范围</text>
+      <view class="date-row"><input class="form-input flex-1" type="text" placeholder="开始 YYYY-MM-DD" value="{{exportStart}}" data-field="exportStart" bindinput="onExportDate"/><text class="date-sep">—</text><input class="form-input flex-1" type="text" placeholder="结束 YYYY-MM-DD" value="{{exportEnd}}" data-field="exportEnd" bindinput="onExportDate"/></view>
+      <view class="export-btns">
+        <button class="btn-secondary" data-type="sales" bindtap="doExport">导出销售</button>
+        <button class="btn-secondary" data-type="inventory" bindtap="doExport">导出库存</button>
+        <button class="btn-secondary" data-type="waste" bindtap="doExport">导出报损</button>
+        <button class="btn-secondary" data-type="accounts" bindtap="doExport">导出往来账</button>
+      </view>
+    </view>
+  </block>
+</view>

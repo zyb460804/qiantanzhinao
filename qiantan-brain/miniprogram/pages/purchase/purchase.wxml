@@ -1,0 +1,263 @@
+<!-- 采购清单 — AI建议→编辑→验收→入库→付款 -->
+<wxs src="/utils/format.wxs" module="fmt" />
+<view class="page-shell purchase-page {{skinClass}}">
+
+  <!-- Hero -->
+  <view class="page-hero purchase-hero">
+    <text class="eyebrow">PROCURE · 采购验收</text>
+    <text class="hero-title">采购清单</text>
+    <text class="hero-desc">下单→到货验收→批次入库→供应商付款</text>
+  </view>
+
+  <!-- Loading -->
+  <view wx:if="{{loading}}" class="purchase-skeleton">
+    <view class="skel-bar"><view class="skel-line title"></view><view class="skel-line medium"></view></view>
+    <view wx:for="{{[1,2,3]}}" wx:key="*this" class="skel-card"><view class="skel-line title"></view><view class="skel-line medium"></view><view class="skel-line"></view><view class="skel-line short"></view></view>
+  </view>
+
+  <!-- Empty -->
+  <view wx:elif="{{!listData}}" class="empty-state surface empty-purchase">
+    <mascot size="lg" mood="idle"></mascot>
+    <text class="empty-title">今日还没有采购清单</text>
+    <text class="empty-desc">从AI建议生成采购清单，快速开始今日采购</text>
+    <button class="btn-primary empty-action" bindtap="generateFromAdvice" loading="{{submitting}}">从AI建议生成</button>
+  </view>
+
+  <!-- List view -->
+  <block wx:else>
+    <!-- Status bar -->
+    <view class="status-bar">
+      <view class="status-block">
+        <text class="status-label">清单状态</text>
+        <text class="tag {{listData.list_status_tag}}">{{listData.list_status_text}}</text>
+      </view>
+      <view class="status-divider"></view>
+      <view class="status-block">
+        <text class="status-label">预计总额</text>
+        <text class="status-amount">¥{{fmt.fixed(listData.total_actual_cost, 2)}}</text>
+      </view>
+      <view class="status-block" wx:if="{{listData.payment_status}}">
+        <text class="status-label">付款</text>
+        <text class="status-amount-sm {{listData.payment_status === 'paid' ? 'ok' : 'warn'}}">{{listData.payment_status === 'paid' ? '已付清' : listData.payment_status === 'partial' ? '部分付' : '未付'}}</text>
+      </view>
+    </view>
+
+    <!-- Section -->
+    <view class="section-head">
+      <text class="section-title">采购项</text>
+      <text class="section-caption">{{listData.item_count}} 项 · {{listData.purchased_count}} 已入库</text>
+      <view wx:if="{{listData.status === 'confirmed' || listData.status === 'accepted'}}" class="section-action" bindtap="enterAcceptance">到货验收</view>
+    </view>
+
+    <view wx:if="{{listData.items.length === 0}}" class="empty-state surface">
+      <text class="empty-icon">∅</text><text>清单为空</text>
+      <button class="btn-secondary empty-action" bindtap="generateFromAdvice">重新生成</button>
+    </view>
+
+    <!-- Items -->
+    <view wx:else class="purchase-list">
+      <view wx:for="{{listData.items}}" wx:key="item_id" class="purchase-card {{item.status_class}}">
+
+        <!-- 普通模式：商品信息 + 编辑 -->
+        <block wx:if="{{!acceptanceMode}}">
+          <view class="card-head">
+            <view class="card-title-wrap">
+              <text class="card-name">{{item.product_name}}</text>
+              <text class="tag {{item.status_tag}}">{{item.status_text}}</text>
+              <text wx:if="{{item.supplier_name}}" class="supplier-badge">{{item.supplier_name}}</text>
+            </view>
+            <view wx:if="{{item.editable}}" class="card-actions">
+              <text class="action-link" data-id="{{item.item_id}}" bindtap="pickSupplier">{{item.supplier_name ? '换' : '选供应商'}}</text>
+              <text class="cancel-btn" data-id="{{item.item_id}}" bindtap="cancelItem">取消</text>
+            </view>
+            <view wx:elif="{{item.status === 'purchased'}}" class="card-actions">
+              <text class="action-link return" data-id="{{item.item_id}}" bindtap="openReturn">退货</text>
+            </view>
+          </view>
+
+          <view class="qty-row" wx:if="{{item.editable}}">
+            <view class="qty-field"><text class="qty-label">建议</text><text class="qty-rec">{{fmt.fixed(item.recommended_qty, 1)}}</text><text class="qty-unit">{{item.unit}}</text></view>
+            <view class="qty-sep">→</view>
+            <view class="qty-field">
+              <text class="qty-label">实际</text>
+              <input wx:if="{{editingItemId === item.item_id}}" class="qty-input" type="digit" value="{{item.actual_qty}}" data-id="{{item.item_id}}" data-field="qty" focus="{{true}}" bindinput="editQty" bindblur="saveItem" />
+              <view wx:else class="qty-display" data-id="{{item.item_id}}" bindtap="startEdit"><text class="qty-actual">{{fmt.fixed(item.actual_qty, 1)}}</text><text class="qty-unit">{{item.unit}}</text></view>
+            </view>
+            <view class="deviation {{item.deviation_tone}}" wx:if="{{item.deviation_percent !== 0}}">{{item.deviation_percent > 0 ? '+' : ''}}{{item.deviation_percent}}%</view>
+          </view>
+
+          <!-- 已验收摘要 -->
+          <view wx:if="{{item.has_acceptance && item.status !== 'cancelled'}}" class="acceptance-summary">
+            <text class="acc-sum-label">验收:</text>
+            <text>到货{{fmt.fixed(item.arrival_qty,1)}}{{item.unit}}</text>
+            <text>合格{{fmt.fixed(item.accepted_qty,1)}}{{item.unit}}</text>
+            <text wx:if="{{item.package_count}}">{{item.package_count}}件</text>
+            <text wx:if="{{item.shortage_qty > 0}}" class="warn">缺{{fmt.fixed(item.shortage_qty,1)}}</text>
+            <text wx:if="{{item.damaged_qty > 0}}" class="warn">损{{fmt.fixed(item.damaged_qty,1)}}</text>
+          </view>
+
+          <view class="cost-row" wx:if="{{item.editable}}">
+            <view class="cost-field"><text class="cost-label">单价</text><input class="cost-input" type="digit" value="{{item.actual_unit_cost}}" data-id="{{item.item_id}}" data-field="cost" bindinput="editCost" bindblur="saveItem" /></view>
+            <view class="cost-field"><text class="cost-label">小计</text><text class="cost-subtotal">¥{{fmt.fixed(item.actual_subtotal, 2)}}</text></view>
+          </view>
+          <view class="cost-row" wx:elif="{{item.status === 'purchased'}}">
+            <view class="cost-field"><text class="cost-label">入库</text><text class="cost-subtotal">{{fmt.fixed(item.accepted_qty || item.actual_qty, 1)}}{{item.unit}} · ¥{{fmt.fixed(item.actual_unit_cost, 2)}}/{{item.unit}}</text></view>
+          </view>
+
+          <view class="reason" wx:if="{{item.reason}}"><text class="reason-tag">AI建议</text><text class="reason-text">{{item.reason}}</text></view>
+        </block>
+
+        <!-- 验收模式 -->
+        <block wx:else>
+          <view class="card-head">
+            <text class="card-name">{{item.product_name}}</text>
+            <text class="tag tag-blue" wx:if="{{item.status !== 'cancelled'}}">验收中</text>
+            <text class="tag tag-muted" wx:else>已取消</text>
+          </view>
+          <view wx:if="{{item.status !== 'cancelled'}}">
+            <!-- 包装与称重 -->
+            <view class="acc-row">
+              <view class="acc-field sm"><text class="acc-label">件数</text><input class="acc-input sm" type="number" value="{{acceptanceItems[item.item_id].package_count || ''}}" data-id="{{item.item_id}}" data-field="package_count" bindinput="editAcceptanceField" placeholder="0"/></view>
+              <view class="acc-field"><text class="acc-label">毛重</text><input class="acc-input" type="digit" value="{{acceptanceItems[item.item_id].gross_weight || ''}}" data-id="{{item.item_id}}" data-field="gross_weight" bindinput="editAcceptanceField" placeholder="0"/></view>
+              <view class="acc-field"><text class="acc-label">皮重</text><input class="acc-input" type="digit" value="{{acceptanceItems[item.item_id].tare_weight || ''}}" data-id="{{item.item_id}}" data-field="tare_weight" bindinput="editAcceptanceField" placeholder="0"/></view>
+              <view class="acc-field"><text class="acc-label">净重</text><input class="acc-input hl" type="digit" value="{{acceptanceItems[item.item_id].net_weight || ''}}" data-id="{{item.item_id}}" data-field="net_weight" bindinput="editAcceptanceField" placeholder="0"/></view>
+            </view>
+            <!-- 到货差异 -->
+            <view class="acc-row">
+              <view class="acc-field"><text class="acc-label">到货</text><input class="acc-input hl" type="digit" value="{{acceptanceItems[item.item_id].arrival_qty || ''}}" data-id="{{item.item_id}}" data-field="arrival_qty" bindinput="editAcceptanceField" placeholder="0"/></view>
+              <view class="acc-field"><text class="acc-label">合格入库</text><input class="acc-input hl ok" type="digit" value="{{acceptanceItems[item.item_id].accepted_qty || ''}}" data-id="{{item.item_id}}" data-field="accepted_qty" bindinput="editAcceptanceField" placeholder="0"/></view>
+              <view class="acc-field"><text class="acc-label">缺斤</text><input class="acc-input" type="digit" value="{{acceptanceItems[item.item_id].shortage_qty || ''}}" data-id="{{item.item_id}}" data-field="shortage_qty" bindinput="editAcceptanceField" placeholder="0"/></view>
+            </view>
+            <view class="acc-row">
+              <view class="acc-field"><text class="acc-label">破损</text><input class="acc-input" type="digit" value="{{acceptanceItems[item.item_id].damaged_qty || ''}}" data-id="{{item.item_id}}" data-field="damaged_qty" bindinput="editAcceptanceField" placeholder="0"/></view>
+              <view class="acc-field"><text class="acc-label">拒收</text><input class="acc-input" type="digit" value="{{acceptanceItems[item.item_id].rejected_qty || ''}}" data-id="{{item.item_id}}" data-field="rejected_qty" bindinput="editAcceptanceField" placeholder="0"/></view>
+              <view class="acc-field"><text class="acc-label">退货</text><input class="acc-input" type="digit" value="{{acceptanceItems[item.item_id].returned_qty || ''}}" data-id="{{item.item_id}}" data-field="returned_qty" bindinput="editAcceptanceField" placeholder="0"/></view>
+            </view>
+            <!-- 单价与质量 -->
+            <view class="acc-row">
+              <view class="acc-field"><text class="acc-label">实际单价</text><input class="acc-input" type="digit" value="{{acceptanceItems[item.item_id].actual_unit_cost || ''}}" data-id="{{item.item_id}}" data-field="actual_unit_cost" bindinput="editAcceptanceField" placeholder="0"/></view>
+              <view class="acc-toggle" data-id="{{item.item_id}}" bindtap="toggleQuality">
+                <text>质量合格</text>
+                <view class="toggle {{acceptanceItems[item.item_id].quality_ok !== false ? 'on' : 'off'}}"><view class="toggle-knob"></view></view>
+              </view>
+            </view>
+            <view class="acc-row"><input class="acc-input full" value="{{acceptanceItems[item.item_id].acceptance_notes || ''}}" data-id="{{item.item_id}}" data-field="acceptance_notes" bindinput="editAcceptanceStr" placeholder="验收备注（选填）" /></view>
+          </view>
+        </block>
+      </view>
+    </view>
+
+    <!-- 验收按钮 -->
+    <view wx:if="{{acceptanceMode}}" class="acceptance-bar">
+      <button class="btn-secondary" bindtap="exitAcceptance">取消</button>
+      <button class="btn-primary" bindtap="submitAcceptance" loading="{{submitting}}">验收确认并入库</button>
+    </view>
+  </block>
+
+  <!-- Bottom bar (非验收模式) -->
+  <view wx:if="{{listData && !confirmed && !acceptanceMode && listData.items.length > 0}}" class="bottom-bar safe-bottom">
+    <view class="bottom-summary">
+      <text class="bottom-label">共 {{listData.item_count}} 项 · 总额</text>
+      <text class="bottom-amount">¥{{fmt.fixed(listData.total_actual_cost, 2)}}</text>
+    </view>
+    <button class="btn-secondary" wx:if="{{listData.purchased_count > 0}}" bindtap="openPayment">付供应商款</button>
+    <button class="btn-primary bottom-btn" bindtap="confirmPurchase" loading="{{submitting}}">{{listData.status === 'accepted' ? '确认入库' : '确认采购入库'}}</button>
+  </view>
+
+  <!-- Confirm result -->
+  <view wx:if="{{confirmed && confirmResult}}" class="result-mask" bindtap="goHome">
+    <view class="result-card safe-bottom" catchtap="">
+      <mascot size="lg" mood="cheer" class="result-mascot"></mascot>
+      <text class="result-title">入库完成</text>
+      <text class="result-subtitle">已入库 {{confirmResult.confirmed_count}} 项</text>
+      <view class="result-summary">
+        <view class="result-stat"><text class="result-stat-num">{{confirmResult.confirmed_count}}</text><text class="result-stat-label">已入库</text></view>
+        <view class="result-stat-divider"></view>
+        <view class="result-stat"><text class="result-stat-num">¥{{fmt.fixed(confirmResult.total_actual_cost, 2)}}</text><text class="result-stat-label">总成本</text></view>
+      </view>
+      <view class="result-list" wx:if="{{confirmResult.records.length > 0}}">
+        <view wx:for="{{confirmResult.records}}" wx:key="item_id" class="result-item"><text class="result-item-name">{{item.product_name}}</text><text class="result-item-qty">{{fmt.fixed(item.qty, 1)}}</text></view>
+      </view>
+      <view class="result-actions">
+        <button class="btn-secondary" bindtap="goHome">返回首页</button>
+        <button class="btn-secondary" bindtap="openPayment">付供应商款</button>
+        <button class="btn-primary" bindtap="viewInventory">查看库存</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 供应商选择弹窗 -->
+  <view wx:if="{{showSupplierPicker}}" class="picker-mask" bindtap="closeSupplierPicker">
+    <view class="picker-sheet" catchtap="">
+      <text class="picker-title">选择供应商</text>
+      <view wx:if="{{suppliers.length}}" class="picker-list">
+        <view wx:for="{{suppliers}}" wx:key="supplier_id" class="picker-item" data-id="{{item.supplier_id}}" data-name="{{item.supplier_name}}" bindtap="selectSupplier">
+          <text class="picker-name">{{item.supplier_name}}</text>
+          <text class="picker-balance {{item.balance > 0 ? 'warn' : ''}}">{{item.balance > 0 ? '欠 ¥' + fmt.fixed(item.balance, 0) : '已结清'}}</text>
+        </view>
+      </view>
+      <view wx:else class="picker-empty">暂无供应商档案，请先在"我的"→供应商管理中添加</view>
+      <button class="picker-close" bindtap="closeSupplierPicker">关闭</button>
+    </view>
+  </view>
+
+  <!-- 供应商付款弹窗 -->
+  <view wx:if="{{showPayment}}" class="picker-mask" bindtap="closePayment">
+    <view class="picker-sheet" catchtap="">
+      <text class="picker-title">付供应商款</text>
+      <view class="picker-list">
+        <view wx:for="{{suppliers}}" wx:key="supplier_id" class="picker-item {{paymentSupplierId === item.supplier_id ? 'active' : ''}}" data-id="{{item.supplier_id}}" data-name="{{item.supplier_name}}" bindtap="pickPaymentSupplier">
+          <text class="picker-name">{{item.supplier_name}}</text>
+          <text class="picker-balance {{item.balance > 0 ? 'warn' : ''}}">{{item.balance > 0 ? '欠 ¥' + fmt.fixed(item.balance, 0) : '已结清'}}</text>
+        </view>
+      </view>
+      <view wx:if="{{paymentSupplierId}}" class="payment-form">
+        <view class="pay-field"><text class="pay-label">金额</text><input class="pay-input" type="digit" value="{{paymentAmount}}" bindinput="editPaymentAmount" placeholder="0.00"/></view>
+        <view class="pay-methods">
+          <view wx:for="{{[{key:'cash', label:'现金'}, {key:'wechat', label:'微信'}, {key:'bank_transfer', label:'转账'}]}}" wx:key="key" class="pay-chip {{paymentMethod === item.key ? 'active' : ''}}" data-method="{{item.key}}" bindtap="selectPaymentMethod">{{item.label}}</view>
+        </view>
+        <input class="pay-input note" value="{{paymentNote}}" bindinput="editPaymentNote" placeholder="备注（选填）"/>
+      </view>
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closePayment">取消</button>
+        <button class="btn-primary" bindtap="submitPayment" loading="{{paymentSubmitting}}" disabled="{{!paymentSupplierId}}">确认付款 ¥{{paymentAmount}}</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 对账单弹窗 -->
+  <view wx:if="{{showStatement && statementData}}" class="picker-mask" bindtap="closeStatement">
+    <view class="picker-sheet statement-sheet" catchtap="">
+      <text class="picker-title">供应商对账单</text>
+      <text class="statement-supplier">{{statementData.supplier_name || '供应商'}}</text>
+      <view class="statement-summary">
+        <view class="stmt-stat"><text class="stmt-num">¥{{fmt.fixed(statementData.total_purchases, 0)}}</text><text class="stmt-label">采购总额</text></view>
+        <view class="stmt-stat"><text class="stmt-num">¥{{fmt.fixed(statementData.total_payments, 0)}}</text><text class="stmt-label">已付款</text></view>
+        <view class="stmt-stat"><text class="stmt-num {{statementData.current_balance > 0 ? 'warn' : ''}}">¥{{fmt.fixed(statementData.current_balance, 0)}}</text><text class="stmt-label">当前欠款</text></view>
+      </view>
+      <view class="statement-list" wx:if="{{statementData.items.length}}">
+        <view wx:for="{{statementData.items}}" wx:key="id" class="stmt-item">
+          <view class="stmt-left"><text class="stmt-dir">{{item.direction === 'purchase' ? '采购' : item.direction === 'payment' ? '付款' : '退货'}}</text><text class="stmt-note">{{item.note || ''}}</text></view>
+          <text class="stmt-amount {{item.direction === 'payment' ? 'ok' : ''}}">{{item.direction === 'payment' ? '-' : '+'}}¥{{fmt.fixed(item.amount, 2)}}</text>
+        </view>
+      </view>
+      <button class="picker-close" bindtap="closeStatement">关闭</button>
+    </view>
+  </view>
+
+  <!-- 退货弹窗 -->
+  <view wx:if="{{showReturn}}" class="picker-mask" bindtap="closeReturn">
+    <view class="picker-sheet" catchtap="">
+      <text class="picker-title">退货给供应商</text>
+      <view class="payment-form">
+        <view class="pay-field"><text class="pay-label">数量</text><input class="pay-input" type="digit" value="{{returnQty}}" bindinput="editReturnQty" placeholder="0"/></view>
+        <view class="pay-field"><text class="pay-label">原因</text><input class="pay-input note" value="{{returnReason}}" bindinput="editReturnReason" placeholder="退货原因（必填）"/></view>
+      </view>
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeReturn">取消</button>
+        <button class="btn-primary" bindtap="submitReturn" loading="{{returnSubmitting}}">确认退货</button>
+      </view>
+    </view>
+  </view>
+
+</view>
