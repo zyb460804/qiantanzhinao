@@ -381,6 +381,44 @@ async def list_sale_orders(
     }
 
 
+@router.get("/orders/held", response_model=AnyResponse)
+async def list_held_orders(
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all currently held (parked) orders for this merchant."""
+    orders = (
+        (await db.execute(
+            select(SaleOrder)
+            .where(
+                SaleOrder.merchant_id == merchant.id,
+                SaleOrder.status == "held",
+            )
+            .order_by(SaleOrder.held_at.desc())
+        ))
+        .scalars()
+        .all()
+    )
+
+    result = []
+    for order in orders:
+        item_count_result = await db.scalar(
+            select(func.count(SaleOrderItem.id)).where(
+                SaleOrderItem.order_id == order.id
+            )
+        )
+        result.append({
+            "order_id": str(order.id),
+            "order_no": order.order_no,
+            "item_count": int(item_count_result or 0),
+            "total_amount": float(order.total_amount),
+            "customer_name": order.customer_name,
+            "held_at": order.held_at.isoformat() if order.held_at else None,
+        })
+
+    return {"code": 0, "data": result}
+
+
 @router.get("/orders/{order_id}", response_model=AnyResponse)
 async def get_sale_order(
     order_id: uuid.UUID,
@@ -847,44 +885,6 @@ async def hold_order(
             "held_at": order.held_at.isoformat() if order.held_at else None,
         },
     }
-
-
-@router.get("/orders/held", response_model=AnyResponse)
-async def list_held_orders(
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    """List all currently held (parked) orders for this merchant."""
-    orders = (
-        (await db.execute(
-            select(SaleOrder)
-            .where(
-                SaleOrder.merchant_id == merchant.id,
-                SaleOrder.status == "held",
-            )
-            .order_by(SaleOrder.held_at.desc())
-        ))
-        .scalars()
-        .all()
-    )
-
-    result = []
-    for order in orders:
-        item_count_result = await db.scalar(
-            select(func.count(SaleOrderItem.id)).where(
-                SaleOrderItem.order_id == order.id
-            )
-        )
-        result.append({
-            "order_id": str(order.id),
-            "order_no": order.order_no,
-            "item_count": int(item_count_result or 0),
-            "total_amount": float(order.total_amount),
-            "customer_name": order.customer_name,
-            "held_at": order.held_at.isoformat() if order.held_at else None,
-        })
-
-    return {"code": 0, "data": result}
 
 
 @router.post("/orders/{order_id}/resume", response_model=AnyResponse)
