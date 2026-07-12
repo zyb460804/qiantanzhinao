@@ -269,6 +269,7 @@ async def create_sale_order(
     db: AsyncSession = Depends(get_db),
 ):
     """Create an idempotent POS order with single or combined payment."""
+    await _check_settlement_locked(db, merchant.id)
     if body.client_id:
         existing = await db.scalar(
             select(SaleOrder).where(
@@ -1028,6 +1029,26 @@ async def cancel_held_order(
 # ---------------------------------------------------------------------------
 # 日结对账
 # ---------------------------------------------------------------------------
+
+
+async def _check_settlement_locked(
+    db: AsyncSession, merchant_id: uuid.UUID, action_date: date | None = None,
+) -> None:
+    """如果当天日结已关闭，禁止业务操作（section 4.10 日结锁定）。"""
+    from datetime import date as date_type
+    target_date = action_date or utc_now().date()
+    settlement = await db.scalar(
+        select(DailySettlement).where(
+            DailySettlement.merchant_id == merchant_id,
+            DailySettlement.date == target_date,
+            DailySettlement.status == "closed",
+        )
+    )
+    if settlement:
+        raise HTTPException(
+            status_code=409,
+            detail=f"日结已关闭({target_date})，不允许新增或修改业务数据",
+        )
 
 
 async def _settlement_numbers(
