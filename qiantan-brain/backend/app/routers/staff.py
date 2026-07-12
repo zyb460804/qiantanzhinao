@@ -1,8 +1,14 @@
-"""员工管理与权限 API (section 4.17)."""
+"""员工管理与权限 API (section 4.17).
+
+提供：
+- 角色/权限定义查询
+- 员工 CRUD
+- require_permission 依赖：路由级权限执行
+"""
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +20,65 @@ from app.schemas.common import AnyResponse
 
 
 router = APIRouter(prefix="/api/v1/staff", tags=["staff"])
+
+
+# ═══════════════════════════════════════════════════════════════
+# 权限依赖（供其他路由使用）
+# ═══════════════════════════════════════════════════════════════
+
+
+class PermissionContext:
+    """权限上下文 — 记录当前操作者身份和权限检查结果."""
+    def __init__(self, merchant_id: uuid.UUID, staff_id: uuid.UUID | None,
+                 role: str, permissions: set[str]):
+        self.merchant_id = merchant_id
+        self.staff_id = staff_id
+        self.role = role
+        self.permissions = permissions
+
+
+def require_permission(permission: str):
+    """路由级权限依赖工厂。用法: Depends(require_permission("void_record")).
+
+    在路由层直接拦截无权限用户, 返回 403。
+    当前通过 X-Staff-Id header 区分员工（过渡方案），
+    未来应改为员工 JWT token。
+    """
+    async def _check(
+        request: Request,
+        merchant: Merchant = Depends(get_current_merchant),
+        db: AsyncSession = Depends(get_db),
+    ) -> PermissionContext:
+        role = "owner"
+        staff_id: uuid.UUID | None = None
+
+        staff_header = request.headers.get("X-Staff-Id")
+        if staff_header:
+            try:
+                sid = uuid.UUID(staff_header)
+                staff = await db.get(StaffMember, sid)
+                if staff and staff.merchant_id == merchant.id and staff.is_active:
+                    role = staff.role
+                    staff_id = sid
+            except ValueError:
+                pass
+
+        perms = ROLE_PERMISSIONS.get(role, set())
+        if permission not in perms:
+            raise HTTPException(
+                status_code=403,
+                detail=f"角色 {role} 无权限执行 {permission}",
+            )
+        return PermissionContext(
+            merchant_id=merchant.id, staff_id=staff_id,
+            role=role, permissions=perms,
+        )
+    return _check
+
+
+# ═══════════════════════════════════════════════════════════════
+# 角色与员工 CRUD
+# ═══════════════════════════════════════════════════════════════
 
 
 @router.get("/roles", response_model=AnyResponse)

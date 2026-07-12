@@ -70,8 +70,19 @@ async def wechat_code2session(code: str) -> str:
 
     生产需配置 settings.wechat_appid / wechat_secret。
     测试通过 monkeypatch 本函数替换网络调用，避免真实请求。
+
+    Dev 模式（debug=True）：未配置微信凭证时自动使用 mock openid，
+    使前端小程序开发环境无需真实 AppID/Secret 即可正常登录。
     """
+    # 无微信凭证时的策略：
+    #  - debug=True（dev）：生成确定性 mock openid，允许本地开发跑通完整登录流程
+    #  - debug=False（生产）：直接 503，绝不降级（fail-closed）
     if not settings.wechat_appid or not settings.wechat_secret:
+        if settings.debug:
+            import hashlib
+
+            mock = hashlib.sha256(f"qiantan-dev:{code}".encode()).hexdigest()
+            return f"dev_openid_{mock[:24]}"
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="服务端未配置微信 AppID/Secret",

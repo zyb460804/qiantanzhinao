@@ -26,6 +26,7 @@ from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
 from app.models.pos import SaleOrder
 from app.models.product import ProductCategory
+from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 from app.services.accounts_service import get_customer_balance, record_customer_receivable
 from app.services.batch import consume_batches_fifo
@@ -56,6 +57,7 @@ async def record_waste(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("record_waste")),
 ):
     """Record waste/loss: deduct from FIFO batches, write inventory ledger.
 

@@ -1,4 +1,7 @@
-fastapi==0.115.0
+# ⚠️ 严禁升级到 >=0.139.0：该版本在 Python 3.13 上 include_router 静默失效，
+# 导致所有路由 404。如需升级请先在 Python 3.13 上验证 include_router 行为。
+# 已知可用：0.115.6。参考：2026-07-12 资深开发排查修复。
+fastapi==0.115.6
 uvicorn[standard]==0.30.0
 sqlalchemy[asyncio]==2.0.35
 asyncpg==0.29.0

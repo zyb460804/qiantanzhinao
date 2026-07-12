@@ -34,6 +34,7 @@ from app.schemas.pos import (
     RefundOrderRequest,
 )
 from app.services.accounts_service import record_customer_receivable
+from app.routers.staff import require_permission
 from app.services.batch import consume_batches_fifo, return_to_batches
 from app.services.sku_service import resolve_sku_id
 
@@ -646,6 +647,7 @@ async def refund_order(
     body: RefundOrderRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("order_refund")),
 ):
     """Refund an entire order or specific items. Generates reverse ledger entries."""
     order = await db.scalar(
@@ -1185,6 +1187,7 @@ async def close_daily_settlement(
     settle_date: date,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("daily_settle")),
 ):
     numbers = await _settlement_numbers(db, merchant.id, settle_date)
     settlement = await db.scalar(
