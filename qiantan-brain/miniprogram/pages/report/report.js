@@ -7,9 +7,10 @@
  *   /reports/trends   — 营业趋势折线 (支持 days 参数)
  *
  * 图表策略:
- *   内联 Canvas 2D 双折线 (营业额 + 利润), 参考 dashboard.js
+ *   utils/chart.js 统一 Canvas 2D 折线图
  */
 var app = getApp();
+var Chart = require('../../utils/chart');
 
 Page({
   data: {
@@ -49,18 +50,20 @@ Page({
   onLoad: function () {
     this.setData({ skinClass: 'skin-' + app.resolveSkin() });
     this.setData({ refreshTime: this._formatTime(new Date()) });
-    this.loadReport();
+    this.loadReport('daily');
   },
 
   onShow: function () {
-    if (!this.data.loading && !this.data.dailyData) {
-      this.loadReport();
+    // 如果 page 被回收(activeTab 已非初始 daily)或数据为空,重新加载当前 tab
+    if (!this.data.loading && !this.data.hasData) {
+      this.loadReport(this.data.activeTab);
     }
   },
 
   onPullDownRefresh: function () {
     var self = this;
-    this.loadReport(function () {
+    var tab = this.data.activeTab;
+    this.loadReport(tab, function () {
       wx.stopPullDownRefresh();
       app.showToast('报告已更新', 'success');
     }, function () {
@@ -72,27 +75,65 @@ Page({
 
   switchTab: function (e) {
     var tab = e.currentTarget.dataset.tab;
-    if (tab === this.data.activeTab) return;
-    this.setData({ activeTab: tab });
-    this.loadReport();
+    if (!tab || tab === this.data.activeTab) return;
+    // 缓存当前 Tab 数据避免白屏闪烁
+    var oldTab = this.data.activeTab;
+    this._tabCache = this._tabCache || {};
+    this._tabCache[oldTab] = {
+      dailyData: this.data.dailyData,
+      weeklyData: this.data.weeklyData,
+      trendData: this.data.trendData,
+      metrics: this.data.metrics,
+      salesRanking: this.data.salesRanking,
+      maxRankQty: this.data.maxRankQty,
+      wasteList: this.data.wasteList,
+      aiSummary: this.data.aiSummary,
+      actionItems: this.data.actionItems,
+      healthLevel: this.data.healthLevel,
+    };
+    // 如果有该 Tab 缓存，直接恢复（单次 setData 避免 WeChat 批处理丢弃 activeTab）
+    var cached = this._tabCache[tab];
+    if (cached) {
+      this.setData({
+        activeTab: tab,
+        hasData: true,
+        loading: false,
+        dailyData: cached.dailyData, weeklyData: cached.weeklyData, trendData: cached.trendData,
+        metrics: cached.metrics, salesRanking: cached.salesRanking, maxRankQty: cached.maxRankQty,
+        wasteList: cached.wasteList, aiSummary: cached.aiSummary, actionItems: cached.actionItems,
+        healthLevel: cached.healthLevel,
+      });
+      this._renderDerived();
+    } else {
+      // 合并 setData：activeTab + loading 在一次调用中完成，避免批处理竞态
+      this.setData({ activeTab: tab, loading: true, hasData: false });
+      this.loadReport(tab);
+    }
   },
 
   // ── 数据加载 ─────────────────────────────────────────
 
-  loadReport: function (onSuccess, onError) {
+  /**
+   * @param {string}   tab      - 'daily' | 'weekly' | 'monthly'
+   * @param {function} onSuccess
+   * @param {function} onError
+   */
+  loadReport: function (tab, onSuccess, onError) {
     var self = this;
-    var tab = this.data.activeTab;
-    var mid = app.getMerchantId();
+    var tabName = tab || this.data.activeTab || 'daily';
 
-    this.setData({ loading: true, hasData: false });
+    // 合并 setData：activeTab + loading + hasData 在一次调用中完成
+    // 避免多次 setData 导致的 WeChat 批处理丢弃 activeTab
+    this.setData({ activeTab: tabName, loading: true, hasData: false });
 
-    var req = app.request;
+    // app.request 依赖 app 作为 this，不能脱离对象直接调用。
+    var req = function (options) { return app.request(options); };
 
-    if (tab === 'daily') {
+    if (tabName === 'daily') {
       // 今日报告 + 近7日趋势
       Promise.all([
-        req({ url: '/reports/daily?merchant_id=' + mid }).catch(function () { return null; }),
-        req({ url: '/reports/trends?merchant_id=' + mid + '&days=7' }).catch(function () { return null; }),
+        req({ url: '/reports/daily' }).catch(function () { return null; }),
+        req({ url: '/reports/trends?days=7' }).catch(function () { return null; }),
       ]).then(function (results) {
         var daily = results[0];
         var trends = results[1] || [];
@@ -121,11 +162,11 @@ Page({
         self._renderDerived();
         if (onSuccess) onSuccess();
       });
-    } else if (tab === 'weekly') {
+    } else if (tabName === 'weekly') {
       // 周报 + 近7日趋势
       Promise.all([
-        req({ url: '/reports/weekly?merchant_id=' + mid }).catch(function () { return null; }),
-        req({ url: '/reports/trends?merchant_id=' + mid + '&days=7' }).catch(function () { return null; }),
+        req({ url: '/reports/weekly' }).catch(function () { return null; }),
+        req({ url: '/reports/trends?days=7' }).catch(function () { return null; }),
       ]).then(function (results) {
         var weekly = results[0];
         var trends = weekly && weekly.daily_trends ? weekly.daily_trends : (results[1] || []);
@@ -156,60 +197,84 @@ Page({
       });
     } else {
       // 近30日：拉取30天趋势,聚合核心指标
-      req({ url: '/reports/trends?merchant_id=' + mid + '&days=30' })
+      req({ url: '/reports/trends?days=30' })
         .catch(function () { return null; })
         .then(function (trends) {
-          trends = trends || [];
+          // 强制转为数组：兼容后端返回 {data:[...]} 或直接返回数组
+          if (!Array.isArray(trends)) {
+            trends = (trends && trends.data && Array.isArray(trends.data)) ? trends.data
+                   : (trends && trends.items && Array.isArray(trends.items)) ? trends.items
+                   : [];
+          }
           if (trends.length === 0) {
             self.setData({
               loading: false,
               hasData: false,
               trendData: [],
-              rangeLabel: '近30日经营报告',
+              rangeLabel: '近30日经营报告 · 暂无数据',
             });
             self._renderDerived();
             if (onError) onError();
             return;
           }
 
-          // 聚合30天数据
-          var totalRevenue = 0, totalCost = 0, totalProfit = 0;
-          trends.forEach(function (d) {
-            totalRevenue += Number(d.revenue) || 0;
-            totalCost += Number(d.cost) || 0;
-            totalProfit += Number(d.profit) || 0;
-          });
+          try {
+            // 聚合30天数据
+            var totalRevenue = 0, totalCost = 0, totalProfit = 0;
+            trends.forEach(function (d) {
+              totalRevenue += Number(d.revenue) || 0;
+              totalCost += Number(d.cost) || 0;
+              totalProfit += Number(d.profit) || 0;
+            });
 
-          // 用聚合数据填充 weeklyData 供渲染复用
-          var monthlyAgg = {
-            period: '近30日',
-            week_revenue: totalRevenue,
-            week_profit: totalProfit,
-            last_week_revenue: 0,
-            revenue_change_pct: 0,
-            daily_trends: trends,
-            sales_ranking: [],
-            waste_ranking: [],
-            adoption_rate: 0,
-            recommendation_total: 0,
-            recommendation_adopted: 0,
-            health_score: 0,
-            ai_summary: '近30日累计营业额 ' + self._money(totalRevenue) +
-                        ' 元,毛利润 ' + self._money(totalProfit) + ' 元。' +
-                        '建议关注趋势变化,及时调整采购与销售策略。',
-          };
+            // 用利润率估算健康分(0-100)
+            var profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue * 100) : 0;
+            var healthScore = Math.max(0, Math.min(100, Math.round(profitMargin * 2)));
 
-          self.setData({
-            weeklyData: monthlyAgg,
-            trendData: trends,
-            rangeLabel: '近30日经营报告',
-            refreshTime: self._formatTime(new Date()),
-            loading: false,
-            hasData: true,
-          });
-          self._renderWeekly();
-          self._renderDerived();
-          if (onSuccess) onSuccess();
+            // 用聚合数据填充 weeklyData 供渲染复用
+            var monthlyAgg = {
+              period: '近30日',
+              week_revenue: totalRevenue,
+              week_profit: totalProfit,
+              last_week_revenue: 0,
+              revenue_change_pct: 0,
+              daily_trends: trends,
+              sales_ranking: [],
+              waste_ranking: [],
+              adoption_rate: 0,
+              recommendation_total: 0,
+              recommendation_adopted: 0,
+              health_score: healthScore,
+              ai_summary: '近30日数据汇总:累计营业额 ' + self._money(totalRevenue) +
+                          ' 元,毛利润 ' + self._money(totalProfit) + ' 元,毛利率 ' +
+                          self._pct(profitMargin) + '。' +
+                          (profitMargin < 15 ? '毛利率偏低,建议优化采购成本或调整售价。' :
+                           profitMargin > 40 ? '毛利率良好,可考虑适当扩大进货量。' :
+                           '毛利率处于正常区间,保持当前经营节奏。'),
+            };
+
+            self.setData({
+              weeklyData: monthlyAgg,
+              trendData: trends,
+              rangeLabel: '近30日经营报告',
+              refreshTime: self._formatTime(new Date()),
+              loading: false,
+              hasData: true,
+            });
+            self._renderWeekly();
+            self._renderDerived();
+            if (onSuccess) onSuccess();
+          } catch (e) {
+            // 聚合过程中任何异常都不应该卡页面
+            self.setData({
+              loading: false,
+              hasData: false,
+              trendData: [],
+              rangeLabel: '近30日经营报告 · 数据异常',
+            });
+            app.logError('report/monthly', e, { silent: true });
+            if (onError) onError();
+          }
         });
     }
   },
@@ -218,10 +283,10 @@ Page({
 
   _renderDerived: function () {
     var self = this;
-    // 延迟绘制 Canvas,确保 DOM 已更新
-    setTimeout(function () {
+    // 用 nextTick 确保 DOM 更新后再绘制 Canvas(替代固定延时,避免竞态)
+    wx.nextTick(function () {
       self.drawTrendChart();
-    }, 280);
+    });
   },
 
   // ── 渲染今日数据 ─────────────────────────────────────
@@ -302,161 +367,17 @@ Page({
     if (!data || data.length === 0) return;
 
     var self = this;
-    var query = wx.createSelectorQuery().in(this);
-    query.select('#trendCanvas')
-      .fields({ node: true, size: true })
-      .exec(function (res) {
-        if (!res[0] || !res[0].node) return;
-        var canvas = res[0].node;
-        var ctx = canvas.getContext('2d');
-        var dpr = wx.getWindowInfo().pixelRatio;
-        var w = res[0].width;
-        var h = res[0].height;
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        ctx.scale(dpr, dpr);
-
-        self.setData({ canvasWidth: w, canvasHeight: h });
-        self._drawLineChart(ctx, w, h, data);
+    Chart.initCanvas(this, '#trendCanvas').then(function (c) {
+      if (!c) return;
+      self.setData({ canvasWidth: c.width, canvasHeight: c.height });
+      Chart.drawLineChart(c.ctx, c.width, c.height, data, {
+        series: [
+          { key: 'revenue', color: '#2f9e6e', axis: 'left' },
+          { key: 'profit', color: '#e8552f', axis: 'left' },
+          { key: 'customer_price', color: '#2E7DD1', axis: 'right' },
+        ],
+        fillArea: { key: 'revenue', gradientFrom: 'rgba(47,158,110,.22)', gradientTo: 'rgba(47,158,110,0)' },
       });
-  },
-
-  _drawLineChart: function (ctx, w, h, data) {
-    var pad = { top: 22, right: 54, bottom: 34, left: 48 };
-    var chartW = w - pad.left - pad.right;
-    var chartH = h - pad.top - pad.bottom;
-    var count = data.length;
-    ctx.clearRect(0, 0, w, h);
-    if (!count) return;
-
-    // 采样:超过14个点时抽取
-    var drawData = data;
-    if (count > 14) {
-      var step = Math.ceil(count / 14);
-      drawData = [];
-      for (var i = 0; i < count; i += step) {
-        drawData.push(data[i]);
-      }
-      if (drawData[drawData.length - 1] !== data[count - 1]) {
-        drawData.push(data[count - 1]);
-      }
-      count = drawData.length;
-    }
-
-    // 双轴刻度: 左轴=金额(营业额/利润), 右轴=客单价
-    var leftVals = [], rightVals = [];
-    drawData.forEach(function (d) {
-      leftVals.push(Number(d.revenue) || 0);
-      leftVals.push(Number(d.profit) || 0);
-      rightVals.push(Number(d.customer_price) || 0);
-    });
-    var maxLeft = Math.max.apply(null, leftVals.concat([1]));
-    var magnitude = Math.pow(10, Math.max(0, String(Math.floor(maxLeft)).length - 2));
-    maxLeft = Math.ceil(maxLeft / magnitude) * magnitude;
-    var maxRight = Math.max.apply(null, rightVals.concat([1]));
-    if (maxRight <= 10) maxRight = 10;
-    else maxRight = Math.ceil(maxRight / (maxRight >= 100 ? 10 : 5)) * (maxRight >= 100 ? 10 : 5);
-
-    var formatMoney = function (value) {
-      if (value >= 10000) return '¥' + (value / 10000).toFixed(1) + '万';
-      if (value >= 1000) return '¥' + (value / 1000).toFixed(1) + 'k';
-      return '¥' + Math.round(value);
-    };
-    var formatAov = function (value) { return '¥' + (Math.round(value * 10) / 10); };
-    var pointX = function (index) {
-      return count === 1 ? pad.left + chartW / 2 : pad.left + index / (count - 1) * chartW;
-    };
-    var pointYL = function (value) {
-      return pad.top + chartH - (Number(value) || 0) / maxLeft * chartH;
-    };
-    var pointYR = function (value) {
-      return pad.top + chartH - (Number(value) || 0) / maxRight * chartH;
-    };
-
-    // 网格线 + 双轴刻度
-    ctx.font = '10px sans-serif';
-    ctx.textBaseline = 'middle';
-    for (var g = 0; g <= 4; g++) {
-      var gy = pad.top + g / 4 * chartH;
-      ctx.beginPath();
-      if (ctx.setLineDash) ctx.setLineDash([3, 4]);
-      ctx.moveTo(pad.left, gy);
-      ctx.lineTo(w - pad.right, gy);
-      ctx.strokeStyle = g === 4 ? '#C9D5CD' : '#E4EAE5';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      if (ctx.setLineDash) ctx.setLineDash([]);
-      // 左轴(金额)
-      ctx.fillStyle = '#8A938D';
-      ctx.textAlign = 'right';
-      ctx.fillText(formatMoney(maxLeft * (1 - g / 4)), pad.left - 7, gy);
-      // 右轴(客单价)
-      ctx.fillStyle = '#2E7DD1';
-      ctx.textAlign = 'left';
-      ctx.fillText(formatAov(maxRight * (1 - g / 4)), w - pad.right + 6, gy);
-    }
-
-    // 营业额区域填充(左轴)
-    if (count > 1) {
-      var gradient = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
-      gradient.addColorStop(0, 'rgba(47, 158, 110, 0.22)');
-      gradient.addColorStop(1, 'rgba(47, 158, 110, 0)');
-      ctx.beginPath();
-      drawData.forEach(function (d, i) {
-        var x = pointX(i);
-        var y = pointYL(d.revenue);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.lineTo(pointX(count - 1), pad.top + chartH);
-      ctx.lineTo(pointX(0), pad.top + chartH);
-      ctx.closePath();
-      ctx.fillStyle = gradient;
-      ctx.fill();
-    }
-
-    // 绘制折线: 营业额/利润走左轴, 客单价走右轴
-    var drawLine = function (key, color, axis) {
-      var py = axis === 'right' ? pointYR : pointYL;
-      ctx.beginPath();
-      drawData.forEach(function (d, i) {
-        var x = pointX(i);
-        var y = py(d[key]);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2.5;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      if (count > 1) ctx.stroke();
-      // 数据点
-      drawData.forEach(function (d, i) {
-        var x = pointX(i);
-        var y = py(d[key]);
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFEFA';
-        ctx.fill();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2.2;
-        ctx.stroke();
-      });
-    };
-
-    drawLine('revenue', '#2f9e6e', 'left');
-    drawLine('profit', '#e8552f', 'left');
-    drawLine('customer_price', '#2E7DD1', 'right');
-
-    // X 轴日期标签
-    ctx.fillStyle = '#7B8780';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    var labelStep = 1;
-    if (count > 7) labelStep = Math.ceil(count / 6);
-    drawData.forEach(function (d, i) {
-      if (i % labelStep !== 0 && i !== count - 1) return;
-      var label = (d.date || '').slice(5).replace('-', '/');
-      ctx.fillText(label, pointX(i), h - 8);
     });
   },
 

@@ -65,6 +65,61 @@ async def test_create_from_advice(client, db_session):
     assert "list_id" in data["data"]
 
 
+async def test_create_from_manual_calendar_items(client):
+    """Calendar items are matched by product name and become editable purchase items."""
+    resp = await client.post(
+        "/api/v1/purchase/from-advice",
+        json={"items": [{"name": "白菜", "qty": 5, "unit": "斤", "from": "时令建议"}]},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()["data"]
+    assert payload["added_count"] == 1
+    assert payload["item_count"] == 1
+    assert payload["unmatched_items"] == []
+
+    today = await client.get("/api/v1/purchase/today")
+    item = today.json()["data"]["items"][0]
+    assert item["product_name"] == "白菜"
+    assert item["actual_qty"] == 5.0
+    assert item["reason"] == "时令建议"
+
+
+async def test_manual_calendar_items_do_not_duplicate_existing_product(client):
+    """Repeated calendar import succeeds idempotently without duplicate rows."""
+    body = {"items": [{"product_id": 1, "name": "白菜", "qty": 5, "unit": "斤"}]}
+    first = await client.post("/api/v1/purchase/from-advice", json=body)
+    second = await client.post("/api/v1/purchase/from-advice", json=body)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["data"]["added_count"] == 0
+    assert second.json()["data"]["item_count"] == 1
+
+
+async def test_manual_calendar_items_report_unmatched_names(client):
+    """Matched items are imported while unknown names are returned to the caller."""
+    resp = await client.post(
+        "/api/v1/purchase/from-advice",
+        json={"items": [
+            {"name": "白菜", "qty": 5, "unit": "斤"},
+            {"name": "不存在的时令菜", "qty": 3, "unit": "斤"},
+        ]},
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["added_count"] == 1
+    assert data["unmatched_items"] == ["不存在的时令菜"]
+
+
+async def test_manual_calendar_items_keep_draft_when_nothing_matches(client):
+    """An all-unmatched import fails clearly so the mini-program retains its local draft."""
+    resp = await client.post(
+        "/api/v1/purchase/from-advice",
+        json={"items": [{"name": "不存在的时令菜", "qty": 3, "unit": "斤"}]},
+    )
+    assert resp.status_code == 400
+    assert "商品目录中未找到" in resp.json()["detail"]
+
+
 # ------------------------------------------------------------------
 # GET /api/v1/purchase/today
 # ------------------------------------------------------------------

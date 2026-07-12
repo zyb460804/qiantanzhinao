@@ -7,11 +7,11 @@
 
   <!-- 设备列表 -->
   <block wx:if="{{tab==='devices'}}">
-    <view class="section-head"><text class="section-title">已注册设备</text><text class="link" bindtap="openDevForm">+ 注册</text></view>
+    <view class="section-head"><text class="section-title">已注册设备</text><view><text class="link" bindtap="scanDevice">扫码绑定</text><text class="link" style="margin-left:12rpx" bindtap="openDevForm">+ 注册</text></view></view>
     <view wx:if="{{!devices.length}}" class="empty-state"><text>暂无设备，点击"+ 注册"添加智能秤或摄像头</text></view>
     <view wx:else class="cat-list">
       <view wx:for="{{devices}}" wx:key="device_id" class="cat-item">
-        <view class="cat-main"><text class="cat-name">{{item.device_name}}</text><text class="cat-meta">{{item.device_type}} · {{item.serial_number||'无序列号'}}</text><text class="cat-meta" wx:if="{{item.last_heartbeat}}">心跳: {{item.last_heartbeat}}</text></view>
+        <view class="cat-main"><text class="cat-name">{{item.device_name}}</text><text class="cat-meta">{{item.device_type}} · {{item.serial_number||'无序列号'}}</text><text class="cat-meta {{item.last_heartbeat ? '' : 'warn'}}">{{item.last_heartbeat ? '心跳: ' + item.last_heartbeat : '设备已离线，请检查电源和网络连接'}}</text></view>
         <view class="cat-actions">
           <text class="act-btn" data-id="{{item.device_id}}" bindtap="sendHeartbeat">心跳</text>
           <text class="act-btn del" data-id="{{item.device_id}}" bindtap="deactivateDevice">停用</text>

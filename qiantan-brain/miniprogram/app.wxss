@@ -10,6 +10,7 @@ page {
   /* ---------- 中性 · 暖纸（非纯白纯黑） ---------- */
   --paper: #fffdf5;          /* 卡片纸面 */
   --paper-2: #fbf8ef;        /* 次级纸面 / 凹陷 */
+  --paper-3: #f3efe3;        /* 三级纸面 / 骨架屏 */
   --canvas: #f5f1e6;        /* 页面底色 */
   --ink: #18221d;            /* 主文字 */
   --ink-2: #4e5a52;         /* 次级文字 */
@@ -235,18 +236,41 @@ button::after { border: 0; }
 .kpi-sub { color: var(--ink-2); font-size: var(--fs-xs); }
 
 /* =============================================================
- * 骨架屏（流光，首次进入用，不烦人）
+ * 骨架屏 — 可见灰色 + 流光动画
  * ============================================================= */
-.skeleton { position: relative; overflow: hidden; background: var(--paper-2); border-radius: var(--r-md); }
+.skeleton { position: relative; overflow: hidden; background: #ede9dc; border-radius: var(--r-md); }
 .skeleton::after {
   content: ""; position: absolute; inset: 0;
-  background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.65) 50%, transparent 80%);
-  transform: translateX(-100%);
-  animation: shimmer 1.25s infinite;
+  background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.50) 50%, transparent 80%);
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.5s ease-in-out infinite;
 }
-.sk-line { height: 22rpx; margin: 14rpx 0; border-radius: 8rpx; }
-.sk-block { height: 200rpx; border-radius: var(--r-lg); }
+@keyframes sk-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+.sk-line { height: 22rpx; margin: 14rpx 0; border-radius: 8rpx; background: #ddd9cc; display: block; }
+.sk-block { height: 200rpx; border-radius: var(--r-lg); background: #ede9dc; position: relative; overflow: hidden; }
 .sk-circle { border-radius: 50%; }
+
+/* 骨架屏布局 — v3.3 极简版, 移除 ::before 伪元素流光层（兼容问题元凶） */
+.skeleton-wrap { padding: 32rpx; }
+.sk-hero {
+  margin-bottom: 32rpx; padding: 32rpx;
+  background: #2a5a4a; border-radius: 20rpx;
+}
+.sk-grid { display: flex; gap: 12rpx; margin-bottom: 16rpx; }
+.sk-card {
+  flex: 1; height: 180rpx;
+  background: #e8e3d5; border-radius: 16rpx;
+}
+.sk-ring {
+  width: 120rpx; height: 120rpx; border-radius: 50%;
+  background: #c9c4b6; margin: 12rpx auto;
+}
+.w60 { width: 60%; }
+.w40 { width: 40%; }
+.w80 { width: 80%; }
+.w50 { width: 50%; }
 
 /* =============================================================
  * 浮动语音按钮（FAB） + 涟漪
@@ -328,6 +352,7 @@ button::after { border: 0; }
 .ui-dark {
   --paper: #1c211c;
   --paper-2: #161a16;
+  --paper-3: #111511;
   --canvas: #11140f;
   --ink: #e9efe9;
   --ink-2: #aab4ab;
@@ -352,7 +377,7 @@ button::after { border: 0; }
  * ============================================================= */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes breathe { 0%,100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.14); opacity: 1; } }
-@keyframes shimmer { 100% { transform: translateX(100%); } }
+/* @keyframes shimmer 已在 L249 定义，此处移除重复定义 */
 @keyframes fab-pulse { 0% { box-shadow: 0 0 0 0 rgba(226,80,62,0.45); } 70% { box-shadow: 0 0 0 26rpx rgba(226,80,62,0); } 100% { box-shadow: 0 0 0 0 rgba(226,80,62,0); } }
 @keyframes pop-in { 0% { opacity: 0; transform: scale(0.9) translateY(8rpx); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
 @keyframes float-y { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8rpx); } }

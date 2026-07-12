@@ -20,6 +20,14 @@ class RefreshRequest(BaseModel):
     pass
 
 
+class MerchantUpdateRequest(BaseModel):
+    """更新商户信息的请求体。"""
+
+    name: str | None = None
+    business_type: str | None = None
+    location: str | None = None
+
+
 # ── 响应数据模型 ──────────────────────────────────────────
 
 

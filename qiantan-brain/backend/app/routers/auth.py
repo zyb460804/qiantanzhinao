@@ -27,6 +27,7 @@ from app.schemas.auth import (
     LoginData,
     LogoutResponse,
     MerchantInfo,
+    MerchantUpdateRequest,
     MeResponse,
     RefreshResponse,
     TokenData,
@@ -89,6 +90,24 @@ async def wechat_login(
 @router.get("/me", response_model=MeResponse)
 async def me(merchant: Merchant = Depends(get_current_merchant)):
     """返回当前登录商户信息（身份来自 token）。"""
+    return MeResponse(code=0, data=_merchant_to_info(merchant))
+
+
+@router.put("/me", response_model=MeResponse)
+async def update_me(
+    body: MerchantUpdateRequest,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新当前商户信息。"""
+    if body.name is not None:
+        merchant.name = body.name
+    if body.business_type is not None:
+        merchant.business_type = body.business_type
+    if body.location is not None:
+        merchant.location = body.location
+    await db.commit()
+    await db.refresh(merchant)
     return MeResponse(code=0, data=_merchant_to_info(merchant))
 
 

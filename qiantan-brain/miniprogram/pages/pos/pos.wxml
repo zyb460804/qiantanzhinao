@@ -84,7 +84,7 @@
       <text wx:if="{{settlement.purchase_paid}}">采购付款 ¥{{settlement.purchase_paid}}</text>
       <text wx:if="{{settlement.customer_repay}}">客户回款 ¥{{settlement.customer_repay}}</text>
     </view>
-    <text class="diff {{Math.abs(settlement.diff_amount || 0) < 0.01 ? 'ok' : 'warn'}}">差异 ¥{{settlement.diff_amount}}</text>
+    <text class="diff {{settlement.isBalanced ? 'ok' : 'warn'}}">差异 ¥{{settlement.diff_amount}}</text>
     <text class="settlement-extra" wx:if="{{settlement.estimated_gross_profit}}">预计毛利 ¥{{settlement.estimated_gross_profit}} · 现金净流入 ¥{{settlement.net_cash_flow}}</text>
   </view>
   <button class="close-day" bindtap="closeDay">确认今日日结</button>

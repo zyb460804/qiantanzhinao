@@ -1,5 +1,5 @@
 {
-  "miniprogramRoot": "miniprogram/",
+  "miniprogramRoot": "miniprogram",
   "projectname": "千摊智脑",
   "description": "AI经营智能体 — 面向小微商户的语音记账与决策系统",
   "appid": "wx2e2334a77575f6ca",
@@ -35,9 +35,9 @@
     "userConfirmedBundleSwitch": false,
     "packNpmManually": false,
     "packNpmRelationList": [],
-    "minifyWXSS": true,
+    "minifyWXSS": false,
     "disableUseStrict": false,
-    "minifyWXML": true,
+    "minifyWXML": false,
     "showES6CompileOption": false,
     "useCompilerPlugins": false,
     "compileWorklet": false,
@@ -53,9 +53,13 @@
     "tabIndent": "insertSpaces",
     "tabSize": 2
   },
-  "simulatorPluginLibVersion": {},
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      { "type": "folder", "value": "backend" },
+      { "type": "folder", "value": "docs" },
+      { "type": "suffix", "value": ".pyc" },
+      { "type": "suffix", "value": ".txt" }
+    ],
     "include": []
   }
 }

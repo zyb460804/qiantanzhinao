@@ -164,6 +164,17 @@ Page({
     }});
   },
 
+  fillRemaining: function (e) {
+    var method = e.currentTarget.dataset.method;
+    var payable = this.data.payableAmount;
+    var split = Object.assign({}, this.data.paySplit);
+    var methods = ['wechat', 'cash', 'alipay', 'credit'];
+    var assigned = 0;
+    methods.forEach(function (m) { if (m !== method) assigned += Number(split[m] || 0); });
+    split[method] = Math.max(0, payable - assigned);
+    this.setData({ paySplit: split });
+  },
+
   selectPayment: function (e) { this.setData({ paymentMethod: e.currentTarget.dataset.method }); },
 
   // ==================== 结账 ====================
@@ -409,9 +420,12 @@ Page({
     wx.showModal({ title: '确认日结', content: '将按系统销售、各渠道实收、采购付款、赊账余额生成对账结果。日结后不可直接修改历史记录。', success: function (r) {
       if (!r.confirm) return;
       app.request({ url: '/pos/daily-settlement/' + today + '/close', method: 'POST' }).then(function (data) {
+        // WXML 不支持调用 Math.abs,在 JS 中预计算布尔值再绑定
+        var isBalanced = Math.abs(data.diff_amount || 0) < 0.01;
+        data.isBalanced = isBalanced;
         self.setData({ settlement: data });
-        wx.showToast({ title: Math.abs(data.diff_amount || 0) < 0.01 ? '日结完成，账目平衡' : '日结完成，存在差异', icon: 'none' });
-      });
+        wx.showToast({ title: isBalanced ? '日结完成，账目平衡' : '日结完成，存在差异', icon: 'none' });
+      }).catch(function () { wx.showToast({ title: '日结失败，请重试', icon: 'none' }); });
     }});
   }
 });

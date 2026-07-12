@@ -94,17 +94,16 @@
   transition: transform var(--dur-fast) var(--ease-spring); }
 .voice-fab:active { transform: scale(.92); }
 
-/* ── 首载骨架屏 ── */
-.skeleton-wrap { padding: 24rpx; }
-.sk-hero { position: relative; min-height: 320rpx; padding: 40rpx 30rpx; background: var(--green-800); border-radius: var(--radius-xl); overflow: hidden; }
-.sk-line { height: 26rpx; margin: 16rpx 0; background: rgba(255,255,255,.16); border-radius: 99rpx; animation: shimmer 1.4s linear infinite; background-size: 400% 100%; }
+/* ── 首载骨架屏 (v3.3: 极简版, 移除所有可能不兼容的 WXSS 特性) ── */
+.skeleton-wrap { padding: 24rpx; background: #f5f1e6; }
+.sk-hero { min-height: 320rpx; padding: 40rpx 30rpx; background: #2a5a4a; border-radius: 24rpx; }
+.sk-line { display: block; height: 26rpx; margin: 16rpx 0; background: #d4cfc0; border-radius: 99rpx; }
 .sk-line.w60 { width: 60%; height: 34rpx; }
 .sk-line.w40 { width: 40%; }
-.sk-ring { position: absolute; right: 30rpx; bottom: 30rpx; width: 150rpx; height: 150rpx; border-radius: 50%; background: rgba(255,255,255,.12); animation: shimmer 1.4s linear infinite; background-size: 400% 100%; }
-.sk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18rpx; margin-top: 20rpx; }
-.sk-card { min-height: 180rpx; border-radius: var(--radius-lg); animation: shimmer 1.4s linear infinite; background-size: 400% 100%; }
-.sk-card.tall { min-height: 260rpx; margin-top: 18rpx; animation: shimmer 1.4s linear infinite; background-size: 400% 100%; }
-.sk-card, .sk-hero { background-color: var(--line); }
+.sk-ring { width: 150rpx; height: 150rpx; border-radius: 50%; background: #c9c4b6; margin-top: 30rpx; }
+.sk-grid { display: flex; flex-direction: row; gap: 18rpx; margin-top: 20rpx; }
+.sk-card { flex: 1; min-height: 180rpx; background: #e8e3d5; border-radius: 16rpx; }
+.sk-card.tall { min-height: 260rpx; margin-top: 18rpx; }
 
 /* ── 主动动画 ── */
 .insight, .money-card, .action-card, .status-card, .record-list { animation: pop-in var(--dur-normal) var(--ease-spring) both; }

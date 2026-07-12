@@ -53,7 +53,22 @@ Page({
   },
 
   switchTab: function (event) {
+    var self = this;
     var tab = event.currentTarget.dataset.tab;
+    // 盘点进行中切 Tab → 确认放弃
+    if (this.data.sessionId && !this.data.completed && tab !== 'stocktake') {
+      wx.showModal({
+        title: '放弃盘点？', content: '当前盘点尚未完成，切换后将丢失已核对的数据。',
+        confirmText: '放弃盘点', cancelText: '继续盘点', confirmColor: '#d9524a',
+        success: function (res) {
+          if (res.confirm) {
+            self.setData({ activeTab: tab, sessionId: null, stocktakeItems: [], submittedMap: {}, completed: false, result: null });
+            if (tab === 'history') self.loadHistory();
+          }
+        },
+      });
+      return;
+    }
     this.setData({ activeTab: tab });
     if (tab === 'history') {
       this.loadHistory();
@@ -76,6 +91,7 @@ Page({
           product_name: item.product_name,
           unit: item.unit || '斤',
           book_qty: Number(item.book_qty) || 0,
+          avg_cost: Number(item.avg_cost || item.unit_cost) || 0,
           actual_qty: '',
           variance: null,
           reason: '',
@@ -163,6 +179,11 @@ Page({
     }
     var reason = (item.variance === 0 || item.variance === null) ? 'unknown' : (item.reason || 'unknown');
     this.setData({ submitting: true });
+    // 乐观更新：立即标记 UI 为提交中
+    var items = self.data.stocktakeItems.slice();
+    items[index]._submitting = true;
+    self.setData({ stocktakeItems: items });
+
     app.request({
       url: '/inventory/stocktake/' + this.data.sessionId + '/submit',
       method: 'POST',
@@ -174,6 +195,7 @@ Page({
     }).then(function (data) {
       var items = self.data.stocktakeItems.slice();
       items[index].submitted = true;
+      items[index]._submitting = false;
       items[index].variance = data.variance;
       var submittedMap = self.data.submittedMap;
       submittedMap[item.product_id] = {
@@ -196,18 +218,25 @@ Page({
     var items = this.data.stocktakeItems;
     var progressCount = 0;
     var totalVariance = 0;
+    var lossAmount = 0;
     items.forEach(function (item) {
       if (item.submitted && item.variance !== null) {
         progressCount++;
         totalVariance += item.variance;
+        // 预估损耗金额:盘亏部分 × 单位成本
+        if (item.variance < 0 && item.avg_cost) {
+          lossAmount += Math.abs(item.variance) * Number(item.avg_cost);
+        }
       }
     });
     totalVariance = Math.round(totalVariance * 100) / 100;
+    lossAmount = Math.round(lossAmount * 100) / 100;
     var total = items.length;
     var percent = total > 0 ? Math.round(progressCount / total * 100) : 0;
     this.setData({
       progressCount: progressCount,
       totalVariance: totalVariance,
+      lossAmount: lossAmount,
       progressPercent: percent,
     });
   },

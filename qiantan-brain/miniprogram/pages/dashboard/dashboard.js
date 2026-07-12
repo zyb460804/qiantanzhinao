@@ -4,10 +4,11 @@
  *
  * 图表策略:
  *   - 库存 Tab: stock-chart 组件 (复用)
- *   - 经营 Tab: 内联 Canvas 双折线 (暂未抽组件)
+ *   - 经营 Tab: utils/chart.js 内联 Canvas 双折线
  *   - 风险 Tab: risk-gauge 组件 (复用)
  */
 var app = getApp();
+var Chart = require('../../utils/chart');
 
 Page({
   data: {
@@ -44,18 +45,18 @@ Page({
 
   loadAllData: function () {
     var self = this;
-    var mid = app.getMerchantId();
 
     this.setData({ loading: true });
 
-    var req = app.request;
+    // app.request 依赖 app 作为 this，不能脱离对象直接调用。
+    var req = function (options) { return app.request(options); };
 
     Promise.all([
-      req({ url: '/twin/dashboard',        data: { merchant_id: mid } }).catch(function(){return null}),
-      req({ url: '/twin/inventory-mirror', data: { merchant_id: mid } }).catch(function(){return null}),
-      req({ url: '/twin/business-mirror',  data: { merchant_id: mid } }).catch(function(){return null}),
-      req({ url: '/twin/risk-mirror',      data: { merchant_id: mid } }).catch(function(){return null}),
-      req({ url: '/advice/daily',          data: { merchant_id: mid } }).catch(function(){return null}),
+      req({ url: '/twin/dashboard' }).catch(function(){return null}),
+      req({ url: '/twin/inventory-mirror' }).catch(function(){return null}),
+      req({ url: '/twin/business-mirror' }).catch(function(){return null}),
+      req({ url: '/twin/risk-mirror' }).catch(function(){return null}),
+      req({ url: '/advice/daily' }).catch(function(){return null}),
     ]).then(function (results) {
       var invData = results[1];
       var riskData = results[3];
@@ -195,140 +196,16 @@ Page({
     if (!range || range.length === 0) return;
 
     var self = this;
-    var query = wx.createSelectorQuery().in(this);
-    query.select('#chartCanvas')
-      .fields({ node: true, size: true })
-      .exec(function (res) {
-        if (!res[0] || !res[0].node) return;
-        var canvas = res[0].node;
-        var ctx = canvas.getContext('2d');
-        var dpr = wx.getWindowInfo().pixelRatio;
-        var w = res[0].width;
-        var h = res[0].height;
-        canvas.width = w * dpr; canvas.height = h * dpr;
-        ctx.scale(dpr, dpr);
-
-        var series = [
+    Chart.initCanvas(this, '#chartCanvas').then(function (c) {
+      if (!c) return;
+      Chart.drawLineChart(c.ctx, c.width, c.height, range, {
+        series: [
           { key: 'revenue', color: '#175C45', axis: 'left' },
           { key: 'profit', color: '#F3A83B', axis: 'left' },
           { key: 'customer_price', color: '#2E7DD1', axis: 'right' },
-        ];
-        self._drawLineChart(ctx, w, h, range, series);
+        ],
+        fillArea: { key: 'revenue', gradientFrom: 'rgba(23,92,69,.20)', gradientTo: 'rgba(23,92,69,0)' },
       });
-  },
-
-  _drawLineChart: function (ctx, w, h, data, series) {
-    var pad = { top: 22, right: 54, bottom: 34, left: 48 };
-    var chartW = w - pad.left - pad.right;
-    var chartH = h - pad.top - pad.bottom;
-    var count = data.length;
-    ctx.clearRect(0, 0, w, h);
-    if (!count) return;
-
-    // 双轴刻度: 左轴=金额(营业额/利润), 右轴=客单价
-    var leftVals = [], rightVals = [];
-    data.forEach(function (d) {
-      series.forEach(function (s) {
-        if (s.axis === 'right') rightVals.push(Number(d[s.key]) || 0);
-        else leftVals.push(Number(d[s.key]) || 0);
-      });
-    });
-    var maxLeft = Math.max.apply(null, leftVals.concat([1]));
-    var magnitude = Math.pow(10, Math.max(0, String(Math.floor(maxLeft)).length - 2));
-    maxLeft = Math.ceil(maxLeft / magnitude) * magnitude;
-    var maxRight = Math.max.apply(null, rightVals.concat([1]));
-    if (maxRight <= 10) maxRight = 10;
-    else maxRight = Math.ceil(maxRight / (maxRight >= 100 ? 10 : 5)) * (maxRight >= 100 ? 10 : 5);
-
-    var formatMoney = function (value) {
-      if (value >= 10000) return '¥' + (value / 10000).toFixed(1) + '万';
-      if (value >= 1000) return '¥' + (value / 1000).toFixed(1) + 'k';
-      return '¥' + Math.round(value);
-    };
-    var formatAov = function (value) { return '¥' + (Math.round(value * 10) / 10); };
-    var pointX = function (index) {
-      return count === 1 ? pad.left + chartW / 2 : pad.left + index / (count - 1) * chartW;
-    };
-    var pointYL = function (value) {
-      return pad.top + chartH - (Number(value) || 0) / maxLeft * chartH;
-    };
-    var pointYR = function (value) {
-      return pad.top + chartH - (Number(value) || 0) / maxRight * chartH;
-    };
-
-    ctx.font = '10px sans-serif';
-    ctx.textBaseline = 'middle';
-    for (var g = 0; g <= 4; g++) {
-      var gy = pad.top + g / 4 * chartH;
-      ctx.beginPath();
-      if (ctx.setLineDash) ctx.setLineDash([3, 4]);
-      ctx.moveTo(pad.left, gy);
-      ctx.lineTo(w - pad.right, gy);
-      ctx.strokeStyle = g === 4 ? '#C9D5CD' : '#E4EAE5';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      if (ctx.setLineDash) ctx.setLineDash([]);
-      ctx.fillStyle = '#8A938D';
-      ctx.textAlign = 'right';
-      ctx.fillText(formatMoney(maxLeft * (1 - g / 4)), pad.left - 7, gy);
-      ctx.fillStyle = '#2E7DD1';
-      ctx.textAlign = 'left';
-      ctx.fillText(formatAov(maxRight * (1 - g / 4)), w - pad.right + 6, gy);
-    }
-
-    // 第一条序列 (revenue) 下方填充渐变
-    if (count > 1) {
-      var gradient = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
-      gradient.addColorStop(0, 'rgba(23,92,69,.20)');
-      gradient.addColorStop(1, 'rgba(23,92,69,0)');
-      ctx.beginPath();
-      data.forEach(function (d, i) {
-        var x = pointX(i);
-        var y = pointYL(d[series[0].key]);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.lineTo(pointX(count - 1), pad.top + chartH);
-      ctx.lineTo(pointX(0), pad.top + chartH);
-      ctx.closePath();
-      ctx.fillStyle = gradient;
-      ctx.fill();
-    }
-
-    var drawLine = function (s) {
-      var py = s.axis === 'right' ? pointYR : pointYL;
-      ctx.beginPath();
-      data.forEach(function (d, i) {
-        var x = pointX(i);
-        var y = py(d[s.key]);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.strokeStyle = s.color;
-      ctx.lineWidth = 2.5;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      if (count > 1) ctx.stroke();
-      data.forEach(function (d, i) {
-        var x = pointX(i);
-        var y = py(d[s.key]);
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFEFA';
-        ctx.fill();
-        ctx.strokeStyle = s.color;
-        ctx.lineWidth = 2.2;
-        ctx.stroke();
-      });
-    };
-
-    series.forEach(function (s) { drawLine(s); });
-
-    ctx.fillStyle = '#7B8780';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    data.forEach(function (d, i) {
-      var label = (d.date || '').slice(5).replace('-', '/');
-      ctx.fillText(label, pointX(i), h - 8);
     });
   },
 

@@ -27,6 +27,9 @@ App({
     this.globalData.merchantName = wx.getStorageSync('merchantName') || '';
     this.globalData.skin = this.getSkinByHour(new Date().getHours());
 
+    // 同步减少动效到 stream-text 模块
+    try { require('./utils/stream-text').setReduceMotion(this.globalData.reduceMotion); } catch (e) {}
+
     this.checkApiHealth();
     this.ensureLogin(false).then(function () {
       try { require('./utils/offline-sync').getQueue().sync().catch(function () {}); } catch (e) {}
@@ -47,9 +50,9 @@ App({
     }.bind(this));
   },
 
-  onError: function (err) { console.error('全局错误:', err); },
-  onUnhandledRejection: function (res) { console.error('未处理的Promise拒绝:', res.reason); },
-  onPageNotFound: function () { wx.redirectTo({ url: '/pages/index/index' }); },
+  onError: function (err) { console.error('全局错误:', err && (err.message || err.errMsg || err.stack || JSON.stringify(err)) || err); },
+  onUnhandledRejection: function (res) { console.error('未处理的Promise拒绝:', res && (res.reason && (res.reason.message || res.reason.errMsg || res.reason.stack || JSON.stringify(res.reason))) || res); },
+  onPageNotFound: function () { wx.switchTab({ url: '/pages/index/index' }); },
 
   showToast: function (msg, icon) {
     if (this._toastLock) return;
@@ -215,4 +218,21 @@ App({
   getMerchantId: function () { return this.globalData.merchantId; },
   getSkinByHour: function (h) { return h < 11 ? 'morning' : h < 17 ? 'noon' : 'evening'; },
   resolveSkin: function () { return this.globalData.skinManual || this.getSkinByHour(new Date().getHours()); },
+
+  /**
+   * 统一错误日志 + 可选 Toast。
+   * @param {string} context  - 错误发生位置 (如 'voice/parseText')
+   * @param {Error}  err      - 错误对象
+   * @param {Object} opts     - { silent: true 不弹Toast, level: 'warn'|'error' }
+   */
+  logError: function (context, err, opts) {
+    opts = opts || {};
+    var detail = (err && (err.message || err.errMsg)) || String(err);
+    var level = opts.level || 'error';
+    console[level]('[' + context + ']', detail, err);
+    if (!opts.silent) {
+      var msg = (err && err.body && (err.body.message || err.body.detail));
+      if (msg) this.showToast(String(msg));
+    }
+  },
 });

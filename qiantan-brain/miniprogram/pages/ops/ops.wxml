@@ -1,3 +1,4 @@
+<wxs src="/utils/format.wxs" module="fmt" />
 <!-- 经营管理 — 报损·临期·客户·导出 -->
 <view class="page-shell ops-page {{skin}}">
   <view class="page-hero"><text class="eyebrow">OPERATIONS · 日常经营</text><text class="hero-title">经营管理</text></view>
@@ -11,7 +12,7 @@
     <view class="section-head"><text class="section-title">记录报损</text><text class="link" bindtap="openWasteForm">+ 记录</text></view>
     <view class="cat-list" wx:if="{{wasteRecords.length}}">
       <view wx:for="{{wasteRecords}}" wx:key="record_id" class="cat-item">
-        <view class="cat-main"><text class="cat-name">商品{{item.product_id}}</text><text class="cat-meta">{{item.notes}}</text></view>
+        <view class="cat-main"><text class="cat-name">{{item.product_name || '商品' + item.product_id}}</text><text class="cat-meta">{{item.notes}}</text></view>
         <text class="cat-amount warn">-{{item.quantity}}{{item.unit}}</text>
       </view>
     </view>
@@ -30,7 +31,7 @@
         <view wx:for="{{wasteReasons}}" wx:key="*this" class="reason-chip {{wasteForm.reason === item ? 'active' : ''}}" data-reason="{{item}}" bindtap="pickWasteReason">{{item}}</view>
       </view>
       <input class="form-input" placeholder="备注" value="{{wasteForm.notes}}" data-field="notes" bindinput="onWasteField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeWasteForm">取消</button><button class="btn-primary" bindtap="submitWaste">确认报损</button></view>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeWasteForm">取消</button><button class="btn-primary" bindtap="submitWaste" loading="{{wasteSubmitting}}" disabled="{{wasteSubmitting}}">确认报损</button></view>
     </view>
   </view>
 
@@ -52,7 +53,7 @@
           <text wx:if="{{item.current_price}}">现价 ¥{{item.current_price}}</text>
         </view>
         <view wx:if="{{item.suggested_price}}" class="clear-suggest">
-          <text>建议降价至 ¥{{item.suggested_price.toFixed(2)}}</text>
+          <text>建议降价至 ¥{{fmt.fixed(item.suggested_price, 2)}}</text>
           <text class="act-btn" data-index="{{index}}" bindtap="quickDiscount">立即改价</text>
         </view>
       </view>
@@ -62,15 +63,17 @@
   <!-- ====== 客户赊账 ====== -->
   <block wx:if="{{tab==='customers'}}">
     <view class="section-head"><text class="section-title">赊账客户</text></view>
+    <view class="search-bar"><icon name="search" size="28" color="var(--muted)"/><input class="search-input" placeholder="搜索客户名" value="{{customerSearch}}" bindinput="onCustomerSearch"/></view>
     <view wx:if="{{!customers.length}}" class="empty-state"><text>暂无赊账客户</text></view>
+    <view wx:elif="{{!filteredCustomers.length}}" class="empty-state"><text>未找到匹配 "{{customerSearch}}" 的客户</text></view>
     <view wx:else class="cat-list">
-      <view wx:for="{{customers}}" wx:key="customer_name" class="cat-item">
+      <view wx:for="{{filteredCustomers}}" wx:key="customer_name" class="cat-item">
         <view class="cat-main">
           <text class="cat-name">{{item.customer_name}}</text>
           <text class="cat-meta" wx:if="{{item.is_overdue}}">逾期{{item.overdue_days}}天!</text>
           <text class="cat-meta" wx:elif="{{item.last_transaction}}">最近: {{item.last_transaction}}</text>
         </view>
-        <text class="cat-balance {{item.balance > 0 ? 'warn' : ''}}">{{item.balance > 0 ? '欠¥'+item.balance.toFixed(0) : '已结清'}}</text>
+        <text class="cat-balance {{item.balance > 0 ? 'warn' : ''}}">{{item.balance > 0 ? '欠¥'+fmt.fixed(item.balance, 0) : '已结清'}}</text>
         <view class="cat-actions">
           <text class="act-btn" data-name="{{item.customer_name}}" bindtap="viewCustomerLedger">明细</text>
           <text class="act-btn" wx:if="{{item.balance > 0}}" data-name="{{item.customer_name}}" bindtap="openRepay">回款</text>
@@ -84,13 +87,13 @@
     <view class="picker-sheet statement-sheet" catchtap="">
       <text class="picker-title">{{ledgerName}} · 赊账明细</text>
       <view class="statement-summary">
-        <view class="stmt-stat"><text class="stmt-num">¥{{customerLedger.total_charge.toFixed(0)}}</text><text class="stmt-label">赊账总额</text></view>
-        <view class="stmt-stat"><text class="stmt-num">¥{{customerLedger.total_repay.toFixed(0)}}</text><text class="stmt-label">已回款</text></view>
-        <view class="stmt-stat"><text class="stmt-num {{customerLedger.balance > 0 ? 'warn' : ''}}">¥{{customerLedger.balance.toFixed(0)}}</text><text class="stmt-label">当前欠款</text></view>
+        <view class="stmt-stat"><text class="stmt-num">¥{{fmt.fixed(customerLedger.total_charge, 0)}}</text><text class="stmt-label">赊账总额</text></view>
+        <view class="stmt-stat"><text class="stmt-num">¥{{fmt.fixed(customerLedger.total_repay, 0)}}</text><text class="stmt-label">已回款</text></view>
+        <view class="stmt-stat"><text class="stmt-num {{customerLedger.balance > 0 ? 'warn' : ''}}">¥{{fmt.fixed(customerLedger.balance, 0)}}</text><text class="stmt-label">当前欠款</text></view>
       </view>
       <view class="statement-list"><view wx:for="{{customerLedger.items}}" wx:key="id" class="stmt-item">
         <view class="stmt-left"><text class="stmt-dir">{{item.direction==='charge'?'赊账':'回款'}}</text><text class="stmt-note">{{item.note||''}}</text></view>
-        <text class="stmt-amount {{item.direction==='repay'?'ok':''}}">{{item.direction==='repay'?'-':'+'}}¥{{item.amount.toFixed(2)}}</text>
+        <text class="stmt-amount {{item.direction==='repay'?'ok':''}}">{{item.direction==='repay'?'-':'+'}}¥{{fmt.fixed(item.amount, 2)}}</text>
       </view></view>
       <button class="picker-close" bindtap="closeLedger">关闭</button>
     </view>
@@ -100,7 +103,7 @@
   <view wx:if="{{showRepayForm}}" class="picker-mask" bindtap="closeRepay">
     <view class="picker-sheet" catchtap=""><text class="picker-title">{{repayForm.customer_name}} · 回款</text>
       <input class="form-input" type="digit" placeholder="金额" value="{{repayForm.amount}}" data-field="amount" bindinput="onRepayField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeRepay">取消</button><button class="btn-primary" bindtap="submitRepay">确认回款</button></view>
+      <view class="picker-actions"><button class="btn-secondary" bindtap="closeRepay">取消</button><button class="btn-primary" bindtap="submitRepay" loading="{{repaySubmitting}}" disabled="{{repaySubmitting}}">确认回款</button></view>
     </view>
   </view>
 

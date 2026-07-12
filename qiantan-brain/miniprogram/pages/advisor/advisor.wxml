@@ -1,4 +1,4 @@
-<!-- AI参谋 · 先给结论，再解释依据与风险 (v2.2 生鲜元气) -->
+<!-- AI参谋 v3.0 · 数据驱动推送 + 反馈机制 -->
 <wxs src="/utils/format.wxs" module="fmt" />
 <view class="page-shell advisor-page skin-{{skin}}">
   <view class="page-hero advisor-hero">
@@ -15,20 +15,30 @@
       <view><text class="env-num">{{envSummary.rainfall_prob}}%</text><text class="env-label">降雨概率</text></view>
       <view><text class="env-num">{{envSummary.is_weekend ? '周末' : '工作日'}}</text><text class="env-label">客流节奏</text></view>
     </view>
+    <view class="env-strip muted" wx:elif="{{envError}}">
+      <view><text class="env-num muted">—</text><text class="env-label">天气数据暂不可用</text></view>
+    </view>
   </view>
 
-  <!-- 小智主动推送（主动智能层） -->
+  <!-- 小智主动推送 — 数据驱动, 点击跳转而非假按钮 -->
   <view class="section-head"><text class="section-title">小智主动推送</text><text class="section-caption">不等你问，先替你盯着</text></view>
   <view class="push-stack">
-    <view wx:for="{{activePush}}" wx:key="id" class="push-card {{item.adopted ? 'done' : ''}}">
-      <view class="push-icon"><icon name="{{item.icon}}" size="38" color="{{item.tone==='warn' ? 'var(--corn)' : 'var(--green-800)'}}" /></view>
-      <view class="push-body">
-        <text class="push-title">{{item.title}}</text>
-        <text class="push-desc">{{item.desc}}</text>
-      </view>
-      <button wx:if="{{!item.adopted}}" class="push-cta" data-id="{{item.id}}" bindtap="adoptPush">{{item.cta}}</button>
-      <view wx:else class="push-done">✓ {{item.doneText}}</view>
+    <block wx:if="{{pushLoading}}">
+      <view class="push-card skeleton"><view class="sk-line w80"></view><view class="sk-line w50"></view></view>
+    </block>
+    <view wx:elif="{{activePush.length === 0}}" class="empty-state mini">
+      <text>当前没有需要主动提醒的事项 👋</text>
     </view>
+    <block wx:else>
+      <view wx:for="{{activePush}}" wx:key="id" class="push-card {{item.tone}}" data-route="{{item.route}}" bindtap="handlePushTap">
+        <view class="push-icon"><icon name="{{item.icon}}" size="38" color="{{item.tone==='warn' ? 'var(--corn)' : 'var(--green-800)'}}" /></view>
+        <view class="push-body">
+          <text class="push-title">{{item.title}}</text>
+          <text class="push-desc">{{item.desc}}</text>
+        </view>
+        <text class="push-cta">{{item.cta}} ›</text>
+      </view>
+    </block>
   </view>
 
   <view class="section-head"><text class="section-title">优先行动</text><text class="section-caption">{{recommendations.length}} 条建议</text></view>
@@ -39,7 +49,7 @@
     <text class="says-text">{{saysText}}<text class="caret">▍</text></text>
   </view>
 
-  <view wx:if="{{recommendations.length === 0}}" class="loading-card"><view class="loading-line wide"></view><view class="loading-line"></view><view class="loading-line short"></view></view>
+  <view wx:if="{{recommendations.length === 0 && !pushLoading}}" class="empty-state surface"><mascot size="sm" mood="idle"/><text>暂无建议。记几笔经营流水后，小智就能帮你分析。</text></view>
 
   <view wx:for="{{recommendations}}" wx:key="product_id" class="advice-card">
     <view class="advice-index">0{{index + 1}}</view>
@@ -51,6 +61,12 @@
         <view wx:for="{{item.basis}}" wx:key="factor" wx:for-item="b" class="basis-line"><text class="basis-factor">{{b.factor}}</text><text class="basis-value {{b.impact === '+' ? 'green' : b.impact === '-' ? 'red' : ''}}">{{b.value}}</text></view>
       </view>
       <view class="risk-note" wx:if="{{item.risk_warning}}"><text class="risk-symbol">!</text><text>{{item.risk_warning}}</text></view>
+      <!-- 反馈按钮 -->
+      <view class="advice-feedback">
+        <text class="fb-label">这条建议有用吗？</text>
+        <text class="fb-btn {{feedbackMap[item.recommendation_id] === 'helpful' ? 'active' : ''}}" data-id="{{item.recommendation_id || recommendationIds[index]}}" data-type="helpful" bindtap="onFeedback">👍 有用</text>
+        <text class="fb-btn {{feedbackMap[item.recommendation_id] === 'not_helpful' ? 'active' : ''}}" data-id="{{item.recommendation_id || recommendationIds[index]}}" data-type="not_helpful" bindtap="onFeedback">👎 没用</text>
+      </view>
     </view>
   </view>
 

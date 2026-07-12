@@ -7,6 +7,11 @@
   </view>
 
   <block wx:else>
+    <!-- 缓存降级提示 -->
+    <view class="stale-banner" wx:if="{{staleData}}"><text>数据可能不是最新，下拉刷新 →</text></view>
+    <!-- 错误状态 -->
+    <view class="empty-state surface" wx:if="{{loadError}}"><mascot size="md" mood="worry"/><text>数据加载失败，请下拉刷新</text></view>
+    <block wx:if="{{!loadError}}">
     <view class="page-hero home-hero">
       <view class="hero-topline">
         <view><text class="eyebrow">QIANTAN · 今日经营台</text><text class="hero-title">{{greeting}}，{{merchantName}}</text></view>
@@ -54,6 +59,8 @@
       <view class="summary-stat"><text class="summary-num green">{{inStockCount}}</text><text class="summary-label">当前有库存</text></view>
       <view class="summary-divider"></view>
       <view class="summary-stat"><text class="summary-num {{expiringCount > 0 ? 'red' : ''}}">{{expiringCount}}</text><text class="summary-label">临期批次</text></view>
+      <view class="summary-divider"></view>
+      <view class="summary-stat"><text class="summary-num" style="color:{{riskColor}}">{{riskScore}}</text><text class="summary-label">风险 {{riskLevel}}</text></view>
     </view>
     <text class="data-note">不同商品单位不可直接相加，因此首页按品类和风险展示，不再汇总成“总斤数”。</text>
 
@@ -70,5 +77,6 @@
       <view wx:for="{{recentRecords}}" wx:key="id" class="record-item"><view class="record-bullet"></view><text class="record-text">{{item.display_text}}</text></view>
     </view>
     <view class="empty-state surface" wx:else><mascot size="sm" mood="idle"/><text>还没有经营记录。先记一笔，利润、库存和建议才会逐步准确。</text></view>
+  </block>
   </block>
 </view>

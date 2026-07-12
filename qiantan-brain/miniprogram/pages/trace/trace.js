@@ -68,50 +68,58 @@ Page({
     app.request({
       url: '/food-safety/trace/' + encodeURIComponent(code),
       method: 'GET',
-      noAuth: true,  // Public endpoint, no JWT required
+      auth: false,  // 公开端点,无需 JWT(app.js 判断 auth !== false)
     }).then(function (data) {
-      var trace = data.data || data;
+      // app.request 已解包 body.data,这里直接用 data;兼容旧式双重解包
+      var trace = (data && data.trace) ? data.trace : data;
+      // 在 JS 中算好派生字段,WXML 不支持调用页面方法
+      var status = trace && trace.status;
+      var statusLabels = self.data.statusLabels;
+      var statusColors = self.data.statusColors;
+      var statusLabel = statusLabels[status] || status || '未知';
+      var statusColor = statusColors[status] || 'muted';
+      var isSafe = status === 'sellable' || status === 'near_expiry' || status === 'sold_out';
+      var bannerIcon = isSafe ? '✓' : '⚠';
+      // 证照列表预处理为数组
+      var certs = trace && trace.certificates;
+      var certList = [];
+      if (certs) {
+        if (typeof certs === 'string') {
+          try { certs = JSON.parse(certs); } catch (e) { certs = null; }
+        }
+        if (Array.isArray(certs)) {
+          certList = certs.map(function (c) { return typeof c === 'string' ? { name: c } : c; });
+        } else if (certs && typeof certs === 'object') {
+          certList = Object.keys(certs).map(function (k) { return { name: k, value: certs[k] }; });
+        }
+      }
       self.setData({
         loading: false,
         trace: trace,
         error: null,
+        statusLabel: statusLabel,
+        statusColor: statusColor,
+        isSafe: isSafe,
+        bannerIcon: bannerIcon,
+        certList: certList,
+        hasCerts: certList.length > 0,
       });
     }).catch(function (err) {
       self.setData({
         loading: false,
-        error: (err && err.message) || '未找到该批次的追溯信息',
+        error: (err && err.body && (err.body.message || err.body.detail)) || (err && err.message) || '未找到该批次的追溯信息',
       });
     });
   },
 
-  // ── Helpers ─────────────────────────────────────────
-
-  certList: function () {
-    var certs = this.data.trace && this.data.trace.certificates;
-    if (!certs) return [];
-    if (typeof certs === 'string') {
-      try { certs = JSON.parse(certs); } catch (e) { return []; }
-    }
-    if (Array.isArray(certs)) return certs;
-    return Object.keys(certs).map(function (k) {
-      return { name: k, value: certs[k] };
-    });
+  // "重新查询"按钮:从 dataset 读 code,避免 bindtap 传 event 给 loadTrace
+  retryQuery: function (e) {
+    var code = e.currentTarget.dataset.code || this.data.traceCode;
+    if (code) this.loadTrace(code);
   },
 
-  statusLabel: function () {
-    var s = this.data.trace && this.data.trace.status;
-    return this.data.statusLabels[s] || s || '未知';
-  },
-
-  statusColor: function () {
-    var s = this.data.trace && this.data.trace.status;
-    return this.data.statusColors[s] || 'muted';
-  },
-
-  isSafe: function () {
-    var s = this.data.trace && this.data.trace.status;
-    return s === 'sellable' || s === 'near_expiry' || s === 'sold_out';
-  },
+  // 派生字段(statusLabel/statusColor/isSafe/certList)已在 loadTrace 中
+  // 计算并写入 data,WXML 不支持调用页面方法,必须走 data 绑定。
 
   // Copy trace code
   copyCode: function () {
@@ -119,6 +127,23 @@ Page({
       data: this.data.traceCode,
       success: function () {
         wx.showToast({ title: '追溯码已复制', icon: 'success' });
+      },
+    });
+  },
+
+  reportIssue: function () {
+    var self = this;
+    wx.showModal({
+      title: '反馈问题', editable: true,
+      placeholderText: '描述商品或溯源信息的问题...', content: '',
+      success: function (res) {
+        if (res.confirm && res.content && res.content.trim()) {
+          app.request({
+            url: '/feedback', method: 'POST',
+            data: { content: '追溯码 ' + self.data.traceCode + ': ' + res.content.trim(), page: 'pages/trace/trace' },
+          }).then(function () { wx.showToast({ title: '感谢反馈！', icon: 'success' }); })
+            .catch(function () { wx.showToast({ title: '提交失败', icon: 'none' }); });
+        }
       },
     });
   },

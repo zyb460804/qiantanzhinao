@@ -23,10 +23,23 @@ Page({
     returnSubmitting: false,
   },
 
+  onLoad: function (options) {
+    this._pendingStatementSupplierId = options && options.statement ? options.statement : '';
+  },
+
   onShow: function () {
+    var self = this;
     this.setData({ skinClass: 'skin-' + app.resolveSkin() });
-    this.loadList();
     this.loadSuppliers();
+    this._importPurchaseDraft().then(function () {
+      return self.loadList();
+    }).then(function () {
+      if (self._pendingStatementSupplierId) {
+        var supplierId = self._pendingStatementSupplierId;
+        self._pendingStatementSupplierId = '';
+        self._loadStatement(supplierId);
+      }
+    });
   },
 
   onPullDownRefresh: function () {
@@ -36,6 +49,46 @@ Page({
   },
 
   // ── 数据加载 ──────────────────────────────────────────
+
+  _importPurchaseDraft: function () {
+    var self = this;
+    var draft = wx.getStorageSync('purchaseDraft');
+    if (!Array.isArray(draft) || draft.length === 0 || this._draftImporting) return Promise.resolve(false);
+    this._draftImporting = true;
+    this.setData({ submitting: true });
+    var items = draft.map(function (item) {
+      return {
+        product_id: item.product_id || null,
+        name: (item.name || '').trim(),
+        qty: Number(item.qty || item.quantity || 0),
+        unit: item.unit || '斤',
+        from: item.from || '经营日历',
+      };
+    }).filter(function (item) { return item.name && item.qty > 0; });
+    if (!items.length) {
+      wx.removeStorageSync('purchaseDraft');
+      this._draftImporting = false;
+      this.setData({ submitting: false });
+      return Promise.resolve(false);
+    }
+    return app.request({ url: '/purchase/from-advice', method: 'POST', data: { items: items } }).then(function (data) {
+      wx.removeStorageSync('purchaseDraft');
+      self._draftImporting = false;
+      self.setData({ submitting: false });
+      var unmatched = (data && data.unmatched_items) || [];
+      if (unmatched.length) {
+        wx.showModal({ title: '已导入采购清单', content: '以下商品未在商品目录中找到：' + unmatched.join('、'), showCancel: false });
+      } else {
+        wx.showToast({ title: '时令商品已加入清单', icon: 'success' });
+      }
+      return true;
+    }).catch(function (err) {
+      self._draftImporting = false;
+      self.setData({ submitting: false });
+      wx.showToast({ title: (err.body && err.body.detail) || '采购草稿导入失败', icon: 'none' });
+      return false;
+    });
+  },
 
   loadSuppliers: function () {
     var self = this;
@@ -252,6 +305,13 @@ Page({
     var acc = this.data.acceptanceItems;
     if (!acc[itemId]) acc[itemId] = {};
     acc[itemId][field] = val;
+    // 净重自动计算: 毛重 - 皮重
+    if (field === 'gross_weight' || field === 'tare_weight') {
+      var g = Number(acc[itemId].gross_weight) || 0;
+      var t = Number(acc[itemId].tare_weight) || 0;
+      acc[itemId].net_weight = Math.max(0, g - t);
+      acc[itemId].accepted_qty = acc[itemId].net_weight;
+    }
     this.setData({ acceptanceItems: acc });
   },
 
@@ -365,12 +425,23 @@ Page({
 
   // ── 对账单 ────────────────────────────────────────────
 
-  openStatement: function (e) {
-    var supplierId = e.currentTarget.dataset.id;
+  _loadStatement: function (supplierId) {
     var self = this;
-    app.request({ url: '/accounts/supplier/' + supplierId + '/statement' }).then(function (data) {
+    if (!supplierId) return Promise.resolve(false);
+    wx.showLoading({ title: '加载对账单...' });
+    return app.request({ url: '/accounts/supplier/' + supplierId + '/statement' }).then(function (data) {
+      wx.hideLoading();
       self.setData({ showStatement: true, statementData: data, statementSupplierId: supplierId });
-    }).catch(function () {});
+      return true;
+    }).catch(function (err) {
+      wx.hideLoading();
+      wx.showToast({ title: (err.body && err.body.detail) || '对账单加载失败', icon: 'none' });
+      return false;
+    });
+  },
+
+  openStatement: function (e) {
+    return this._loadStatement(e.currentTarget.dataset.id);
   },
 
   closeStatement: function () { this.setData({ showStatement: false, statementData: null }); },

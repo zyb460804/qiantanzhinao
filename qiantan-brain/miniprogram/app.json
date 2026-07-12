@@ -18,7 +18,8 @@
     "pages/ops/ops",
     "pages/devices/devices",
     "pages/finance/finance",
-    "pages/trace/trace"
+    "pages/trace/trace",
+    "pages/doc/doc"
   ],
   "window": {
     "navigationBarBackgroundColor": "#123D30",

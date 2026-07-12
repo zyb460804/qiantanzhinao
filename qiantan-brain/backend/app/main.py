@@ -21,6 +21,7 @@ from app.routers import (
     edge,
     environment,
     expense,
+    feedback,
     food_safety,
     inventory,
     market_admin,
@@ -107,6 +108,7 @@ app.include_router(reconciliation.router)
 app.include_router(device.router)
 app.include_router(expense.router)
 app.include_router(market_admin.router)
+app.include_router(feedback.router)
 app.include_router(media.router)
 
 

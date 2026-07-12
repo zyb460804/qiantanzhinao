@@ -17,7 +17,7 @@ Page({
     quantity: '',
     unit: '斤',
     unitCost: '',
-    demoMode: true,
+    demoMode: false,
     submitting: false,
     submitted: false,
     submitResult: null,
@@ -101,6 +101,15 @@ Page({
     });
   },
 
+  retakePhoto: function () {
+    // 只重置状态,不自动开相机(用户可主动点拍照/相册按钮重新选择)
+    this.setData({
+      imagePath: '', recognizing: false, recognized: false, recognizeFailed: false,
+      detections: [], suggestedProduct: null, submitted: false, submitResult: null,
+      quantity: '', unitCost: '',
+    });
+  },
+
   onImageSelect: function (filePath) {
     var self = this;
     this.setData({
@@ -159,7 +168,6 @@ Page({
       wx.showToast({ title: '请先选择图片', icon: 'none' });
       return;
     }
-    var mid = app.getMerchantId();
 
     this.setData({
       recognizing: true,
@@ -172,7 +180,6 @@ Page({
       url: '/vision/recognize',
       filePath: this.data.imagePath,
       formData: {
-        merchant_id: mid,
         demo_mode: this.data.demoMode ? 'true' : 'false',
       },
     }).then(function (data) {
@@ -342,14 +349,18 @@ Page({
 
     this.setData({ submitting: true });
 
-    var mid = app.getMerchantId();
     var verb = this.data.event_type === 'purchase' ? '进了' : '卖了';
     var text = verb + product.name + qty + this.data.unit;
+    // 采购时拼接成本信息,让 NLP 解析入库成本
+    var unitCost = this.data.unitCost;
+    if (unitCost && this.data.event_type === 'purchase') {
+      text += '每' + this.data.unit + unitCost + '元';
+    }
 
     app.request({
       url: '/voice/parse-text',
       method: 'POST',
-      data: { merchant_id: mid, text: text },
+      data: { text: text },
     }).then(function (res) {
       var parsed = res.parsed || {};
       var voiceLogId = parsed.voice_log_id || res.voice_log_id;
@@ -361,7 +372,7 @@ Page({
       app.request({
         url: '/voice/confirm',
         method: 'POST',
-        data: { voice_log_id: voiceLogId },
+        data: { voice_log_id: voiceLogId, unit_cost: unitCost || undefined },
       }).then(function (confirmRes) {
         var result = confirmRes || {};
         result.product = product.name;

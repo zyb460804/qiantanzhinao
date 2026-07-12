@@ -12,15 +12,14 @@
       "outputPath": ""
     },
     "useCompilerPlugins": false,
-    "minifyWXML": true
+    "minifyWXML": true,
+    "condition": false
   },
   "compileType": "miniprogram",
   "miniprogramRoot": "qiantan-brain/miniprogram/",
-  "simulatorPluginLibVersion": {},
   "packOptions": {
     "ignore": [],
     "include": []
   },
-  "appid": "wx2e2334a77575f6ca",
-  "editorSetting": {}
+  "appid": "wx2e2334a77575f6ca"
 }

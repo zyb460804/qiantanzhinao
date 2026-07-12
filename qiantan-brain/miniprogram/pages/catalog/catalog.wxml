@@ -1,3 +1,4 @@
+<wxs src="/utils/format.wxs" module="fmt" />
 <!-- 商品管理 — SKU/别名/规格/单位/供应商 -->
 <view class="page-shell cat-page {{skin}}">
   <view class="page-hero"><text class="eyebrow">CATALOG · 商品与供应商</text><text class="hero-title">商品管理</text></view>
@@ -9,8 +10,9 @@
   <!-- SKU列表 -->
   <view wx:if="{{tab==='skus'}}">
     <view class="section-head"><text class="section-title">商品SKU</text><text class="link" bindtap="openSkuForm">+ 新增</text></view>
+    <view class="search-bar"><icon name="search" size="28" color="var(--muted)"/><input class="search-input" placeholder="搜索商品名称" value="{{searchKeyword}}" bindinput="onSearchInput"/></view>
     <view class="cat-list">
-      <view wx:for="{{skus}}" wx:key="sku_id" class="cat-item">
+      <view wx:for="{{searchKeyword ? filteredSkus : skus}}" wx:key="sku_id" class="cat-item">
         <view class="cat-main"><text class="cat-name">{{item.name}}</text><text class="cat-meta">{{item.canonical_unit}} · {{item.shelf_life_hours}}h</text></view>
         <text class="cat-price" wx:if="{{item.default_sale_price}}">¥{{item.default_sale_price}}</text>
         <view class="cat-actions">
@@ -50,7 +52,7 @@
     <view class="cat-list">
       <view wx:for="{{suppliers}}" wx:key="supplier_id" class="cat-item">
         <view class="cat-main"><text class="cat-name">{{item.name}}</text><text class="cat-meta" wx:if="{{item.contact}}">{{item.contact}}</text></view>
-        <text class="cat-balance {{item.current_balance > 0 ? 'warn' : ''}}">{{item.current_balance > 0 ? '欠¥'+item.current_balance.toFixed(0) : '已结清'}}</text>
+        <text class="cat-balance {{item.current_balance > 0 ? 'warn' : ''}}">{{item.current_balance > 0 ? '欠¥'+fmt.fixed(item.current_balance, 0) : '已结清'}}</text>
         <view class="cat-actions">
           <text class="act-btn" data-id="{{item.supplier_id}}" bindtap="viewStatement">对账</text>
           <text class="act-btn" data-id="{{item.supplier_id}}" bindtap="openSupForm">编辑</text>

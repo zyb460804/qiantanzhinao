@@ -159,10 +159,10 @@ OfflineMediaQueue.prototype._uploadOne = function (task) {
   self._updateTask(task);
 
   var app = getApp();
-  var token = app.globalData.token || '';
+  var token = app.globalData.accessToken || '';
 
   wx.uploadFile({
-    url: self.uploadUrl || (app.globalData.apiBase || '') + '/api/v1/media/upload',
+    url: self.uploadUrl || (app.globalData.apiBase || '') + '/media/upload',
     filePath: task.savedPath,
     name: 'file',
     header: {

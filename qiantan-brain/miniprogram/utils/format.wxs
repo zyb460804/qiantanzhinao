@@ -8,21 +8,30 @@
 
 /** 小数转百分比整数: 0.78 → "78" */
 var percent = function (val) {
-  if (val === undefined || val === null || val === '') return '0';
+  if (val == undefined || val == null || val == '') return '0';
   return Math.round(val * 100);
 };
 
 /** 数组连接为字符串 */
 var join = function (arr, sep) {
-  if (!arr || arr.length === 0) return '';
+  if (!arr || arr.length == 0) return '';
   return arr.join(sep || '、');
 };
 
 /** 保留指定位小数: 3.14159, 2 → "3.14" (WXS 无 toFixed,手动实现) */
 var fixed = function (val, digits) {
-  if (val === undefined || val === null) return '0';
-  var m = Math.pow(10, digits || 0);
-  return Math.round(val * m) / m;
+  digits = digits || 0;
+  if (val == undefined || val == null || val == '') return '0';
+  val = Number(val);
+  if (val != val) val = 0; // NaN 检查: NaN != NaN 为 true (WXS 无 isNaN)
+  var m = Math.pow(10, digits);
+  var rounded = Math.round(val * m) / m;
+  if (digits == 0) return '' + Math.round(rounded);
+  var parts = ('' + rounded).split('.');
+  var decimals = parts.length > 1 ? parts[1] : '';
+  while (decimals.length < digits) decimals += '0';
+  if (decimals.length > digits) decimals = decimals.slice(0, digits);
+  return parts[0] + '.' + decimals;
 };
 
 module.exports = {

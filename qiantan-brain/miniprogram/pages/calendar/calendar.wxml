@@ -1,10 +1,26 @@
-<!-- 经营日历 · 时令 + 星期策略 (v2.2 生鲜元气) -->
+<!-- 经营日历 · 时令 + 星期策略 (v2.3) -->
 <view class="page-shell calendar-page skin-{{skin}}">
+  <!-- 加载态 -->
+  <view class="skeleton-wrap" wx:if="{{loading}}">
+    <view class="sk-hero"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    <view class="sk-card tall"></view>
+    <view class="sk-card tall"></view>
+  </view>
+
+  <!-- 错误态 -->
+  <view class="empty-state surface" wx:elif="{{hasError}}">
+    <mascot size="md" mood="worry"/>
+    <text>节气数据加载失败</text>
+    <button class="btn-outline" bindtap="retry">重新加载</button>
+  </view>
+
+  <block wx:else>
   <view class="page-hero cal-hero">
     <text class="eyebrow">SEASONAL CALENDAR · 时令经营</text>
     <text class="hero-title">今天卖什么，看节气</text>
     <text class="hero-desc">把节气、星期和天气，变成能直接做的备货与营销。</text>
     <view class="today-pill"><icon name="calendar" size="30" color="var(--corn)" /><text>{{solarTerm}} · {{weekdayText}}</text></view>
+    <button class="btn-outline sm" style="margin-top:12rpx" bindtap="addToPurchase">将当令商品加入采购清单</button>
   </view>
 
   <!-- 星期条 -->
@@ -30,7 +46,7 @@
   </view>
 
   <!-- 未来几天策略 -->
-  <view class="section-head"><text class="section-title">未来几天怎么备</text><text class="section-caption">小智按天气推演</text></view>
+  <view class="section-head"><text class="section-title">未来几天怎么备</text><text class="section-caption">按天气提醒</text></view>
   <view class="plan-list">
     <view wx:for="{{plans}}" wx:key="day" class="plan-card">
       <view class="plan-date"><text class="plan-d">{{item.day}}</text><text class="plan-w">{{item.week}}</text></view>
@@ -41,4 +57,5 @@
       <icon name="{{item.hot ? 'spark' : 'leaf'}}" size="36" color="{{item.hot ? 'var(--red)' : 'var(--green-700)'}}" />
     </view>
   </view>
+  </block>
 </view>

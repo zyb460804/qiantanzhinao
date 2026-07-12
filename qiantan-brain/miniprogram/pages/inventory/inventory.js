@@ -1,4 +1,4 @@
-/** 库存页：按品类与原始单位展示，避免把斤、箱、件等直接相加。 */
+/** 库存页 v3.0 — 下拉刷新 / 搜索 / 预警视觉 / 空状态引导 */
 var app = getApp();
 
 Page({
@@ -8,12 +8,18 @@ Page({
     totalCategories: 0, inStockCount: 0, healthyCount: 0, attentionCount: 0, emptyCount: 0,
     insightTitle: '库存记录平稳', insightText: '当前没有需要优先处理的库存问题。', insightTone: 'good',
     sortMode: 'low', filterMode: 'all', searchKeyword: '', filteredCount: 0,
-    updatedAt: '--:--', loading: true,
+    updatedAt: '--:--', loading: true, isEmpty: false,
   },
 
   onShow: function () {
     this.setData({ skinClass: 'skin-' + app.resolveSkin() });
     this.loadInventory();
+  },
+
+  onPullDownRefresh: function () {
+    var self = this;
+    this.loadInventory(function () { wx.stopPullDownRefresh(); },
+                      function () { wx.stopPullDownRefresh(); });
   },
 
   _decorateItems: function (items) {
@@ -72,18 +78,18 @@ Page({
 
   _loadAlerts: function () {
     var self = this;
-    return app.request({ url: '/inventory/alerts', data: { merchant_id: app.getMerchantId() } }).then(function (data) {
+    return app.request({ url: '/inventory/alerts' }).then(function (data) {
       self.setData({ expiryAlerts: self._decorateAlerts((data && data.expiry_alerts) || []), expiringCount: Number(data && data.expiring_count) || 0 });
     }).catch(function () { self.setData({ expiryAlerts: [], expiringCount: 0 }); });
   },
 
-  loadInventory: function () {
+  loadInventory: function (onSuccess, onError) {
     if (this._loading) return;
     this._loading = true;
     this.setData({ loading: true });
     var self = this;
     this._loadAlerts();
-    app.request({ url: '/inventory/current', data: { merchant_id: app.getMerchantId() } }).then(function (items) {
+    app.request({ url: '/inventory/current' }).then(function (items) {
       var decorated = self._decorateItems(Array.isArray(items) ? items : []);
       var inStock = decorated.filter(function (item) { return item.qty_value > 0; }).length;
       var healthy = decorated.filter(function (item) { return item.status === 'healthy'; }).length;
@@ -97,13 +103,15 @@ Page({
         inventoryItems: decorated, totalCategories: decorated.length, inStockCount: inStock,
         healthyCount: healthy, attentionCount: attention, emptyCount: empty,
         insightTitle: insight.title, insightText: insight.text, insightTone: insight.tone,
-        updatedAt: updatedAt, loading: false,
+        updatedAt: updatedAt, loading: false, isEmpty: decorated.length === 0,
       }, function () { self._applyView(); });
+      if (onSuccess) onSuccess();
     }).catch(function (err) {
       self._loading = false;
       self.setData({ loading: false });
-      console.error('Inventory load fail:', err);
-      wx.showToast({ title: '库存加载失败', icon: 'none' });
+      app.logError('inventory/load', err, { silent: true });
+      if (onError) onError();
+      else wx.showToast({ title: '库存加载失败', icon: 'none' });
     });
   },
 

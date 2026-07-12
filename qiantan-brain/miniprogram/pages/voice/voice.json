@@ -7,5 +7,6 @@
     "mascot": "/components/mascot/mascot"
   },
   "navigationBarBackgroundColor": "#123D30",
-  "navigationBarTextStyle": "white"
+  "navigationBarTextStyle": "white",
+  "enablePullDownRefresh": true
 }

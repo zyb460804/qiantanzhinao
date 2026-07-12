@@ -1,10 +1,10 @@
 {
   "navigationBarTitleText": "库存总览",
   "usingComponents": {
-    "stock-chart": "/components/stock-chart/stock-chart",
     "icon": "/components/icon/icon",
     "mascot": "/components/mascot/mascot"
   },
   "navigationBarBackgroundColor": "#123D30",
-  "navigationBarTextStyle": "white"
+  "navigationBarTextStyle": "white",
+  "enablePullDownRefresh": true
 }

@@ -138,11 +138,11 @@
       </view>
     </view>
 
-    <!-- AI 总结 -->
+    <!-- 经营总结 -->
     <view class="block">
       <view class="section-head">
-        <text class="section-title">AI 经营总结</text>
-        <text class="section-caption">小智智能分析</text>
+        <text class="section-title">经营总结</text>
+        <text class="section-caption">智能分析</text>
       </view>
       <view class="card ai-card">
         <view class="ai-head">

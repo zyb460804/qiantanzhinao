@@ -102,84 +102,166 @@ async def create_from_advice(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Generate a purchase list from today's AI recommendations."""
+    """Generate or extend today's purchase list from AI advice or manual items."""
     merchant_id = merchant.id
-    recommendation_ids = body.get("recommendation_ids", [])
+    recommendation_ids = body.get("recommendation_ids") or []
+    manual_items = body.get("items") or []
+    if not isinstance(recommendation_ids, list) or not isinstance(manual_items, list):
+        raise HTTPException(status_code=400, detail="recommendation_ids 和 items 必须是数组")
+    if len(manual_items) > 100:
+        raise HTTPException(status_code=400, detail="一次最多导入100个采购商品")
 
-    today_start = utc_today_start()
-    if recommendation_ids:
-        rec_query = select(Recommendation).where(
-            Recommendation.id.in_([uuid.UUID(rid) for rid in recommendation_ids]),
-        )
-    else:
-        rec_query = select(Recommendation).where(
-            Recommendation.merchant_id == merchant_id,
-            Recommendation.created_at >= today_start,
-        )
-    rec_result = await db.execute(rec_query)
-    recs = rec_result.scalars().all()
+    recs: list[Recommendation] = []
+    should_load_advice = bool(recommendation_ids) or not manual_items
+    if should_load_advice:
+        today_start = utc_today_start()
+        if recommendation_ids:
+            try:
+                parsed_ids = [uuid.UUID(str(rid)) for rid in recommendation_ids]
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="采购建议ID格式不正确") from exc
+            rec_query = select(Recommendation).where(
+                Recommendation.id.in_(parsed_ids),
+                Recommendation.merchant_id == merchant_id,
+            )
+        else:
+            rec_query = select(Recommendation).where(
+                Recommendation.merchant_id == merchant_id,
+                Recommendation.created_at >= today_start,
+            )
+        recs = (await db.execute(rec_query)).scalars().all()
 
-    if not recs:
+    if not recs and not manual_items:
         raise HTTPException(status_code=404, detail="未找到可用的采购建议")
 
     existing_query = select(PurchaseList).where(
         PurchaseList.merchant_id == merchant_id,
         PurchaseList.status.in_(["draft", "confirmed"]),
     )
-    existing_result = await db.execute(existing_query)
-    existing_list = existing_result.scalars().first()
-
-    if existing_list:
-        plist = existing_list
-    else:
+    plist = (await db.execute(existing_query)).scalars().first()
+    if not plist:
         plist = PurchaseList(merchant_id=merchant_id, status="draft")
         db.add(plist)
         await db.flush()
 
-    product_ids = {r.product_id for r in recs}
-    product_map = await _get_product_map(db, product_ids)
+    rec_product_map = await _get_product_map(db, {r.product_id for r in recs})
 
-    total_estimated = Decimal("0")
-    added_count = 0
-    for rec in recs:
-        product = product_map.get(rec.product_id)
-        if not product:
+    names = {
+        str(item.get("name") or "").strip()
+        for item in manual_items if isinstance(item, dict) and item.get("name")
+    }
+    manual_ids: set[int] = set()
+    for item in manual_items:
+        if not isinstance(item, dict) or item.get("product_id") in (None, ""):
             continue
+        try:
+            manual_ids.add(int(item["product_id"]))
+        except (TypeError, ValueError):
+            continue
+    manual_products = (
+        (await db.execute(select(ProductCategory).where(
+            (ProductCategory.id.in_(manual_ids)) | (ProductCategory.name.in_(names))
+        ))).scalars().all()
+        if manual_ids or names else []
+    )
+    manual_by_id = {product.id: product for product in manual_products}
+    manual_by_name = {product.name: product for product in manual_products}
 
-        item_query = select(PurchaseItem).where(
+    existing_items = (await db.execute(
+        select(PurchaseItem).where(
             PurchaseItem.list_id == plist.id,
-            PurchaseItem.product_id == rec.product_id,
-            PurchaseItem.status == "pending",
+            PurchaseItem.status != "cancelled",
         )
-        item_result = await db.execute(item_query)
-        if item_result.scalar_one_or_none():
-            continue
+    )).scalars().all()
+    existing_product_ids = {item.product_id for item in existing_items}
 
-        qty = rec.recommended_qty or Decimal("0")
-        if qty <= 0:
-            continue
+    added_count = 0
+    matched_manual_count = 0
+    unmatched_names: list[str] = []
 
-        est_cost = product.default_price or Decimal("0")
+    for rec in recs:
+        product = rec_product_map.get(rec.product_id)
+        qty = _to_d(rec.recommended_qty)
+        if not product or qty <= 0 or rec.product_id in existing_product_ids:
+            continue
+        est_cost = _to_d(product.default_price)
         est_total = (qty * est_cost).quantize(Decimal("0.01"))
-        total_estimated += est_total
-
-        item = PurchaseItem(
+        db.add(PurchaseItem(
             list_id=plist.id, merchant_id=merchant_id,
             recommendation_id=rec.id, product_id=rec.product_id,
             sku_id=rec.sku_id, recommended_qty=qty, actual_qty=qty,
             unit=product.unit, estimated_unit_cost=est_cost,
             estimated_cost=est_total, status="pending", reason=rec.suggestion,
-        )
-        db.add(item)
+        ))
+        existing_product_ids.add(rec.product_id)
         added_count += 1
 
-    plist.total_estimated_cost = total_estimated.quantize(Decimal("0.01"))
-    plist.item_count = added_count
+    for raw in manual_items:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        product = None
+        if raw.get("product_id") not in (None, ""):
+            try:
+                product = manual_by_id.get(int(raw["product_id"]))
+            except (TypeError, ValueError):
+                product = None
+        if not product and name:
+            product = manual_by_name.get(name)
+        if not product:
+            unmatched_names.append(name or "未命名商品")
+            continue
+        try:
+            qty = _to_d(raw.get("qty", raw.get("quantity", 0)))
+        except Exception:
+            unmatched_names.append(name or product.name)
+            continue
+        if qty <= 0:
+            unmatched_names.append(name or product.name)
+            continue
+        matched_manual_count += 1
+        if product.id in existing_product_ids:
+            continue
+        est_cost = _to_d(product.default_price)
+        est_total = (qty * est_cost).quantize(Decimal("0.01"))
+        unit = str(raw.get("unit") or product.unit)[:20]
+        source = str(raw.get("from") or raw.get("source") or "手工添加")[:100]
+        db.add(PurchaseItem(
+            list_id=plist.id, merchant_id=merchant_id,
+            product_id=product.id, recommended_qty=qty, actual_qty=qty,
+            unit=unit, estimated_unit_cost=est_cost,
+            estimated_cost=est_total, status="pending", reason=source,
+        ))
+        existing_product_ids.add(product.id)
+        added_count += 1
+
+    if manual_items and matched_manual_count == 0 and not recs:
+        await db.rollback()
+        names_text = "、".join(unmatched_names[:5])
+        raise HTTPException(status_code=400, detail=f"商品目录中未找到：{names_text}，请先在商品目录添加")
+
+    await db.flush()
+    active_items = (await db.execute(
+        select(PurchaseItem).where(
+            PurchaseItem.list_id == plist.id,
+            PurchaseItem.status != "cancelled",
+        )
+    )).scalars().all()
+    plist.item_count = len(active_items)
+    plist.total_estimated_cost = sum(
+        (_to_d(item.estimated_cost) for item in active_items), Decimal("0")
+    ).quantize(Decimal("0.01"))
     await db.commit()
 
     return {
-        "code": 0, "message": f"已生成采购清单，共{added_count}项",
-        "data": {"list_id": str(plist.id), "item_count": added_count},
+        "code": 0,
+        "message": f"采购清单已更新，新增{added_count}项",
+        "data": {
+            "list_id": str(plist.id),
+            "item_count": plist.item_count,
+            "added_count": added_count,
+            "unmatched_items": unmatched_names,
+        },
     }
 
 

@@ -1,0 +1,16 @@
+<!-- 文档展示页 -->
+<view class="page-shell doc-page {{skinClass}}">
+  <view class="page-hero doc-hero">
+    <text class="eyebrow">DOCUMENT</text>
+    <text class="hero-title">{{docTitle}}</text>
+  </view>
+  <view class="doc-list">
+    <view wx:for="{{sections}}" wx:key="h" class="doc-section">
+      <text class="doc-h">{{item.h}}</text>
+      <text class="doc-body">{{item.body}}</text>
+    </view>
+  </view>
+  <view class="doc-footer">
+    <text class="doc-meta">由千摊智脑提供 · 最后更新 2026-07</text>
+  </view>
+</view>

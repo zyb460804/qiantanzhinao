@@ -1,32 +1,110 @@
-<!-- 商户设置 · 让画像与偏好更易理解 -->
+<wxs src="/utils/format.wxs" module="fmt" />
+<!-- 我的 v3.0 — 经营快照 / 快捷操作 / 设备同步 / 工具 / 设置 / 帮助 -->
 <view class="page-shell profile-page {{skinClass}}">
-  <view class="page-hero profile-hero page-hero--breathing">
-    <view class="merchant-avatar">摊</view>
-    <view class="merchant-copy"><text class="eyebrow">STORE SETTINGS · 摊位设置</text><text class="hero-title">{{merchantName || '我的摊位'}}</text><text class="hero-desc">管理摊位名称、语音习惯和建议偏好。</text></view>
+  <!-- ① 经营快照 -->
+  <view class="page-hero snapshot-hero">
+    <text class="eyebrow">MY STALL · {{merchantName || '我的摊位'}}</text>
+    <block wx:if="{{snapshotLoading}}">
+      <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    </block>
+    <block wx:elif="{{snapshotError}}">
+      <text class="hero-desc muted">数据加载失败，下拉刷新重试</text>
+    </block>
+    <block wx:else>
+      <view class="snapshot-main">
+        <text class="snapshot-revenue">¥{{todayRevenueDisplay}}</text>
+        <text class="snapshot-label" wx:if="{{todayOrders > 0}}">↑ {{dayChangePct === null ? '—' : (dayChangePct > 0 ? '+' : '') + fmt.fixed(dayChangePct, 1) + '%'}} 较昨日</text>
+        <text class="snapshot-label muted" wx:else>今天还没有记录，去记一笔吧 →</text>
+      </view>
+      <view class="snapshot-stats" wx:if="{{todayOrders > 0}}">
+        <view class="sstat"><text class="sstat-num">{{todayOrders}} 笔</text><text class="sstat-label">交易笔数</text></view>
+        <view class="sstat"><text class="sstat-num">¥{{todayAov}}</text><text class="sstat-label">客单价</text></view>
+        <view class="sstat"><text class="sstat-num {{dayChangeDir}}">{{trendLabel}}</text><text class="sstat-label">经营趋势</text></view>
+      </view>
+      <view class="snapshot-week" wx:if="{{weekTotal > 0}}" bindtap="goDashboard">本周累计 ¥{{weekTotal}} →</view>
+    </block>
   </view>
 
-  <view class="section-head"><text class="section-title">基本信息</text><text class="section-caption">基础偏好保存在当前设备</text></view>
-  <view class="setting-card">
-    <view class="setting-row"><view class="setting-icon green-bg">名</view><view class="setting-copy"><text class="setting-label">摊位名称</text><input class="setting-input" value="{{merchantName}}" bindinput="onNameChange" placeholder="输入摊位名称" /></view></view>
-    <view class="setting-row"><view class="setting-icon amber-bg">话</view><view class="setting-copy"><text class="setting-label">常用方言</text><picker mode="selector" range="{{dialects}}" value="{{dialectIndex}}" bindchange="onDialectChange"><view class="picker-display">{{dialects[dialectIndex]}}<text>›</text></view></picker></view></view>
+  <!-- ② 快捷操作 -->
+  <view class="section-head"><text class="section-title">快捷操作</text></view>
+  <view class="quick-grid">
+    <view class="quick-card" data-page="voice" bindtap="goQuick"><icon name="mic" size="44" color="#fff"/><text class="quick-title">语音记账</text><text class="quick-desc">{{voiceLabel}}</text></view>
+    <view class="quick-card" data-page="dashboard" bindtap="goQuick"><icon name="mirror" size="44" color="var(--green-800)"/><text class="quick-title">经营镜像</text><text class="quick-desc">今日全貌</text></view>
+    <view class="quick-card" data-page="pos" bindtap="goQuick"><icon name="cart" size="44" color="var(--green-800)"/><text class="quick-title">收银开单</text><text class="quick-desc">快速开单</text></view>
   </view>
-
-  <view class="section-head"><text class="section-title">建议偏好</text><text class="section-caption">用于调整建议强度，不代表风险承诺</text></view>
-  <radio-group class="risk-options" bindchange="onRiskChange">
-    <label class="risk-option {{riskProfile === 'conservative' ? 'selected' : ''}}"><radio value="conservative" checked="{{riskProfile === 'conservative'}}" color="#175C45"/><view><text class="risk-title">稳健经营</text><text class="risk-desc">少压货、优先控制损耗</text></view><text class="risk-badge">稳</text></label>
-    <label class="risk-option {{riskProfile === 'neutral' ? 'selected' : ''}}"><radio value="neutral" checked="{{riskProfile === 'neutral'}}" color="#175C45"/><view><text class="risk-title">平衡经营</text><text class="risk-desc">兼顾销量、利润与风险</text></view><text class="risk-badge">衡</text></label>
-    <label class="risk-option {{riskProfile === 'aggressive' ? 'selected' : ''}}"><radio value="aggressive" checked="{{riskProfile === 'aggressive'}}" color="#175C45"/><view><text class="risk-title">进取经营</text><text class="risk-desc">接受波动，争取更多销量</text></view><text class="risk-badge">进</text></label>
-  </radio-group>
-
-  <button class="save-button" bindtap="saveProfile">保存我的经营偏好</button>
-
-  <view class="section-head"><text class="section-title">全部工具</text><text class="section-caption">低频模块统一收纳</text></view>
-  <view class="entry-grid">
-    <view class="entry-item" wx:for="{{entries}}" wx:key="page" data-page="{{item.page}}" bindtap="goDeep">
-      <view class="entry-icon {{item.tone}}">{{item.glyph}}</view>
-      <text class="entry-name">{{item.name}}</text>
+  <view class="quick-purchase" data-page="purchase" bindtap="goQuick">
+    <view class="qp-left"><icon name="box" size="36" color="var(--corn)"/><text class="qp-title">采购清单</text></view>
+    <view class="qp-right">
+      <text class="qp-badge" wx:if="{{purchasePending > 0}}">待补 {{purchasePending}} 件</text>
+      <text class="qp-badge muted" wx:else>暂无待购</text>
+      <text>›</text>
     </view>
   </view>
 
-  <view class="about-card"><view class="about-logo">千</view><view><text class="about-title">千摊智脑</text><text class="about-desc">面向小微商户的经营记录、库存与决策辅助工具</text></view></view>
+  <!-- ③ 设备与同步 -->
+  <view class="section-head"><text class="section-title">设备与同步</text><text class="section-link" bindtap="goDevices">查看全部 ›</text></view>
+  <view class="device-panel">
+    <block wx:if="{{deviceError}}">
+      <view class="device-row muted"><text>设备数据暂不可用</text></view>
+    </block>
+    <block wx:elif="{{devices.length === 0}}">
+      <view class="device-row muted"><text>暂无设备，点此添加 →</text></view>
+    </block>
+    <block wx:else>
+      <view wx:for="{{devices}}" wx:key="type" class="device-row">
+        <view class="dev-status {{item.status}}"></view>
+        <text class="dev-name">{{item.name}} · {{item.status === 'online' ? '在线' : (item.status === 'unstable' ? '不稳定' : '离线')}}</text>
+        <text class="dev-time">{{item.heartbeat}}</text>
+      </view>
+    </block>
+    <view class="device-row sync-row" bindtap="triggerSync">
+      <view class="dev-status {{offlineQueueCount === 0 ? 'online' : (offlineQueueCount > 5 ? 'offline' : 'unstable')}}"></view>
+      <text class="dev-name">离线数据</text>
+      <text class="dev-time">{{offlineQueueCount === 0 ? '已同步' : (offlineQueueCount + ' 条待上传')}}</text>
+      <text class="dev-action">同步 ›</text>
+    </view>
+  </view>
+
+  <!-- ④ 经营工具 -->
+  <view class="section-head"><text class="section-title">全部工具</text></view>
+  <view class="tool-grid">
+    <view wx:for="{{tools}}" wx:key="page" class="tool-chip" data-page="{{item.page}}" bindtap="goDeep">
+      <view class="tool-glyph {{item.tone}}">{{item.glyph}}</view>
+      <text class="tool-name">{{item.name}}</text>
+    </view>
+  </view>
+
+  <!-- ⑤ 摊位设置 -->
+  <view class="section-head"><text class="section-title">摊位设置</text></view>
+  <view class="setting-group">
+    <view class="setting-row"><text class="setting-label">摊位名称</text><input class="setting-input" value="{{merchantName}}" bindinput="onNameChange" placeholder="输入摊位名称" /></view>
+    <view class="setting-row"><text class="setting-label">常用方言</text><picker range="{{dialects}}" value="{{dialectIndex}}" bindchange="onDialectChange"><text class="setting-val">{{dialects[dialectIndex]}} ›</text></picker></view>
+    <view class="setting-row"><text class="setting-label">营业时段</text><picker range="{{hoursOptions}}" value="{{hoursIndex}}" bindchange="onBusinessHoursChange"><text class="setting-val">{{hoursOptions[hoursIndex]}} ›</text></picker></view>
+    <view class="setting-row"><text class="setting-label">经营提醒</text><switch checked="{{notificationEnabled}}" bindchange="onNotificationToggle" color="#175C45" /></view>
+  </view>
+  <view class="setting-group">
+    <text class="setting-group-title">建议偏好</text>
+    <label class="risk-opt"><radio value="conservative" checked="{{riskProfile === 'conservative'}}" bindchange="onRiskChange"/> 稳健经营 · 少压货、优先控制损耗</label>
+    <label class="risk-opt"><radio value="neutral" checked="{{riskProfile === 'neutral'}}" bindchange="onRiskChange"/> 平衡经营 · 兼顾销量、利润与风险</label>
+    <label class="risk-opt"><radio value="aggressive" checked="{{riskProfile === 'aggressive'}}" bindchange="onRiskChange"/> 进取经营 · 接受波动，争取更多销量</label>
+  </view>
+  <button class="btn-primary save-btn" bindtap="saveProfile">保存我的经营偏好</button>
+
+  <!-- ⑥ 帮助与反馈 -->
+  <view class="section-head"><text class="section-title">帮助与反馈</text></view>
+  <view class="help-grid">
+    <view class="help-card" bindtap="showGuide"><icon name="book" size="36" color="var(--green-800)"/><text class="help-title">操作指南</text><text class="help-desc">快速上手千摊</text></view>
+    <view class="help-card" bindtap="showFAQ"><icon name="help" size="36" color="var(--blue)"/><text class="help-title">常见问题</text><text class="help-desc">常见疑问解答</text></view>
+    <view class="help-card" bindtap="showFeedback"><icon name="edit" size="36" color="var(--corn)"/><text class="help-title">意见反馈</text><text class="help-desc">帮我们更好</text></view>
+    <view class="help-card" bindtap="contactService"><icon name="chat" size="36" color="var(--green-800)"/><text class="help-title">联系客服</text><text class="help-desc">人工在线协助</text></view>
+  </view>
+
+  <!-- ⑦ 关于 -->
+  <view class="section-head"><text class="section-title">关于</text></view>
+  <view class="about-section">
+    <view class="about-row"><text>千摊智脑</text><text class="muted">v{{appVersion}}</text></view>
+    <view class="about-row" bindtap="showPrivacy"><text>隐私政策</text><text>›</text></view>
+    <view class="about-row" bindtap="showTerms"><text>用户协议</text><text>›</text></view>
+    <view class="about-row"><text>开源许可</text><text class="muted">MIT</text></view>
+  </view>
 </view>

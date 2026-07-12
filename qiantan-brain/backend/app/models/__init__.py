@@ -16,6 +16,7 @@ from app.models.catalog import (
     UnitConversion,
 )
 from app.models.environment import EnvironmentRecord
+from app.models.feedback import MerchantFeedback
 from app.models.inventory import CurrentInventory, InventoryRecord
 from app.models.merchant import Merchant
 from app.models.pos import DailySettlement, Payment, Reconciliation, SaleOrder, SaleOrderItem
@@ -47,6 +48,7 @@ __all__ = [
     "PurchaseItem",
     "SupplierPayable",
     "CustomerReceivable",
+    "MerchantFeedback",
     "SaleOrder",
     "SaleOrderItem",
     "Payment",

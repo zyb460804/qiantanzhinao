@@ -123,8 +123,8 @@
           </view>
           <view class="bottom-divider"></view>
           <view class="bottom-stat">
-            <text class="bottom-stat-num muted">--</text>
-            <text class="bottom-stat-label">损耗金额</text>
+            <text class="bottom-stat-num {{lossAmount > 0 ? 'loss' : 'muted'}}">{{lossAmount > 0 ? '¥' + lossAmount : '—'}}</text>
+            <text class="bottom-stat-label">预估损耗</text>
           </view>
         </view>
         <button class="btn-primary bottom-complete {{progressCount < stocktakeItems.length ? 'disabled' : ''}}" bindtap="completeStocktake" loading="{{completing}}">

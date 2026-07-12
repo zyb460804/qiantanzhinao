@@ -11,15 +11,15 @@
     <view class="error-icon">⚠</view>
     <text class="error-title">无法查询</text>
     <text class="error-desc">{{error}}</text>
-    <button class="retry-btn" bindtap="loadTrace" data-code="{{traceCode}}">重新查询</button>
+    <button class="retry-btn" bindtap="retryQuery" data-code="{{traceCode}}">重新查询</button>
   </view>
 
   <!-- Trace Data -->
   <view wx:else class="trace-result">
     <!-- Status banner -->
-    <view class="trace-banner {{statusColor()}}">
-      <text class="banner-icon">{{isSafe() ? '✓' : '⚠'}}</text>
-      <text class="banner-label">{{statusLabel()}}</text>
+    <view class="trace-banner {{statusColor}}">
+      <text class="banner-icon">{{bannerIcon}}</text>
+      <text class="banner-label">{{statusLabel}}</text>
       <text wx:if="{{trace.is_recalled}}" class="banner-warn">该批次已被召回，请勿购买</text>
     </view>
 
@@ -43,10 +43,10 @@
           {{trace.inspection_result === 'pass' ? '✓ 合格' : trace.inspection_result === 'fail' ? '✗ 不合格' : '未检测'}}
         </text>
       </view>
-      <view wx:if="{{certList().length}}" class="trace-row">
+      <view wx:if="{{hasCerts}}" class="trace-row">
         <text class="trace-key">证照凭证</text>
         <view class="trace-val certs">
-          <text wx:for="{{certList()}}" wx:key="name" class="cert-tag">{{item.name || item}}</text>
+          <text wx:for="{{certList}}" wx:key="name" class="cert-tag">{{item.name || item}}</text>
         </view>
       </view>
     </view>
@@ -56,6 +56,9 @@
       <text class="trace-code-label">追溯码</text>
       <text class="trace-code" bindtap="copyCode">{{traceCode}}</text>
       <text class="trace-hint">点击复制追溯码</text>
+      <view class="trace-actions">
+        <button class="btn-outline sm" bindtap="reportIssue">反馈问题</button>
+      </view>
       <text class="trace-meta">由千摊智脑提供 · {{trace.generated_at || ''}}</text>
     </view>
   </view>

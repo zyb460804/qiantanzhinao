@@ -67,7 +67,7 @@
 
     <view class="section-head">
       <text class="section-title">识别结果</text>
-      <text class="section-caption">置信度 {{recognizedConfidencePercent}}%</text>
+      <text class="section-caption">置信度 {{recognizedConfidencePercent}}% · <text class="link-btn" bindtap="retakePhoto">重新拍照</text></text>
     </view>
 
     <!-- 主识别结果 -->
@@ -143,7 +143,7 @@
     <text class="success-title">入库成功</text>
     <text class="success-desc">{{submitResult.product}} · {{submitResult.quantity}}{{submitResult.unit}}</text>
     <text class="success-meta" wx:if="{{submitResult.event_type}}">{{submitResult.event_type === 'purchase' ? '采购入库' : '销售出库'}}</text>
-    <view class="btn-primary big-action-btn" bindtap="reset">继续识别</view>
+    <button class="btn-outline sm" style="margin-top:16rpx" bindtap="retakePhoto">继续识别下一件</button>
   </view>
 
   <view class="safe-bottom"></view>

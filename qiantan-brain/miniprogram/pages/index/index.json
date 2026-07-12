@@ -3,5 +3,6 @@
     "icon": "/components/icon/icon",
     "mascot": "/components/mascot/mascot"
   },
-  "navigationBarTitleText": "千摊智脑"
+  "navigationBarTitleText": "千摊智脑",
+  "enablePullDownRefresh": true
 }

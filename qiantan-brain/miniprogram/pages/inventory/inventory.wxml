@@ -1,4 +1,4 @@
-<!-- 库存总览 · 库存健康工作台 -->
+<!-- 库存总览 · 库存健康工作台 v3.0 -->
 <view class="page-shell inv-page {{skinClass}}">
 
   <!-- Hero -->
@@ -107,6 +107,7 @@
         <text class="section-caption">实时流水汇总</text>
       </view>
 
+      <!-- 搜索 + 筛选 + 排序工具栏 -->
       <view class="inv-tools" wx:if="{{inventoryItems.length > 0}}">
         <view class="search-box">
           <icon name="search" size="sm" color="var(--muted)"></icon>

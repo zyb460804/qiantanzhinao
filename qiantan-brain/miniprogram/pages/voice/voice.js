@@ -1,23 +1,17 @@
 /**
- * 语音记账页面 — 核心交互页 (v2.2 生鲜元气)
- * 新增：时段皮肤 / 声波纹 / 流式字幕；保留录音→ASR→解析全流程
+ * 语音记账页面 v3.0 — 草稿保护 / 上传进度 / 流式对齐
  */
 var app = getApp();
+var streamText = require('../../utils/stream-text').streamText;
 
 Page({
   data: {
-    // State: idle | listening | uploading | processing | success | confirm_needed | error
-    state: 'idle',
-    mode: 'voice',         // 'voice' | 'text'
-    skin: 'noon',
-    asrText: '',           // 识别/输入的文本
-    streamingText: '',      // 流式字幕
-    textInput: '',         // 文本框内容
-    parsed: null,          // 解析结果对象
-    todayCount: 0,
-    recentLogs: [],
+    state: 'idle', mode: 'voice', skin: 'noon',
+    asrText: '', streamingText: '', textInput: '',
+    parsed: null, todayCount: 0, recentLogs: [],
     waveBars: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17],
-    demoMode: false,
+    uploadProgress: 0,
+    debugMode: app.globalData && app.globalData.debugMode,
   },
 
   onShow: function () {
@@ -25,14 +19,37 @@ Page({
     this.loadTodayCount();
   },
 
+  onHide: function () { this._clearTypingTimer(); },
+
+  _clearTypingTimer: function () {
+    // streamText 返回 {cancel: function} 对象,不是 timer id,必须调 .cancel()
+    if (this._typingTimerId && typeof this._typingTimerId.cancel === 'function') {
+      this._typingTimerId.cancel();
+    }
+    this._typingTimerId = null;
+    if (this._typingDoneTimerId) { clearTimeout(this._typingDoneTimerId); this._typingDoneTimerId = null; }
+  },
+
   applySkin: function (skin) {
     if (skin !== 'morning' && skin !== 'evening') skin = 'noon';
     this.setData({ skin: skin });
   },
 
-  // ── 模式切换 ──────────────────────────────────
-  switchToVoice: function () { this.setData({ mode: 'voice', state: 'idle', parsed: null, asrText: '', streamingText: '' }); },
-  switchToText: function () { this.setData({ mode: 'text', state: 'idle', parsed: null, asrText: '', streamingText: '' }); },
+  // ── 模式切换 (草稿保护) ──────────────────
+  switchToVoice: function () {
+    var self = this;
+    if (this.data.textInput && this.data.textInput.trim()) {
+      wx.showModal({
+        title: '切换到语音', content: '文字输入的内容将会丢失，确定切换吗？',
+        success: function (res) {
+          if (res.confirm) { self._clearTypingTimer(); self.setData({ mode: 'voice', textInput: '', state: 'idle', parsed: null, asrText: '', streamingText: '' }); }
+        },
+      });
+    } else {
+      this._clearTypingTimer(); this.setData({ mode: 'voice', state: 'idle', parsed: null, asrText: '', streamingText: '' });
+    }
+  },
+  switchToText: function () { this._clearTypingTimer(); this.setData({ mode: 'text', state: 'idle', parsed: null, asrText: '', streamingText: '' }); },
 
   onTextInput: function (e) { this.setData({ textInput: e.detail.value }); },
 
@@ -47,17 +64,10 @@ Page({
   // ── 流式字幕（逐字打印）────────────────────
   streamReply: function (text, done) {
     var self = this;
-    if (app.globalData.reduceMotion) { this.setData({ streamingText: text }); if (done) done(); return; }
-    this.setData({ streamingText: '' });
-    var i = 0;
-    var t = setInterval(function () {
-      i++;
-      self.setData({ streamingText: text.slice(0, i) });
-      if (i >= text.length) {
-        clearInterval(t);
-        setTimeout(function () { self.setData({ streamingText: '' }); if (done) done(); }, 520);
-      }
-    }, 38);
+    this._clearTypingTimer();
+    this._typingTimerId = streamText(text, function (display) {
+      self.setData({ streamingText: display });
+    }, done);
   },
 
   // ── 语音录制 (由 voice-button 组件触发) ─────────
@@ -81,41 +91,53 @@ Page({
   handleRecordingResult: function (res) {
     var filePath = res.tempFilePath;
     var self = this;
+    this.setData({ uploadProgress: 0 });
 
-    if (this.data.demoMode) {
-      var mockTexts = ['今天进了白菜50斤，三毛钱一斤', '进了土豆30斤，一块二一斤', '卖了西瓜20斤，两块钱一斤，一共卖了40块', '进了猪肉15斤，十二块钱一斤', '进了豆腐10斤，一块五一斤', '扔了烂白菜3斤'];
-      var text = mockTexts[Math.floor(Math.random() * mockTexts.length)];
-      this.setData({ asrText: text });
-      this.streamReply(text, function () { self.parseText(text); });
-      return;
-    }
-
-    var mid = app.getMerchantId();
-    app.uploadFile({ url: '/voice/upload', filePath: filePath, name: 'audio', formData: { merchant_id: mid, dialect: 'mandarin' } })
-      .then(function (data) {
-        var asrText = (data && data.asr_text) || '';
-        var parsed = data && data.parsed;
+    var uploadTask = wx.uploadFile({
+      url: app.globalData.apiBase + '/voice/upload',
+      filePath: filePath,
+      name: 'audio',
+      header: { 'Authorization': 'Bearer ' + app.globalData.accessToken },
+      formData: { dialect: 'mandarin' },
+      success: function (res) {
+        var body;
+        try { body = JSON.parse(res.data); } catch (e) { self.setData({ state: 'error' }); return; }
+        if (!body || body.code !== 0 || !body.data) { self.setData({ state: 'error' }); return; }
+        var data = body.data;
+        var asrText = (data.asr_text) || '';
+        var parsed = data.parsed;
         if (asrText) {
-          self.setData({ asrText: asrText });
+          self.setData({ asrText: asrText, uploadProgress: 100 });
           if (parsed && parsed.voice_log_id) {
             var conf = parsed.confidence || 0;
             self.setData({ parsed: parsed, state: conf >= 0.8 ? 'success' : 'confirm_needed' });
             self.loadTodayCount();
           } else {
-            self.streamReply(asrText, function () { self.parseText(asrText); });
+            // 流式打字与 API 对齐：打字直到 parseText 返回
+            self.setData({ state: 'processing' });
+            self._parseResult = null;
+            self.streamReply(asrText, function () { if (!self._parseResult) self.parseText(asrText); });
+            self.parseText(asrText);
           }
         } else {
           self.setData({ state: 'idle', mode: 'text' });
           wx.showToast({ title: '语音识别未成功，请使用文字输入', icon: 'none', duration: 2500 });
         }
-      }).catch(function () { self.setData({ state: 'error' }); wx.showToast({ title: '上传失败，请重试或使用文字输入', icon: 'none' }); });
+      },
+      fail: function () { self.setData({ state: 'error' }); wx.showToast({ title: '上传失败，请重试', icon: 'none' }); },
+    });
+
+    if (uploadTask && uploadTask.onProgressUpdate) {
+      uploadTask.onProgressUpdate(function (res) {
+        self.setData({ uploadProgress: res.progress });
+      });
+    }
   },
 
   // ── 文本解析 (核心) ──────────────────────────
   parseText: function (text) {
     var self = this;
-    var mid = app.getMerchantId();
-    app.request({ url: '/voice/parse-text', method: 'POST', data: { merchant_id: mid, text: text } })
+    app.request({ url: '/voice/parse-text', method: 'POST', data: { text: text } })
       .then(function (res) {
         var parsed = res.parsed;
         var conf = parsed.confidence || 0;
@@ -151,11 +173,16 @@ Page({
   sayAgain: function () { this.resetToIdle(); },
 
   loadTodayCount: function () {
-    var mid = app.getMerchantId();
-    app.request({ url: '/voice/logs', data: { merchant_id: mid, page: 1, limit: 20 } })
-      .then((function (res) { this.setData({ recentLogs: (res || []).slice(0, 5) }); }).bind(this)).catch(function () {});
-    app.request({ url: '/voice/today-count', data: { merchant_id: mid } })
-      .then((function (res) { this.setData({ todayCount: (res && res.today_count) || 0 }); }).bind(this)).catch(function () {});
+    var self = this;
+    app.request({ url: '/voice/today-count' })
+      .then(function (res) { self.setData({ todayCount: (res && res.today_count) || 0 }); }).catch(function () {});
+    this.loadRecentLogs();
+  },
+
+  loadRecentLogs: function () {
+    var self = this;
+    app.request({ url: '/voice/logs', data: { page: 1, limit: 20 } })
+      .then(function (res) { self.setData({ recentLogs: (res || []).slice(0, 5) }); }).catch(function () {});
   },
 
   voidRecord: function (e) {
