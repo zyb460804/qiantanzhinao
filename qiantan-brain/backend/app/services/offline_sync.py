@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.timezone import parse_iso_datetime, utc_now
 from app.models.inventory import InventoryRecord
+from app.services.batch import consume_batches_fifo_costed, create_batch
 from app.services.sku_service import ensure_sku_for_category, resolve_sku_id
 
 
@@ -165,6 +167,37 @@ async def upsert_offline_item(
     record = _build_inventory_record(merchant_id, item, product_id, sku_id=sku_id)
     db.add(record)
     await db.flush()
+
+    # Track batch lifecycle for inventory-aware events
+    event_type = item.event_type
+    product_name_str = item.product_name or f"商品{product_id}"
+    now = utc_now()
+    if event_type == "purchase":
+        unit_cost = (
+            Decimal(str(item.unit_cost)) if item.unit_cost is not None else None
+        )
+        await create_batch(
+            db,
+            merchant_id=merchant_id,
+            product_id=product_id,
+            product_name=product_name_str,
+            batch_label=f"{product_name_str}-{now.strftime('%m%d%H%M%S')}",
+            quantity=Decimal(str(abs(item.quantity))) if item.quantity else Decimal("0"),
+            purchase_time=record.event_time,
+            sku_id=sku_id,
+            unit_cost=unit_cost,
+        )
+    elif event_type in ("sale", "waste"):
+        qty = Decimal(str(abs(item.quantity))) if item.quantity else Decimal("0")
+        if qty > 0:
+            await consume_batches_fifo_costed(
+                db,
+                merchant_id,
+                product_id,
+                qty,
+                sku_id=sku_id,
+            )
+
     return {
         "idempotency_key": item.idempotency_key,
         "status": "created",
@@ -216,5 +249,44 @@ async def upsert_offline_items(
                 "record_id": None,
                 "message": str(exc),
             }
+        # Create a dead-letter event for failed items, outside the savepoint
+        if result["status"] == "error":
+            await _log_dead_letter(db, merchant_id, item, result)
         results.append(result)
     return results
+
+
+async def _log_dead_letter(
+    db: AsyncSession,
+    merchant_id: uuid.UUID,
+    item: OfflineSyncItem,
+    result: dict,
+) -> None:
+    """Persist a DeadLetterEvent for an item that failed to sync."""
+    from app.models.dead_letter import DeadLetterEvent
+
+    from sqlalchemy import select as _select
+
+    # Check if a dead letter already exists for this idempotency key.
+    if item.idempotency_key:
+        existing_dl = await db.scalar(
+            _select(DeadLetterEvent).where(
+                DeadLetterEvent.merchant_id == merchant_id,
+                DeadLetterEvent.idempotency_key == item.idempotency_key,
+            )
+        )
+        if existing_dl:
+            return
+
+    dead_letter = DeadLetterEvent(
+        merchant_id=merchant_id,
+        idempotency_key=item.idempotency_key,
+        event_type=item.event_type,
+        payload=item.model_dump(),
+        error_message=str(result.get("message", ""))[:1000],
+        retry_count=0,
+        max_retries=3,
+        status="pending",
+        next_retry_at=utc_now() + timedelta(minutes=5),
+    )
+    db.add(dead_letter)

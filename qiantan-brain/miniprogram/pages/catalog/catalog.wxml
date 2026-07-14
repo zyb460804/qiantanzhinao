@@ -1,124 +1,529 @@
 <wxs src="/utils/format.wxs" module="fmt" />
-<!-- 商品管理 — SKU/别名/规格/单位/供应商 -->
+<!-- 商品管理 v2 — 主从布局 + 视觉升级 -->
 <view class="page-shell cat-page {{skin}}">
-  <view class="page-hero"><text class="eyebrow">CATALOG · 商品与供应商</text><text class="hero-title">商品管理</text></view>
 
-  <view class="tab-row">
-    <view wx:for="{{[{k:'skus',l:'SKU'},{k:'aliases',l:'别名'},{k:'specs',l:'规格'},{k:'units',l:'单位'},{k:'suppliers',l:'供应商'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
-  </view>
+  <!-- ═══════════════════ 商品列表页 ═══════════════════ -->
+  <block wx:if="{{!detailSku}}">
 
-  <!-- SKU列表 -->
-  <view wx:if="{{tab==='skus'}}">
-    <view class="section-head"><text class="section-title">商品SKU</text><text class="link" bindtap="openSkuForm">+ 新增</text></view>
-    <view class="search-bar"><icon name="search" size="28" color="var(--muted)"/><input class="search-input" placeholder="搜索商品名称" value="{{searchKeyword}}" bindinput="onSearchInput"/></view>
-    <view class="cat-list">
-      <view wx:for="{{searchKeyword ? filteredSkus : skus}}" wx:key="sku_id" class="cat-item">
-        <view class="cat-main"><text class="cat-name">{{item.name}}</text><text class="cat-meta">{{item.canonical_unit}} · {{item.shelf_life_hours}}h</text></view>
-        <text class="cat-price" wx:if="{{item.default_sale_price}}">¥{{item.default_sale_price}}</text>
-        <view class="cat-actions">
-          <text class="act-btn" data-id="{{item.sku_id}}" bindtap="loadAliases">别名</text>
-          <text class="act-btn" data-id="{{item.sku_id}}" bindtap="loadSpecs">规格</text>
-          <text class="act-btn" data-id="{{item.sku_id}}" bindtap="openSkuForm">编辑</text>
-          <text class="act-btn del" data-id="{{item.sku_id}}" bindtap="deleteSku">停用</text>
+    <!-- 紧凑页头：把屏幕空间留给商品列表 -->
+    <view class="page-hero cat-hero">
+      <view class="hero-copy">
+        <text class="eyebrow">CATALOG</text>
+        <text class="hero-title">商品管理</text>
+        <text class="hero-desc">统一维护售价、单位、保质期与供货关系</text>
+      </view>
+      <view class="hero-stat-card">
+        <text class="hero-stat-num">{{skus.length}}</text>
+        <text class="hero-stat-lab">在用商品</text>
+      </view>
+    </view>
+
+    <!-- 概览 -->
+    <view class="catalog-summary">
+      <view class="summary-item">
+        <text class="summary-value">{{skus.length}}</text>
+        <text class="summary-label">商品总数</text>
+      </view>
+      <view class="summary-divider"></view>
+      <view class="summary-item">
+        <text class="summary-value good">{{pricedCount}}</text>
+        <text class="summary-label">已设置售价</text>
+      </view>
+      <view class="summary-divider"></view>
+      <view class="summary-item">
+        <text class="summary-value warn">{{unpricedCount}}</text>
+        <text class="summary-label">待定价</text>
+      </view>
+    </view>
+
+    <!-- 搜索 + 新增 -->
+    <view class="cat-toolbar">
+      <view class="search-bar">
+        <text class="search-icon">⌕</text>
+        <input class="search-input" placeholder="搜索商品名称或分类" value="{{searchKeyword}}" bindinput="onSearchInput" confirm-type="search"/>
+        <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="onSearchClear">清除</text>
+      </view>
+      <view class="btn-primary btn-sm" bindtap="openSkuForm">
+        <text class="btn-plus">＋</text><text>新增商品</text>
+      </view>
+    </view>
+
+    <view class="list-heading" wx:if="{{!loading && skus.length}}">
+      <text class="list-title">商品档案</text>
+      <text class="list-count">{{searchKeyword ? '找到 ' + filteredSkus.length + ' 项' : '共 ' + skus.length + ' 项'}}</text>
+    </view>
+
+    <!-- 加载状态 -->
+    <view wx:if="{{loading}}" class="catalog-loading">
+      <view class="loading-dot"></view>
+      <text>正在加载商品档案…</text>
+    </view>
+
+    <!-- 使用页面自然滚动，避免固定高度列表造成大块空白和双重滚动 -->
+    <view wx:if="{{!loading && (searchKeyword ? filteredSkus.length : skus.length)}}" class="sku-list">
+      <view wx:for="{{searchKeyword ? filteredSkus : skus}}" wx:key="sku_id"
+            class="sku-card stagger" data-id="{{item.sku_id}}" bindtap="openDetail">
+        <view class="sku-main">
+          <view class="sku-avatar">{{item._initial || '商'}}</view>
+          <view class="sku-content">
+            <view class="sku-name-row">
+              <text class="sku-name">{{item.name}}</text>
+              <text wx:if="{{item.category_group}}" class="sku-cat">{{item.category_group}}</text>
+            </view>
+            <view class="sku-meta">
+              <text>{{item.canonical_unit || '斤'}} / 标准单位</text>
+              <text class="meta-dot">·</text>
+              <text>{{item._shelfLabel ? '保质 ' + item._shelfLabel : '未设置保质期'}}</text>
+            </view>
+          </view>
+          <view class="sku-price-box">
+            <text class="sku-price" wx:if="{{item.default_sale_price}}">¥{{fmt.fixed(item.default_sale_price, 2)}}</text>
+            <text class="sku-price muted" wx:else>待定价</text>
+            <text class="sku-price-unit">/{{item.canonical_unit || '斤'}}</text>
+          </view>
         </view>
+        <view class="sku-footer">
+          <text class="sku-detail-hint">管理别名、规格和供应商</text>
+          <view class="sku-footer-actions">
+            <text class="text-action" data-id="{{item.sku_id}}" catchtap="openSkuForm">编辑</text>
+            <text class="detail-action" data-id="{{item.sku_id}}" catchtap="openDetail">查看详情 <text class="sku-arrow">›</text></text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 空状态 -->
+    <view wx:if="{{!loading && skus.length === 0}}" class="empty-state cat-empty">
+      <view class="empty-illust">＋</view>
+      <text class="empty-title">建立第一份商品档案</text>
+      <text class="empty-desc">先添加商品名称、售价和标准单位，之后可继续维护别名、规格及供应商。</text>
+      <button class="btn-primary empty-action" bindtap="openSkuForm">新增商品</button>
+    </view>
+
+    <!-- 过滤无结果 -->
+    <view wx:if="{{!loading && skus.length > 0 && searchKeyword && filteredSkus.length === 0}}" class="empty-state search-empty">
+      <view class="empty-search-icon">⌕</view>
+      <text class="empty-title">没有匹配的商品</text>
+      <text class="empty-desc">换个名称或分类关键词试试</text>
+      <text class="clear-result" bindtap="onSearchClear">清除搜索</text>
+    </view>
+
+    <!-- 辅助管理入口 -->
+    <view class="tools-section" wx:if="{{!loading}}">
+      <view class="tools-head">
+        <text class="tools-title">基础资料</text>
+        <text class="tools-desc">低频设置集中管理</text>
+      </view>
+      <view class="bottom-tools safe-bottom">
+        <view class="tool-btn" bindtap="openUnitPanel">
+          <view class="tool-icon-wrap"><text class="tool-btn-icon">↔</text></view>
+          <view class="tool-copy">
+            <text class="tool-label">单位与换算</text>
+            <text class="tool-sub">维护重量、包装和计件关系</text>
+          </view>
+          <text class="tool-arrow">›</text>
+        </view>
+        <view class="tool-btn" bindtap="openSupplierPanel">
+          <view class="tool-icon-wrap supplier"><text class="tool-btn-icon">供</text></view>
+          <view class="tool-copy">
+            <text class="tool-label">供应商管理</text>
+            <text class="tool-sub">维护供货方、联系人和账期</text>
+          </view>
+          <text class="tool-arrow">›</text>
+        </view>
+      </view>
+    </view>
+
+  </block>
+
+  <!-- ═══════════════════ SKU 详情面板 ═══════════════════ -->
+  <block wx:else>
+
+    <!-- 返回导航 -->
+    <view class="detail-nav">
+      <view class="detail-back" bindtap="closeDetail">
+        <text class="back-arrow">‹</text>
+        <text class="back-word">返回列表</text>
+      </view>
+    </view>
+
+    <!-- SKU 信息卡 -->
+    <view class="detail-hero">
+      <view class="detail-hero-top">
+        <text class="detail-hero-name">{{detailSku.name}}</text>
+        <text wx:if="{{detailSku.category_group}}" class="detail-hero-cat">{{detailSku.category_group}}</text>
+      </view>
+      <view class="detail-hero-meta">
+        <view class="dhm-item">
+          <text class="dhm-val">{{detailSku.canonical_unit || '斤'}}</text>
+          <text class="dhm-lab">标准单位</text>
+        </view>
+        <view class="dhm-sep"></view>
+        <view class="dhm-item">
+          <text class="dhm-val">{{detailSku._shelfLabel || '—'}}</text>
+          <text class="dhm-lab">保质期</text>
+        </view>
+        <view class="dhm-sep"></view>
+        <view class="dhm-item">
+          <text class="dhm-val price">{{detailSku.default_sale_price ? '¥' + fmt.fixed(detailSku.default_sale_price, 2) : '未定价'}}</text>
+          <text class="dhm-lab">默认售价</text>
+        </view>
+      </view>
+      <view class="detail-hero-acts">
+        <text class="act-chip" bindtap="openSkuForm" data-id="{{detailSku.sku_id}}">✎ 编辑信息</text>
+        <text class="act-chip del" bindtap="deleteSku" data-id="{{detailSku.sku_id}}">停用</text>
+      </view>
+    </view>
+
+    <!-- 别名 -->
+    <view class="detail-block">
+      <view class="detail-block-head">
+        <view class="dbh-left">
+          <text class="dbh-icon">🏷️</text>
+          <text class="dbh-title">别名</text>
+          <text wx:if="{{detailAliases.length}}" class="dbh-badge">{{detailAliases.length}}</text>
+        </view>
+        <text class="section-link" bindtap="openAliasForm">+ 添加</text>
+      </view>
+      <view wx:if="{{detailAliases.length}}" class="tag-cloud">
+        <view wx:for="{{detailAliases}}" wx:key="alias_id" class="alias-chip {{item.is_system ? 'sys' : ''}}">
+          <text>{{item.alias}}</text>
+          <text wx:if="{{!item.is_system}}" class="alias-chip-x" data-id="{{item.alias_id}}" catchtap="removeAlias">✕</text>
+        </view>
+      </view>
+      <text wx:else class="block-empty">暂无别名 — 收货、语音录入时可用别名自动匹配商品</text>
+    </view>
+
+    <!-- 规格 -->
+    <view class="detail-block">
+      <view class="detail-block-head">
+        <view class="dbh-left">
+          <text class="dbh-icon">📐</text>
+          <text class="dbh-title">规格</text>
+          <text wx:if="{{detailSpecs.length}}" class="dbh-badge">{{detailSpecs.length}}</text>
+        </view>
+        <text class="section-link" bindtap="openSpecForm">+ 添加</text>
+      </view>
+      <view wx:if="{{detailSpecs.length}}" class="spec-list">
+        <view wx:for="{{detailSpecs}}" wx:key="spec_id" class="spec-row">
+          <view class="spec-row-main">
+            <text class="spec-row-name">{{item.name}}</text>
+            <text wx:if="{{item.price_delta > 0}}" class="spec-row-delta up">+¥{{fmt.fixed(item.price_delta, 2)}}</text>
+            <text wx:elif="{{item.price_delta < 0}}" class="spec-row-delta down">-¥{{fmt.fixed(-item.price_delta, 2)}}</text>
+            <text wx:else class="spec-row-delta flat">平价</text>
+          </view>
+          <text class="spec-row-del" data-id="{{item.spec_id}}" catchtap="removeSpec">删除</text>
+        </view>
+      </view>
+      <text wx:else class="block-empty">暂无规格 — 同一商品不同品级可设不同加价</text>
+    </view>
+
+    <!-- 供应商关联 -->
+    <view class="detail-block">
+      <view class="detail-block-head">
+        <view class="dbh-left">
+          <text class="dbh-icon">🤝</text>
+          <text class="dbh-title">供应商与报价</text>
+          <text wx:if="{{detailSupProds.length}}" class="dbh-badge">{{detailSupProds.length}}</text>
+        </view>
+        <view class="dbh-actions">
+          <text wx:if="{{detailSupProds.length >= 2}}" class="section-link compare-link" bindtap="openComparePanel">⚖ 比价</text>
+          <text class="section-link" bindtap="openSupProdForm">+ 关联</text>
+        </view>
+      </view>
+      <view wx:if="{{detailSupProds.length}}" class="supplier-list">
+        <view wx:for="{{detailSupProds}}" wx:key="id" class="supplier-row">
+          <view class="supplier-row-left">
+            <view class="supplier-avatar">{{item.supplier_name[0] || '供'}}</view>
+            <view class="supplier-row-info">
+              <text class="supplier-row-name">{{item.supplier_name || '供应商'}}</text>
+              <view class="supplier-row-detail">
+                <text wx:if="{{item.last_price}}" class="srd-price">报价 ¥{{fmt.fixed(item.last_price, 2)}}/{{detailSku.canonical_unit || '斤'}}</text>
+                <text wx:if="{{item.min_order_qty}}" class="srd-moq">起订 {{item.min_order_qty}}{{detailSku.canonical_unit || '斤'}}</text>
+              </view>
+            </view>
+          </view>
+          <text class="act-chip del" data-id="{{item.id}}" catchtap="removeSupProd">解除</text>
+        </view>
+      </view>
+      <text wx:else class="block-empty">暂未关联供应商 — 关联后可记录各供应商对该商品的报价</text>
+
+      <!-- 比价面板 -->
+      <view wx:if="{{showComparePanel}}" class="compare-panel">
+        <view class="compare-panel-head">
+          <text class="compare-panel-title">⚖ 供应商比价分析</text>
+          <text class="panel-close-sm" bindtap="closeComparePanel">✕</text>
+        </view>
+        <view wx:if="{{compareLoading}}" class="compare-loading">
+          <text>正在分析供应商数据…</text>
+        </view>
+        <block wx:elif="{{compareError}}">
+          <text class="compare-error">{{compareError}}</text>
+        </block>
+        <block wx:elif="{{compareData.suppliers.length}}">
+          <!-- AI 推荐 -->
+          <view wx:if="{{recommendData && recommendData.recommendation}}" class="recommend-card">
+            <view class="rec-badge">AI 推荐</view>
+            <text class="rec-supplier">{{recommendData.recommendation.supplier_name}}</text>
+            <text wx:if="{{recommendData.recommendation.last_price}}" class="rec-price">¥{{fmt.fixed(recommendData.recommendation.last_price, 2)}}/{{detailSku.canonical_unit || '斤'}}</text>
+            <text class="rec-reason">{{recommendData.recommendation.reasoning}}</text>
+            <view wx:if="{{recommendData.recommendation.decision_factors.length}}" class="rec-factors">
+              <text wx:for="{{recommendData.recommendation.decision_factors}}" wx:key="*this" class="rec-factor">{{item}}</text>
+            </view>
+          </view>
+          <!-- 排序切换 -->
+          <view class="compare-sorts">
+            <text class="sort-chip {{compareSort === 'value' ? 'on' : ''}}" bindtap="switchCompareSort" data-sort="value">综合价值</text>
+            <text class="sort-chip {{compareSort === 'price' ? 'on' : ''}}" bindtap="switchCompareSort" data-sort="price">价格优先</text>
+            <text class="sort-chip {{compareSort === 'score' ? 'on' : ''}}" bindtap="switchCompareSort" data-sort="score">质量优先</text>
+          </view>
+          <!-- 对比列表 -->
+          <view class="compare-list">
+            <view wx:for="{{compareData.suppliers}}" wx:key="supplier_id" class="compare-row {{item.is_best ? 'best' : ''}}">
+              <view class="cmp-rank">
+                <text wx:if="{{item.is_best}}" class="cmp-best">★</text>
+                <text wx:else class="cmp-num">{{index + 1}}</text>
+              </view>
+              <view class="cmp-info">
+                <text class="cmp-name">{{item.supplier_name}}</text>
+                <view class="cmp-meta">
+                  <text class="cmp-price">¥{{fmt.fixed(item.last_price, 2) || '—'}}/{{detailSku.canonical_unit || '斤'}}</text>
+                  <text wx:if="{{item.value_score}}" class="cmp-value">性价比 {{fmt.fixed(item.value_score, 1)}}</text>
+                </view>
+                <view class="cmp-metrics">
+                  <text wx:if="{{item.composite_score}}" class="cmp-metric {{item.composite_score >= 80 ? 'good' : item.composite_score >= 60 ? 'ok' : 'warn'}}">综合 {{fmt.fixed(item.composite_score, 0)}}分</text>
+                  <text wx:if="{{item.lead_time_hours}}" class="cmp-metric">到货 {{item.lead_time_hours}}h</text>
+                  <text wx:if="{{item.on_time_rate}}" class="cmp-metric {{item.on_time_rate >= 90 ? 'good' : ''}}">准时 {{fmt.fixed(item.on_time_rate, 0)}}%</text>
+                  <text wx:if="{{item.default_credit_days}}" class="cmp-metric">账期 {{item.default_credit_days}}天</text>
+                </view>
+              </view>
+              <text wx:if="{{item.is_best}}" class="cmp-best-tag">最佳</text>
+            </view>
+          </view>
+        </block>
+        <text wx:else class="block-empty">暂无对比数据</text>
+      </view>
+    </view>
+
+  </block>
+
+  <!-- ═══════════════════ 全局面板：单位换算 ═══════════════════ -->
+  <view wx:if="{{showUnitPanel}}" class="panel-overlay" bindtap="closeUnitPanel">
+    <view class="panel-sheet" catchtap="stopMaskTap">
+      <view class="panel-head">
+        <text class="panel-title">⚖️ 单位换算管理</text>
+        <text class="panel-close" bindtap="closeUnitPanel">✕</text>
+      </view>
+      <view class="panel-body">
+
+        <view class="panel-section">
+          <view class="panel-section-head">
+            <text class="panel-section-title">单位字典</text>
+            <text class="section-link" bindtap="openUnitForm">+ 添加</text>
+          </view>
+          <view wx:if="{{units.length}}" class="unit-grid">
+            <view wx:for="{{units}}" wx:key="unit_id" class="unit-chip">
+              <text class="unit-chip-code">{{item.code}}</text>
+              <text class="unit-chip-kind">{{item.kind === 'weight' ? '重量' : item.kind === 'package' ? '包装' : '计件'}}</text>
+            </view>
+          </view>
+          <text wx:else class="block-empty">暂无自定义单位</text>
+        </view>
+
+        <view class="panel-section">
+          <view class="panel-section-head">
+            <text class="panel-section-title">换算关系</text>
+            <text class="section-link" bindtap="openConvForm">+ 添加</text>
+          </view>
+          <view wx:if="{{conversions.length}}" class="conv-list">
+            <view wx:for="{{conversions}}" wx:key="id" class="conv-row">
+              <view class="conv-row-left">
+                <text class="conv-formula">{{item.from_unit}} → {{item.to_unit}}</text>
+                <text class="conv-factor">×{{item.factor}}</text>
+                <text wx:if="{{item._skuName}}" class="conv-sku-ref">{{item._skuName}}</text>
+              </view>
+              <text class="act-chip del" catchtap="deleteConv" data-id="{{item.id}}">删除</text>
+            </view>
+          </view>
+          <text wx:else class="block-empty">暂无换算关系</text>
+        </view>
+
       </view>
     </view>
   </view>
 
-  <!-- 别名 -->
-  <view wx:if="{{tab==='aliases'}}">
-    <view class="section-head"><text class="section-title">别名列表</text><text class="link" bindtap="openAliasForm">+ 新增</text></view>
-    <view class="cat-list"><view wx:for="{{aliases}}" wx:key="alias_id" class="cat-item"><text class="cat-name">{{item.alias}}</text><text class="act-btn del" data-id="{{item.alias_id}}" bindtap="removeAlias">删除</text></view></view>
-    <view wx:if="{{!aliases.length}}" class="empty-state"><text>暂无别名，点击"+ 新增"添加</text></view>
-  </view>
-
-  <!-- 规格 -->
-  <view wx:if="{{tab==='specs'}}">
-    <view class="section-head"><text class="section-title">规格列表</text><text class="link" bindtap="openSpecForm">+ 新增</text></view>
-    <view class="cat-list"><view wx:for="{{specs}}" wx:key="spec_id" class="cat-item"><text class="cat-name">{{item.name}}</text><text class="cat-price" wx:if="{{item.price_delta}}">{{item.price_delta>0?'+':''}}¥{{item.price_delta}}</text><text class="act-btn del" data-id="{{item.spec_id}}" bindtap="removeSpec">删除</text></view></view>
-  </view>
-
-  <!-- 单位 -->
-  <view wx:if="{{tab==='units'}}">
-    <view class="section-head"><text class="section-title">单位</text><text class="link" bindtap="openUnitForm">+ 新增</text></view>
-    <view class="cat-list"><view wx:for="{{units}}" wx:key="unit_id" class="cat-item"><text class="cat-name">{{item.name}}</text><text class="cat-meta">{{item.code}} · {{item.kind}}</text></view></view>
-    <view class="section-head"><text class="section-title">换算关系</text><text class="link" bindtap="openConvForm">+ 新增</text></view>
-    <view class="cat-list"><view wx:for="{{conversions}}" wx:key="id" class="cat-item"><text class="cat-name">{{item.from_unit}}→{{item.to_unit}}</text><text class="cat-meta">x{{item.factor}}</text><text class="act-btn del" data-id="{{item.id}}" bindtap="deleteConv">删除</text></view></view>
-  </view>
-
-  <!-- 供应商 -->
-  <view wx:if="{{tab==='suppliers'}}">
-    <view class="section-head"><text class="section-title">供应商</text><text class="link" bindtap="openSupForm">+ 新增</text></view>
-    <view class="cat-list">
-      <view wx:for="{{suppliers}}" wx:key="supplier_id" class="cat-item">
-        <view class="cat-main"><text class="cat-name">{{item.name}}</text><text class="cat-meta" wx:if="{{item.contact}}">{{item.contact}}</text></view>
-        <text class="cat-balance {{item.current_balance > 0 ? 'warn' : ''}}">{{item.current_balance > 0 ? '欠¥'+fmt.fixed(item.current_balance, 0) : '已结清'}}</text>
-        <view class="cat-actions">
-          <text class="act-btn" data-id="{{item.supplier_id}}" bindtap="viewStatement">对账</text>
-          <text class="act-btn" data-id="{{item.supplier_id}}" bindtap="openSupForm">编辑</text>
-          <text class="act-btn del" data-id="{{item.supplier_id}}" bindtap="deleteSup">停用</text>
-        </view>
-      </view>
-    </view>
-  </view>
-
-  <!-- SKU Form Modal -->
+  <!-- ═══════════════════ 弹窗：SKU 表单 ═══════════════════ -->
   <view wx:if="{{showSkuForm}}" class="picker-mask" bindtap="closeSkuForm">
-    <view class="picker-sheet" catchtap="">
-      <text class="picker-title">{{editSkuId ? '编辑' : '新增'}}SKU</text>
-      <input class="form-input" placeholder="名称" value="{{skuForm.name}}" data-field="name" bindinput="onSkuField"/>
-      <input class="form-input" placeholder="分类" value="{{skuForm.category_group}}" data-field="category_group" bindinput="onSkuField"/>
-      <input class="form-input" placeholder="标准单位" value="{{skuForm.canonical_unit}}" data-field="canonical_unit" bindinput="onSkuField"/>
-      <input class="form-input" type="number" placeholder="保质期(小时)" value="{{skuForm.shelf_life_hours}}" data-field="shelf_life_hours" bindinput="onSkuField"/>
-      <input class="form-input" type="digit" placeholder="默认售价" value="{{skuForm.default_sale_price}}" data-field="default_sale_price" bindinput="onSkuField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeSkuForm">取消</button><button class="btn-primary" bindtap="saveSku">保存</button></view>
+    <view class="picker-sheet form-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">{{editSkuId ? '编辑商品' : '新增商品'}}</text>
+
+      <text class="form-label">商品名称</text>
+      <input class="form-input" placeholder="如：土豆、西红柿" value="{{skuForm.name}}" data-field="name" bindinput="onSkuField"/>
+
+      <view class="form-row">
+        <view class="form-col grow">
+          <text class="form-label">分类</text>
+          <input class="form-input" placeholder="如：根茎类" value="{{skuForm.category_group}}" data-field="category_group" bindinput="onSkuField"/>
+        </view>
+        <view class="form-col">
+          <text class="form-label">标准单位</text>
+          <input class="form-input sm" placeholder="斤" value="{{skuForm.canonical_unit}}" data-field="canonical_unit" bindinput="onSkuField"/>
+        </view>
+      </view>
+
+      <!-- 保质期 + 单位切换 -->
+      <text class="form-label">保质期</text>
+      <view class="life-row">
+        <input class="form-input life-num" type="digit" placeholder="3" value="{{skuForm.shelf_life_value}}" data-field="shelf_life_value" bindinput="onSkuField"/>
+        <view class="life-unit-switch">
+          <view class="life-unit {{skuForm.shelf_life_unit === '小时' ? 'on' : ''}}" data-unit="小时" bindtap="switchLifeUnit">小时</view>
+          <view class="life-unit {{skuForm.shelf_life_unit === '天' ? 'on' : ''}}" data-unit="天" bindtap="switchLifeUnit">天</view>
+        </view>
+      </view>
+
+      <text class="form-label">默认售价（选填）</text>
+      <input class="form-input" type="digit" placeholder="0.00" value="{{skuForm.default_sale_price}}" data-field="default_sale_price" bindinput="onSkuField"/>
+
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeSkuForm">取消</button>
+        <button class="btn-primary" bindtap="saveSku" loading="{{submitting}}">保存</button>
+      </view>
     </view>
   </view>
 
-  <!-- Alias Modal -->
+  <!-- ═══════════════════ 弹窗：别名表单 ═══════════════════ -->
   <view wx:if="{{showAliasForm}}" class="picker-mask" bindtap="closeAliasForm">
-    <view class="picker-sheet" catchtap="">
-      <text class="picker-title">添加别名</text>
-      <input class="form-input" placeholder="如: 西红柿、洋柿子" value="{{aliasForm.alias}}" data-field="alias" bindinput="onAliasField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeAliasForm">取消</button><button class="btn-primary" bindtap="saveAlias">保存</button></view>
+    <view class="picker-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">为「{{detailSku.name}}」添加别名</text>
+      <text class="form-hint">别名可用于语音录入和快速搜索匹配</text>
+      <input class="form-input" placeholder="如：西红柿、洋柿子" value="{{aliasForm.alias}}" bindinput="onAliasField"/>
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeAliasForm">取消</button>
+        <button class="btn-primary" bindtap="saveAlias" loading="{{submitting}}">添加</button>
+      </view>
     </view>
   </view>
 
-  <!-- Spec Modal -->
+  <!-- ═══════════════════ 弹窗：规格表单 ═══════════════════ -->
   <view wx:if="{{showSpecForm}}" class="picker-mask" bindtap="closeSpecForm">
-    <view class="picker-sheet" catchtap="">
-      <text class="picker-title">添加规格</text>
-      <input class="form-input" placeholder="如: 精品大果" value="{{specForm.name}}" data-field="name" bindinput="onSpecField"/>
-      <input class="form-input" type="digit" placeholder="加价(元)" value="{{specForm.price_delta}}" data-field="price_delta" bindinput="onSpecField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeSpecForm">取消</button><button class="btn-primary" bindtap="saveSpec">保存</button></view>
+    <view class="picker-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">为「{{detailSku.name}}」添加规格</text>
+      <text class="form-hint">不同规格可在销售时叠加不同价格</text>
+      <input class="form-input" placeholder="规格名称，如：精品大果" value="{{specForm.name}}" data-field="name" bindinput="onSpecField"/>
+      <text class="form-label">相对标准售价的加价</text>
+      <view class="delta-row">
+        <input class="form-input delta-num" type="digit" placeholder="0" value="{{specForm.price_delta}}" data-field="price_delta" bindinput="onSpecField"/>
+        <text class="delta-unit">元</text>
+      </view>
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeSpecForm">取消</button>
+        <button class="btn-primary" bindtap="saveSpec" loading="{{submitting}}">添加</button>
+      </view>
     </view>
   </view>
 
-  <!-- Unit/Conversion modals -->
-  <view wx:if="{{showUnitForm}}" class="picker-mask" bindtap="closeUnitForm">
-    <view class="picker-sheet" catchtap=""><text class="picker-title">新增单位</text>
-      <input class="form-input" placeholder="代码 如: 筐" value="{{unitForm.code}}" data-field="code" bindinput="onUnitField"/>
-      <input class="form-input" placeholder="名称 如: 筐" value="{{unitForm.name}}" data-field="name" bindinput="onUnitField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeUnitForm">取消</button><button class="btn-primary" bindtap="saveUnit">保存</button></view>
+  <!-- ═══════════════════ 弹窗：供应商关联表单 ═══════════════════ -->
+  <view wx:if="{{showSupProdForm}}" class="picker-mask" bindtap="closeSupProdForm">
+    <view class="picker-sheet sup-prod-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">关联「{{detailSku.name}}」到供应商</text>
+      <text class="form-hint">记录该供应商对这个商品的报价和起订量</text>
+
+      <text class="form-label">选择供应商</text>
+      <scroll-view wx:if="{{allSuppliers.length}}" class="pick-scroll" scroll-y>
+        <view wx:for="{{allSuppliers}}" wx:key="supplier_id"
+              class="pick-row {{supProdForm.supplier_id === item.supplier_id ? 'active' : ''}}"
+              data-id="{{item.supplier_id}}" catchtap="pickSupProdSupplier">
+          <view class="pick-row-left">
+            <view class="supplier-avatar sm">{{item.name[0] || '供'}}</view>
+            <text class="pick-row-name">{{item.name}}</text>
+          </view>
+          <text wx:if="{{supProdForm.supplier_id === item.supplier_id}}" class="pick-check">✓</text>
+        </view>
+      </scroll-view>
+      <text wx:else class="block-empty pick-empty">暂无供应商</text>
+
+      <block wx:if="{{supProdForm.supplier_id}}">
+        <text class="form-label">最近报价（元/{{detailSku.canonical_unit || '斤'}}）</text>
+        <input class="form-input" type="digit" placeholder="如：1.50" value="{{supProdForm.last_price}}" data-field="last_price" bindinput="onSupProdField"/>
+
+        <text class="form-label">最小起订量（{{detailSku.canonical_unit || '斤'}}）</text>
+        <input class="form-input" type="digit" placeholder="如：50" value="{{supProdForm.min_order_qty}}" data-field="min_order_qty" bindinput="onSupProdField"/>
+      </block>
+
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeSupProdForm">取消</button>
+        <button class="btn-primary" bindtap="saveSupProd" disabled="{{!supProdForm.supplier_id}}" loading="{{submitting}}">确认关联</button>
+      </view>
     </view>
   </view>
 
+  <!-- ═══════════════════ 弹窗：换算表单（带 SKU 选择器） ═══════════════════ -->
   <view wx:if="{{showConvForm}}" class="picker-mask" bindtap="closeConvForm">
-    <view class="picker-sheet" catchtap=""><text class="picker-title">新增换算</text>
-      <input class="form-input" placeholder="从(如:筐)" value="{{convForm.from_unit}}" data-field="from_unit" bindinput="onConvField"/>
-      <input class="form-input" placeholder="到(如:斤)" value="{{convForm.to_unit}}" data-field="to_unit" bindinput="onConvField"/>
-      <input class="form-input" type="digit" placeholder="因子(如:50)" value="{{convForm.factor}}" data-field="factor" bindinput="onConvField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeConvForm">取消</button><button class="btn-primary" bindtap="saveConv">保存</button></view>
+    <view class="picker-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">新增换算关系</text>
+      <text class="form-hint">例如：「筐→斤 ×50」表示 1 筐 = 50 斤</text>
+
+      <view class="form-row">
+        <view class="form-col">
+          <text class="form-label">从</text>
+          <input class="form-input sm" placeholder="筐" value="{{convForm.from_unit}}" data-field="from_unit" bindinput="onConvField"/>
+        </view>
+        <view class="form-col">
+          <text class="form-label">到</text>
+          <input class="form-input sm" placeholder="斤" value="{{convForm.to_unit}}" data-field="to_unit" bindinput="onConvField"/>
+        </view>
+        <view class="form-col">
+          <text class="form-label">因子</text>
+          <input class="form-input sm" type="digit" placeholder="50" value="{{convForm.factor}}" data-field="factor" bindinput="onConvField"/>
+        </view>
+      </view>
+
+      <text class="form-label">适用商品（选填）</text>
+      <text class="form-sub">不选则为通用换算，选中后仅对该商品生效</text>
+      <view wx:if="{{convForm.sku_id}}" class="chosen-sku">
+        <text class="chosen-sku-name">{{convForm._skuName}}</text>
+        <text class="chosen-sku-clr" bindtap="clearConvSku">✕ 清除</text>
+      </view>
+      <scroll-view wx:else class="pick-scroll conv-pick" scroll-y>
+        <view wx:for="{{skus}}" wx:key="sku_id" class="pick-row" data-id="{{item.sku_id}}" catchtap="pickConvSku">
+          <text class="pick-row-name">{{item.name}}</text>
+        </view>
+      </scroll-view>
+
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeConvForm">取消</button>
+        <button class="btn-primary" bindtap="saveConv" loading="{{submitting}}">保存</button>
+      </view>
     </view>
   </view>
 
-  <!-- Supplier Modal -->
-  <view wx:if="{{showSupForm}}" class="picker-mask" bindtap="closeSupForm">
-    <view class="picker-sheet" catchtap=""><text class="picker-title">{{editSupId ? '编辑' : '新增'}}供应商</text>
-      <input class="form-input" placeholder="名称" value="{{supForm.name}}" data-field="name" bindinput="onSupField"/>
-      <input class="form-input" placeholder="联系方式" value="{{supForm.contact}}" data-field="contact" bindinput="onSupField"/>
-      <input class="form-input" type="number" placeholder="到货周期(小时)" value="{{supForm.lead_time_hours}}" data-field="lead_time_hours" bindinput="onSupField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeSupForm">取消</button><button class="btn-primary" bindtap="saveSup">保存</button></view>
+  <!-- ═══════════════════ 弹窗：单位表单 ═══════════════════ -->
+  <view wx:if="{{showUnitForm}}" class="picker-mask" bindtap="closeUnitForm">
+    <view class="picker-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">新增单位</text>
+
+      <view class="form-row">
+        <view class="form-col grow">
+          <text class="form-label">代码</text>
+          <input class="form-input" placeholder="如：筐" value="{{unitForm.code}}" data-field="code" bindinput="onUnitField"/>
+        </view>
+        <view class="form-col grow">
+          <text class="form-label">名称</text>
+          <input class="form-input" placeholder="如：筐" value="{{unitForm.name}}" data-field="name" bindinput="onUnitField"/>
+        </view>
+      </view>
+
+      <text class="form-label">类型</text>
+      <view class="kind-row">
+        <view wx:for="{{[{k:'weight',l:'重量'},{k:'package',l:'包装'},{k:'count',l:'计件'}]}}" wx:key="k"
+              class="kind-chip {{unitForm.kind === item.k ? 'on' : ''}}" data-kind="{{item.k}}" bindtap="pickUnitKind">{{item.l}}</view>
+      </view>
+
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeUnitForm">取消</button>
+        <button class="btn-primary" bindtap="saveUnit" loading="{{submitting}}">保存</button>
+      </view>
     </view>
   </view>
+
 </view>

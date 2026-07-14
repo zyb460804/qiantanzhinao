@@ -55,6 +55,10 @@ class SupplierPayable(Base):
     note: Mapped[str | None] = mapped_column(sa.Text)
     due_date: Mapped[date | None] = mapped_column(sa.Date)
     settled: Mapped[bool] = mapped_column(sa.Boolean, default=False)
+    # purchase 应付已被付款核销的金额，支持部分付款；payment/return 行保持 0。
+    settled_amount: Mapped[Decimal] = mapped_column(
+        sa.Numeric(12, 2), default=Decimal("0"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
     idempotency_key: Mapped[str | None] = mapped_column(sa.String(64), index=True)
 
@@ -113,12 +117,8 @@ class CustomerCreditProfile(Base):
     credit_limit: Mapped[Decimal | None] = mapped_column(
         sa.Numeric(12, 2)
     )  # 信用额度（NULL=无限制）
-    default_credit_days: Mapped[int | None] = mapped_column(
-        sa.Integer
-    )  # 默认账期（天）
-    is_blocked: Mapped[bool] = mapped_column(
-        sa.Boolean, default=False
-    )  # 停止赊账
+    default_credit_days: Mapped[int | None] = mapped_column(sa.Integer)  # 默认账期（天）
+    is_blocked: Mapped[bool] = mapped_column(sa.Boolean, default=False)  # 停止赊账
     block_reason: Mapped[str | None] = mapped_column(sa.String(200))
     notes: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ApiResponse, PaginatedResponse
 
@@ -56,7 +56,7 @@ class StocktakeSubmitData(BaseModel):
     product_id: int
     product_name: str
     book_qty: float
-    actual_qty: float
+    actual_qty: float = Field(ge=0)
     diff: float
     diff_reason: str | None = None
 
@@ -94,7 +94,7 @@ class VoidRequest(BaseModel):
 
 class StocktakeSubmitRequest(BaseModel):
     product_id: int
-    actual_qty: float
+    actual_qty: float = Field(ge=0)
     unit: str | None = None
     diff_reason: str | None = None
     variance_reason: str | None = None

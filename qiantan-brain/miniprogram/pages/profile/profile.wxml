@@ -78,6 +78,7 @@
   <view class="section-head"><text class="section-title">摊位设置</text></view>
   <view class="setting-group">
     <view class="setting-row"><text class="setting-label">摊位名称</text><input class="setting-input" value="{{merchantName}}" bindinput="onNameChange" placeholder="输入摊位名称" /></view>
+    <view class="setting-row"><text class="setting-label">所在城市</text><picker range="{{cityOptions}}" value="{{cityIndex}}" bindchange="onCityChange"><text class="setting-val">{{cityOptions[cityIndex]}} ›</text></picker></view>
     <view class="setting-row"><text class="setting-label">常用方言</text><picker range="{{dialects}}" value="{{dialectIndex}}" bindchange="onDialectChange"><text class="setting-val">{{dialects[dialectIndex]}} ›</text></picker></view>
     <view class="setting-row"><text class="setting-label">营业时段</text><picker range="{{hoursOptions}}" value="{{hoursIndex}}" bindchange="onBusinessHoursChange"><text class="setting-val">{{hoursOptions[hoursIndex]}} ›</text></picker></view>
     <view class="setting-row"><text class="setting-label">经营提醒</text><switch checked="{{notificationEnabled}}" bindchange="onNotificationToggle" color="#175C45" /></view>

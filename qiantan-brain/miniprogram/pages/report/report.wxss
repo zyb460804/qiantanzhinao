@@ -1,12 +1,15 @@
 /* 经营报告 · v2.2 视觉（生鲜元气） */
 .report-page { padding-top: 22rpx; }
 .report-hero { padding-bottom: 32rpx; }
+/* Hero 的装饰圆位于右下角，必须禁止它遮挡“近30日”的点击区域。 */
+.report-hero::after { pointer-events: none; z-index: 0; }
+.report-hero > view, .report-hero > text { position: relative; z-index: 1; }
 .hero-kick { font-size: 22rpx; letter-spacing: 2rpx; color: var(--green-200); font-weight: 700; }
 .hero-title { font-family: var(--font-display); font-size: 64rpx; font-weight: 900; color: #fff; letter-spacing: -1rpx; display: block; line-height: 1.05; }
 .hero-desc { display: block; font-size: 24rpx; color: rgba(255,255,255,.72); margin-top: 8rpx; }
 
-.range-tabs { display: flex; gap: 12rpx; margin-top: 28rpx; background: rgba(255,255,255,.14); padding: 8rpx; border-radius: 99rpx; }
-.range-tab { flex: 1; text-align: center; font-size: 24rpx; color: rgba(255,255,255,.78); padding: 14rpx; border-radius: 99rpx; transition: all var(--dur-fast); }
+.range-tabs { display: flex; gap: 12rpx; margin-top: 28rpx; background: rgba(255,255,255,.14); padding: 8rpx; border-radius: 99rpx; position: relative; z-index: 2; }
+.range-tab { flex: 1; text-align: center; font-size: 24rpx; color: rgba(255,255,255,.78); padding: 14rpx; border-radius: 99rpx; transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast); line-height: 1.4; position: relative; z-index: 3; }
 .range-tab.active { background: #fff; color: var(--green-800); font-weight: 700; }
 
 /* 核心指标卡 */
@@ -109,3 +112,20 @@
 /* 空状态 */
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 16rpx; padding: 64rpx 32rpx; text-align: center; }
 .empty-tip { font-size: 24rpx; color: var(--muted); }
+
+/* 2026 统一设计升级：报告阅读体验 */
+.report-page { padding-bottom: 90rpx; }
+.report-hero { margin-bottom: 0; }
+.report-signal-strip { display: flex; align-items: center; margin: 18rpx 0 24rpx; padding: 20rpx 12rpx; background: var(--paper); border: 1.5rpx solid var(--ring); border-radius: 22rpx; box-shadow: var(--shadow-sm); }
+.report-signal-strip > view { flex: 1; text-align: center; }
+.signal-num { display: block; color: var(--ink); font-family: var(--font-num); font-size: 31rpx; font-weight: 850; }
+.signal-num.warn { color: var(--corn-deep, #9a6b00); }.signal-num.good { color: var(--green-700); }
+.signal-label { display: block; margin-top: 5rpx; color: var(--muted); font-size: 19rpx; }
+.signal-divider { width: 1rpx; height: 42rpx; flex: 0 0 auto !important; background: var(--line); }
+.kpi { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }
+.kpi-value { letter-spacing: -.5rpx; }
+.report-page .card { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }
+.chart-card { overflow: hidden; }
+.rank-row, .waste-row { padding-top: 22rpx; padding-bottom: 22rpx; }
+.ai-card { position: relative; overflow: hidden; }
+.ai-card::before { position: absolute; top: 0; left: 0; right: 0; height: 6rpx; background: linear-gradient(90deg, var(--green-700), var(--corn)); content: ''; }

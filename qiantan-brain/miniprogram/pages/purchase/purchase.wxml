@@ -9,6 +9,16 @@
     <text class="hero-desc">下单→到货验收→批次入库→供应商付款</text>
   </view>
 
+  <view class="purchase-flow">
+    <view class="purchase-step active"><text class="step-index">1</text><text class="step-name">生成清单</text></view>
+    <view class="step-connector"></view>
+    <view class="purchase-step {{listData ? 'active' : ''}}"><text class="step-index">2</text><text class="step-name">确认采购</text></view>
+    <view class="step-connector"></view>
+    <view class="purchase-step {{acceptanceMode ? 'active' : ''}}"><text class="step-index">3</text><text class="step-name">到货验收</text></view>
+    <view class="step-connector"></view>
+    <view class="purchase-step {{listData && listData.purchased_count ? 'active' : ''}}"><text class="step-index">4</text><text class="step-name">入库付款</text></view>
+  </view>
+
   <!-- Loading -->
   <view wx:if="{{loading}}" class="purchase-skeleton">
     <view class="skel-bar"><view class="skel-line title"></view><view class="skel-line medium"></view></view>
@@ -28,7 +38,7 @@
     <!-- Status bar -->
     <view class="status-bar">
       <view class="status-block">
-        <text class="status-label">清单状态</text>
+        <text class="status-label">{{listData.order_no || '采购清单'}}</text>
         <text class="tag {{listData.list_status_tag}}">{{listData.list_status_text}}</text>
       </view>
       <view class="status-divider"></view>
@@ -40,6 +50,10 @@
         <text class="status-label">付款</text>
         <text class="status-amount-sm {{listData.payment_status === 'paid' ? 'ok' : 'warn'}}">{{listData.payment_status === 'paid' ? '已付清' : listData.payment_status === 'partial' ? '部分付' : '未付'}}</text>
       </view>
+    </view>
+    <view class="expected-arrival" wx:if="{{listData.expected_arrival}}">
+      <text class="arrival-label">预计到货</text>
+      <text class="arrival-date">{{listData.expected_arrival}}</text>
     </view>
 
     <!-- Section -->
@@ -161,12 +175,13 @@
       <text class="bottom-amount">¥{{fmt.fixed(listData.total_actual_cost, 2)}}</text>
     </view>
     <button class="btn-secondary" wx:if="{{listData.purchased_count > 0}}" bindtap="openPayment">付供应商款</button>
+    <button class="btn-secondary" wx:if="{{listData.can_confirm_order}}" bindtap="confirmOrder" loading="{{submitting}}">确认下单</button>
     <button class="btn-primary bottom-btn" bindtap="confirmPurchase" loading="{{submitting}}">{{listData.status === 'accepted' ? '确认入库' : '确认采购入库'}}</button>
   </view>
 
   <!-- Confirm result -->
   <view wx:if="{{confirmed && confirmResult}}" class="result-mask" bindtap="goHome">
-    <view class="result-card safe-bottom" catchtap="">
+    <view class="result-card safe-bottom" catchtap="stopMaskTap">
       <mascot size="lg" mood="cheer" class="result-mascot"></mascot>
       <text class="result-title">入库完成</text>
       <text class="result-subtitle">已入库 {{confirmResult.confirmed_count}} 项</text>
@@ -188,7 +203,7 @@
 
   <!-- 供应商选择弹窗 -->
   <view wx:if="{{showSupplierPicker}}" class="picker-mask" bindtap="closeSupplierPicker">
-    <view class="picker-sheet" catchtap="">
+    <view class="picker-sheet" catchtap="stopMaskTap">
       <text class="picker-title">选择供应商</text>
       <view wx:if="{{suppliers.length}}" class="picker-list">
         <view wx:for="{{suppliers}}" wx:key="supplier_id" class="picker-item" data-id="{{item.supplier_id}}" data-name="{{item.supplier_name}}" bindtap="selectSupplier">
@@ -196,14 +211,15 @@
           <text class="picker-balance {{item.balance > 0 ? 'warn' : ''}}">{{item.balance > 0 ? '欠 ¥' + fmt.fixed(item.balance, 0) : '已结清'}}</text>
         </view>
       </view>
-      <view wx:else class="picker-empty">暂无供应商档案，请先在"我的"→供应商管理中添加</view>
+      <view wx:else class="picker-empty">暂无供应商档案</view>
+      <button class="btn-sm btn-secondary" style="margin-top:16rpx;" bindtap="goSupplier">去添加供应商 ›</button>
       <button class="picker-close" bindtap="closeSupplierPicker">关闭</button>
     </view>
   </view>
 
   <!-- 供应商付款弹窗 -->
   <view wx:if="{{showPayment}}" class="picker-mask" bindtap="closePayment">
-    <view class="picker-sheet" catchtap="">
+    <view class="picker-sheet" catchtap="stopMaskTap">
       <text class="picker-title">付供应商款</text>
       <view class="picker-list">
         <view wx:for="{{suppliers}}" wx:key="supplier_id" class="picker-item {{paymentSupplierId === item.supplier_id ? 'active' : ''}}" data-id="{{item.supplier_id}}" data-name="{{item.supplier_name}}" bindtap="pickPaymentSupplier">
@@ -214,7 +230,7 @@
       <view wx:if="{{paymentSupplierId}}" class="payment-form">
         <view class="pay-field"><text class="pay-label">金额</text><input class="pay-input" type="digit" value="{{paymentAmount}}" bindinput="editPaymentAmount" placeholder="0.00"/></view>
         <view class="pay-methods">
-          <view wx:for="{{[{key:'cash', label:'现金'}, {key:'wechat', label:'微信'}, {key:'bank_transfer', label:'转账'}]}}" wx:key="key" class="pay-chip {{paymentMethod === item.key ? 'active' : ''}}" data-method="{{item.key}}" bindtap="selectPaymentMethod">{{item.label}}</view>
+          <view wx:for="{{[{key:'cash', label:'现金'}, {key:'wechat', label:'微信'}, {key:'alipay', label:'支付宝'}, {key:'bank_transfer', label:'转账'}]}}" wx:key="key" class="pay-chip {{paymentMethod === item.key ? 'active' : ''}}" data-method="{{item.key}}" bindtap="selectPaymentMethod">{{item.label}}</view>
         </view>
         <input class="pay-input note" value="{{paymentNote}}" bindinput="editPaymentNote" placeholder="备注（选填）"/>
       </view>
@@ -227,7 +243,7 @@
 
   <!-- 对账单弹窗 -->
   <view wx:if="{{showStatement && statementData}}" class="picker-mask" bindtap="closeStatement">
-    <view class="picker-sheet statement-sheet" catchtap="">
+    <view class="picker-sheet statement-sheet" catchtap="stopMaskTap">
       <text class="picker-title">供应商对账单</text>
       <text class="statement-supplier">{{statementData.supplier_name || '供应商'}}</text>
       <view class="statement-summary">
@@ -247,7 +263,7 @@
 
   <!-- 退货弹窗 -->
   <view wx:if="{{showReturn}}" class="picker-mask" bindtap="closeReturn">
-    <view class="picker-sheet" catchtap="">
+    <view class="picker-sheet" catchtap="stopMaskTap">
       <text class="picker-title">退货给供应商</text>
       <view class="payment-form">
         <view class="pay-field"><text class="pay-label">数量</text><input class="pay-input" type="digit" value="{{returnQty}}" bindinput="editReturnQty" placeholder="0"/></view>
@@ -256,6 +272,28 @@
       <view class="picker-actions">
         <button class="btn-secondary" bindtap="closeReturn">取消</button>
         <button class="btn-primary" bindtap="submitReturn" loading="{{returnSubmitting}}">确认退货</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 采购历史 -->
+  <view class="history-toggle" bindtap="toggleHistory">
+    <text class="history-toggle-text">采购历史</text>
+    <text class="history-toggle-arrow">{{showHistory ? '收起' : '展开'}} ›</text>
+  </view>
+  <view class="history-list" wx:if="{{showHistory}}">
+    <view wx:if="{{historyList.length === 0}}" class="empty-state mini">
+      <text>近30日暂无历史采购记录</text>
+    </view>
+    <view wx:for="{{historyList}}" wx:key="list_id" class="history-card">
+      <view class="history-top">
+        <text class="history-no">{{item.order_no}}</text>
+        <text class="tag {{item.status_text === '已完成' ? 'tag-green' : item.status_text === '已取消' ? 'tag-muted' : 'tag-amber'}}">{{item.status_text}}</text>
+      </view>
+      <view class="history-meta">
+        <text>{{item.item_count}}项</text>
+        <text>¥{{fmt.fixed(item.total_cost, 2)}}</text>
+        <text wx:if="{{item.payment_status === 'paid'}}">已付清</text>
       </view>
     </view>
   </view>

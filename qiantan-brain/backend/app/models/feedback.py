@@ -15,7 +15,12 @@ class MerchantFeedback(Base):
     __table_args__ = {"extend_existing": True}
 
     id: Mapped[_uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=_uuid.uuid4)
-    merchant_id: Mapped[_uuid.UUID] = mapped_column(sa.Uuid, nullable=False, index=True)
+    merchant_id: Mapped[_uuid.UUID] = mapped_column(
+        sa.Uuid,
+        sa.ForeignKey("merchants.id"),
+        nullable=False,
+        index=True,
+    )
     content: Mapped[str] = mapped_column(sa.Text, nullable=False)
     page: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     app_version: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)

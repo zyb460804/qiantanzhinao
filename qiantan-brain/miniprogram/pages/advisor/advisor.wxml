@@ -41,7 +41,26 @@
     </block>
   </view>
 
-  <view class="section-head"><text class="section-title">优先行动</text><text class="section-caption">{{recommendations.length}} 条建议</text></view>
+  <!-- AI 可执行动作 — 一键改价/采购/清货/锁定 -->
+  <view class="section-head" wx:if="{{aiActions.length > 0}}">
+    <text class="section-title">AI 待执行动作</text>
+    <text class="section-caption">{{aiActions.length}} 项可一键执行</text>
+  </view>
+  <view class="ai-action-stack" wx:if="{{aiActions.length > 0}}">
+    <view wx:for="{{aiActions}}" wx:key="id" class="ai-action-card {{item.tone}}">
+      <view class="ai-action-top">
+        <view class="ai-action-badge">{{item.typeLabel}}</view>
+        <text class="ai-action-title">{{item.title}}</text>
+      </view>
+      <text class="ai-action-desc">{{item.desc}}</text>
+      <view class="ai-action-btns">
+        <button class="btn-primary ai-btn-execute" data-id="{{item.id}}" bindtap="executeAiAction">一键执行</button>
+        <text class="ai-btn-reject" data-id="{{item.id}}" bindtap="rejectAiAction">忽略</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section-head"><text class="section-caption">{{recommendations.length}} 条建议</text></view>
 
   <!-- 打字中 + 流式口吻 -->
   <view class="mascot-says" wx:if="{{saysText}}">
@@ -72,6 +91,23 @@
 
   <view class="purchase-cta" wx:if="{{recommendations.length > 0}}">
     <button class="btn-primary purchase-btn" bindtap="addToPurchase">把这些建议加入采购清单</button>
+  </view>
+
+  <!-- 效果复盘 — 最近执行的 AI 动作 -->
+  <view class="section-head" wx:if="{{aiHistory.length > 0}}">
+    <text class="section-title">效果复盘</text>
+    <text class="section-caption">最近动作记录</text>
+  </view>
+  <view class="ai-history-stack" wx:if="{{aiHistory.length > 0}}">
+    <view wx:for="{{aiHistory}}" wx:key="id" class="ai-history-item {{item.statusClass}}">
+      <view class="ai-history-top">
+        <text class="ai-history-badge">{{item.typeLabel}}</text>
+        <text class="ai-history-title">{{item.title}}</text>
+        <text class="ai-history-status {{item.statusClass}}">{{item.statusText}}</text>
+      </view>
+      <text class="ai-history-result" wx:if="{{item.resultText}}">{{item.resultText}}</text>
+      <text class="ai-history-time" wx:if="{{item.executedAt}}">{{item.executedAt}}</text>
+    </view>
   </view>
 
   <view class="sandbox-banner" bindtap="toggleSim">

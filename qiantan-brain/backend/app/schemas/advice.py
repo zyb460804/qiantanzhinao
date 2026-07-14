@@ -29,9 +29,9 @@ class DailyAdviceResponse(BaseModel):
 
 
 class WhatIfRequest(BaseModel):
-    merchant_id: UUID
     product_id: int
     scenario: dict  # {"purchase_qty": 50, "unit_cost": 0.3, "unit_price": 1.5}
+    # merchant_id 由 get_merchant_id 依赖注入（token），不在 body 中传递
 
 
 class ScenarioInput(BaseModel):

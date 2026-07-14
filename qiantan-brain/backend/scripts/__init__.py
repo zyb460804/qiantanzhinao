@@ -52,33 +52,37 @@ def generate_inventory_records(merchant_id: uuid.UUID, days: int = 30) -> list[I
             total = round(qty * cost, 2)
 
             # Purchase record
-            records.append(InventoryRecord(
-                merchant_id=merchant_id,
-                product_id=prod_id,
-                quantity=qty,
-                unit=unit,
-                unit_cost=cost,
-                total_amount=total,
-                event_type="purchase",
-                event_time=datetime(day.year, day.month, day.day, 6, 0, 0),
-                source="seed",
-                batch_label=f"{name}-{day.strftime('%m%d')}",
-            ))
+            records.append(
+                InventoryRecord(
+                    merchant_id=merchant_id,
+                    product_id=prod_id,
+                    quantity=qty,
+                    unit=unit,
+                    unit_cost=cost,
+                    total_amount=total,
+                    event_type="purchase",
+                    event_time=datetime(day.year, day.month, day.day, 6, 0, 0),
+                    source="seed",
+                    batch_label=f"{name}-{day.strftime('%m%d')}",
+                )
+            )
 
             # Sale record
             sold_qty = random.randint(int(qty * 0.3), qty)
             revenue = round(sold_qty * price, 2)
-            records.append(InventoryRecord(
-                merchant_id=merchant_id,
-                product_id=prod_id,
-                quantity=-sold_qty,
-                unit=unit,
-                unit_price=price,
-                total_amount=revenue,
-                event_type="sale",
-                event_time=datetime(day.year, day.month, day.day, 18, 0, 0),
-                source="seed",
-            ))
+            records.append(
+                InventoryRecord(
+                    merchant_id=merchant_id,
+                    product_id=prod_id,
+                    quantity=-sold_qty,
+                    unit=unit,
+                    unit_price=price,
+                    total_amount=revenue,
+                    event_type="sale",
+                    event_time=datetime(day.year, day.month, day.day, 18, 0, 0),
+                    source="seed",
+                )
+            )
 
     return records
 
@@ -105,14 +109,16 @@ async def seed():
 
         # 2. Product categories
         for prod_id, name, unit, price, shelf_life, group in PRODUCTS:
-            db.add(ProductCategory(
-                id=prod_id,
-                name=name,
-                unit=unit,
-                default_price=price,
-                shelf_life_hours=shelf_life,
-                category_group=group,
-            ))
+            db.add(
+                ProductCategory(
+                    id=prod_id,
+                    name=name,
+                    unit=unit,
+                    default_price=price,
+                    shelf_life_hours=shelf_life,
+                    category_group=group,
+                )
+            )
 
         # 3. Environment records (30 days)
         for d in range(30, 0, -1):
@@ -122,17 +128,19 @@ async def seed():
             rain = random.randint(0, 100)
             weather = "雨" if rain > 50 else "多云" if rain > 20 else "晴"
             dow = day.weekday()
-            db.add(EnvironmentRecord(
-                date=day,
-                city="上海",
-                temp_high=temp_h,
-                temp_low=temp_l,
-                weather_type=weather,
-                rainfall_prob=float(rain),
-                is_holiday=False,
-                day_of_week=dow,
-                is_weekend=dow >= 5,
-            ))
+            db.add(
+                EnvironmentRecord(
+                    date=day,
+                    city="上海",
+                    temp_high=temp_h,
+                    temp_low=temp_l,
+                    weather_type=weather,
+                    rainfall_prob=float(rain),
+                    is_holiday=False,
+                    day_of_week=dow,
+                    is_weekend=dow >= 5,
+                )
+            )
 
         await db.flush()
 
@@ -142,7 +150,9 @@ async def seed():
             db.add(r)
 
         await db.commit()
-        print(f"✅ Seeded: 1 merchant, 10 products, 30 env records, {len(records)} inventory records")
+        print(
+            f"✅ Seeded: 1 merchant, 10 products, 30 env records, {len(records)} inventory records"
+        )
 
 
 if __name__ == "__main__":

@@ -1,9 +1,17 @@
 <wxs src="/utils/format.wxs" module="fmt" />
 <!-- 经营管理 — 报损·临期·客户·导出 -->
 <view class="page-shell ops-page {{skin}}">
-  <view class="page-hero"><text class="eyebrow">OPERATIONS · 日常经营</text><text class="hero-title">经营管理</text></view>
+  <view class="page-hero ops-hero">
+    <text class="eyebrow">OPERATIONS · 日常经营</text><text class="hero-title">经营管理</text>
+    <text class="hero-desc">优先处理报损和临期，再维护客户往来与经营数据。</text>
+    <view class="ops-pulse">
+      <view><text class="ops-pulse-num">{{wasteRecords.length}}</text><text class="ops-pulse-label">报损记录</text></view>
+      <view><text class="ops-pulse-num warn">{{clearanceItems.length}}</text><text class="ops-pulse-label">临期待处理</text></view>
+      <view><text class="ops-pulse-num">{{customers.length}}</text><text class="ops-pulse-label">赊账客户</text></view>
+    </view>
+  </view>
 
-  <view class="tab-row">
+  <view class="tab-row ops-tabs">
     <view wx:for="{{[{k:'waste',l:'报损'},{k:'clearance',l:'临期清货'},{k:'customers',l:'客户赊账'},{k:'export',l:'导出'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
   </view>
 
@@ -21,7 +29,7 @@
 
   <!-- 报损表单弹窗 -->
   <view wx:if="{{showWasteForm}}" class="picker-mask" bindtap="closeWasteForm">
-    <view class="picker-sheet" catchtap="">
+    <view class="picker-sheet" catchtap="stopMaskTap">
       <text class="picker-title">记录报损</text>
       <text class="form-label" wx:if="{{wasteForm.product_name}}">商品: {{wasteForm.product_name}}</text>
       <view wx:else class="prod-pick-list"><view wx:for="{{products}}" wx:key="product_id" class="prod-pick-item" data-index="{{index}}" bindtap="pickWasteProduct">{{item.sku_name || item.product_name}} · 余{{item.current_qty}}{{item.unit}}</view></view>
@@ -84,7 +92,7 @@
 
   <!-- 客户明细弹窗 -->
   <view wx:if="{{showCustomerLedger && customerLedger}}" class="picker-mask" bindtap="closeLedger">
-    <view class="picker-sheet statement-sheet" catchtap="">
+    <view class="picker-sheet statement-sheet" catchtap="stopMaskTap">
       <text class="picker-title">{{ledgerName}} · 赊账明细</text>
       <view class="statement-summary">
         <view class="stmt-stat"><text class="stmt-num">¥{{fmt.fixed(customerLedger.total_charge, 0)}}</text><text class="stmt-label">赊账总额</text></view>
@@ -101,9 +109,9 @@
 
   <!-- 回款弹窗 -->
   <view wx:if="{{showRepayForm}}" class="picker-mask" bindtap="closeRepay">
-    <view class="picker-sheet" catchtap=""><text class="picker-title">{{repayForm.customer_name}} · 回款</text>
+    <view class="picker-sheet" catchtap="stopMaskTap"><text class="picker-title">{{repayForm.customer_name}} · 回款</text>
       <input class="form-input" type="digit" placeholder="金额" value="{{repayForm.amount}}" data-field="amount" bindinput="onRepayField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeRepay">取消</button><button class="btn-primary" bindtap="submitRepay" loading="{{repaySubmitting}}" disabled="{{repaySubmitting}}">确认回款</button></view>
+      <view class="picker-actions"><button class="btn-secondary" disabled="{{repaySubmitting}}" bindtap="closeRepay">取消</button><button class="btn-primary" bindtap="submitRepay" loading="{{repaySubmitting}}" disabled="{{repaySubmitting}}">确认回款</button></view>
     </view>
   </view>
 
@@ -114,10 +122,10 @@
       <text class="form-label">日期范围</text>
       <view class="date-row"><input class="form-input flex-1" type="text" placeholder="开始 YYYY-MM-DD" value="{{exportStart}}" data-field="exportStart" bindinput="onExportDate"/><text class="date-sep">—</text><input class="form-input flex-1" type="text" placeholder="结束 YYYY-MM-DD" value="{{exportEnd}}" data-field="exportEnd" bindinput="onExportDate"/></view>
       <view class="export-btns">
-        <button class="btn-secondary" data-type="sales" bindtap="doExport">导出销售</button>
-        <button class="btn-secondary" data-type="inventory" bindtap="doExport">导出库存</button>
-        <button class="btn-secondary" data-type="waste" bindtap="doExport">导出报损</button>
-        <button class="btn-secondary" data-type="accounts" bindtap="doExport">导出往来账</button>
+        <button class="btn-secondary" data-type="sales" disabled="{{exporting}}" loading="{{exporting}}" bindtap="doExport">导出销售</button>
+        <button class="btn-secondary" data-type="inventory" disabled="{{exporting}}" bindtap="doExport">导出库存</button>
+        <button class="btn-secondary" data-type="waste" disabled="{{exporting}}" bindtap="doExport">导出报损</button>
+        <button class="btn-secondary" data-type="accounts" disabled="{{exporting}}" bindtap="doExport">导出往来账</button>
       </view>
     </view>
   </block>

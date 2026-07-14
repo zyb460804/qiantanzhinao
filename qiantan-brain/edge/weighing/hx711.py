@@ -9,7 +9,7 @@ any machine. Set HX711_SIMULATE=0 to force real GPIO.
 
 import os
 import random
-import time
+
 
 _SIMULATE = os.getenv("HX711_SIMULATE", "1") != "0"
 

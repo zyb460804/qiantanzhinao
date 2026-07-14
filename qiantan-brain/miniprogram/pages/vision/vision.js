@@ -60,7 +60,8 @@ Page({
         categoriesLoading: false,
       });
     }).catch(function () {
-      self.setData({ categoriesLoading: false });
+      self.setData({ categoriesLoading: false, categories: [], filteredCategories: [] });
+      wx.showToast({ title: '商品目录加载失败', icon: 'none' });
     });
   },
 
@@ -83,7 +84,7 @@ Page({
         var path = res.tempFiles[0].tempFilePath;
         self.onImageSelect(path);
       },
-      fail: function () {},
+      fail: function (err) { self.handleMediaError(err); },
     });
   },
 
@@ -97,8 +98,14 @@ Page({
         var path = res.tempFiles[0].tempFilePath;
         self.onImageSelect(path);
       },
-      fail: function () {},
+      fail: function (err) { self.handleMediaError(err); },
     });
+  },
+
+  handleMediaError: function (err) {
+    var msg = (err && err.errMsg) || '';
+    if (msg.indexOf('cancel') >= 0) return;
+    wx.showToast({ title: '无法读取图片，请检查相机或相册权限', icon: 'none' });
   },
 
   retakePhoto: function () {
@@ -341,21 +348,29 @@ Page({
       wx.showToast({ title: '请选择商品', icon: 'none' });
       return;
     }
-    var qty = (this.data.quantity || '').trim();
-    if (!qty) {
-      wx.showToast({ title: '请输入数量', icon: 'none' });
+    var qtyText = String(this.data.quantity || '').trim();
+    var qty = Number(qtyText);
+    if (!isFinite(qty) || qty <= 0) {
+      wx.showToast({ title: '请输入大于0的有效数量', icon: 'none' });
+      return;
+    }
+    var unit = String(this.data.unit || '').trim();
+    if (!unit) {
+      wx.showToast({ title: '请输入计量单位', icon: 'none' });
+      return;
+    }
+    var unitPrice = Number(this.data.unitCost);
+    if (!isFinite(unitPrice) || unitPrice <= 0) {
+      wx.showToast({ title: this.data.event_type === 'purchase' ? '请输入有效成本' : '请输入有效售价', icon: 'none' });
       return;
     }
 
     this.setData({ submitting: true });
 
     var verb = this.data.event_type === 'purchase' ? '进了' : '卖了';
-    var text = verb + product.name + qty + this.data.unit;
-    // 采购时拼接成本信息,让 NLP 解析入库成本
-    var unitCost = this.data.unitCost;
-    if (unitCost && this.data.event_type === 'purchase') {
-      text += '每' + this.data.unit + unitCost + '元';
-    }
+    var text = verb + product.name + qty + unit;
+    // 采购和销售都把单价写入文本，让语音解析器分别落 unit_cost / unit_price。
+    text += '每' + unit + unitPrice + '元';
 
     app.request({
       url: '/voice/parse-text',
@@ -372,22 +387,22 @@ Page({
       app.request({
         url: '/voice/confirm',
         method: 'POST',
-        data: { voice_log_id: voiceLogId, unit_cost: unitCost || undefined },
+        data: { voice_log_id: voiceLogId },
       }).then(function (confirmRes) {
         var result = confirmRes || {};
         result.product = product.name;
         result.quantity = qty;
-        result.unit = self.data.unit;
+        result.unit = unit;
         result.event_type = self.data.event_type;
         self.setData({
           submitting: false,
           submitted: true,
           submitResult: result,
         });
-        wx.showToast({ title: '入库成功', icon: 'success' });
-      }).catch(function () {
+        wx.showToast({ title: self.data.event_type === 'purchase' ? '入库成功' : '出库成功', icon: 'success' });
+      }).catch(function (err) {
         self.setData({ submitting: false });
-        wx.showToast({ title: '入库失败，请重试', icon: 'none' });
+        wx.showToast({ title: (err && err.body && err.body.detail) || (self.data.event_type === 'purchase' ? '入库失败，请重试' : '出库失败，请重试'), icon: 'none' });
       });
     }).catch(function () {
       self.setData({ submitting: false });

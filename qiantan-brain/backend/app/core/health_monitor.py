@@ -21,16 +21,18 @@ from app.core.timezone import utc_now
 async def get_sync_dead_letter_count(
     db: AsyncSession, merchant_id: uuid.UUID | None = None
 ) -> int:
-    """Count offline sync items stuck in dead-letter (failed > max_retries).
+    """Count dead-letter events that are still pending, retrying, or permanently failed."""
+    from app.models.dead_letter import DeadLetterEvent
 
-    Query is approximate — dead-letter state lives in the client queue,
-    not in the DB. Server-side we estimate by looking at recent sync
-    gaps (inventory records created more than 1h ago but with no matching
-    batch reconciliation).
-    """
-    # This is a placeholder; real implementation would query a
-    # dead_letter_queue table populated by the sync service.
-    return 0
+    filters: list = [
+        DeadLetterEvent.status.in_(["pending", "retrying", "permanent_failure"])
+    ]
+    if merchant_id:
+        filters.append(DeadLetterEvent.merchant_id == merchant_id)
+    result = await db.execute(
+        select(func.count(DeadLetterEvent.id)).where(*filters)
+    )
+    return result.scalar() or 0
 
 
 async def get_stale_devices(db: AsyncSession, threshold_hours: int = 1) -> int:
@@ -58,8 +60,12 @@ async def get_db_connectivity(db: AsyncSession) -> bool:
 
 async def build_health_report(db: AsyncSession) -> dict:
     """Build a comprehensive health report for operators."""
+    from app.services.device_monitor import detect_device_faults
+
     db_ok = await get_db_connectivity(db)
     stale_devices = await get_stale_devices(db)
+    dead_letters = await get_sync_dead_letter_count(db)
+    device_faults = await detect_device_faults(db)
 
     status = "healthy"
     issues = []
@@ -69,6 +75,17 @@ async def build_health_report(db: AsyncSession) -> dict:
     if stale_devices > 0:
         status = "degraded" if status == "healthy" else status
         issues.append(f"{stale_devices} 台设备心跳超时")
+    if dead_letters > 0:
+        status = "degraded" if status == "healthy" else status
+        issues.append(f"{dead_letters} 条同步死信待处理")
+
+    fault_alert_count = sum(1 for f in device_faults if f["severity"] == "alert")
+    fault_warning_count = sum(1 for f in device_faults if f["severity"] == "warning")
+    if fault_alert_count > 0:
+        status = "degraded" if status == "healthy" else status
+        issues.append(f"{fault_alert_count} 个设备故障告警")
+    if fault_warning_count > 0:
+        issues.append(f"{fault_warning_count} 个设备故障警告")
 
     return {
         "status": status,
@@ -76,6 +93,12 @@ async def build_health_report(db: AsyncSession) -> dict:
         "checks": {
             "database": "ok" if db_ok else "fail",
             "stale_devices": stale_devices,
+            "dead_letters": dead_letters,
+            "device_faults": {
+                "total": len(device_faults),
+                "alert": fault_alert_count,
+                "warning": fault_warning_count,
+            },
         },
         "issues": issues,
     }

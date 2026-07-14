@@ -34,6 +34,7 @@ from app.models.recommendation import Recommendation
 from app.schemas.common import AnyResponse
 from app.schemas.purchase import (
     ConfirmAcceptanceRequest,
+    PurchaseItemUpdateRequest,
     PurchaseReturnRequest,
     RecordAcceptanceRequest,
     SupplierPaymentRequest,
@@ -129,7 +130,7 @@ async def create_from_advice(
                 Recommendation.merchant_id == merchant_id,
                 Recommendation.created_at >= today_start,
             )
-        recs = (await db.execute(rec_query)).scalars().all()
+        recs = list((await db.execute(rec_query)).scalars().all())
 
     if not recs and not manual_items:
         raise HTTPException(status_code=404, detail="未找到可用的采购建议")
@@ -148,7 +149,8 @@ async def create_from_advice(
 
     names = {
         str(item.get("name") or "").strip()
-        for item in manual_items if isinstance(item, dict) and item.get("name")
+        for item in manual_items
+        if isinstance(item, dict) and item.get("name")
     }
     manual_ids: set[int] = set()
     for item in manual_items:
@@ -159,20 +161,33 @@ async def create_from_advice(
         except (TypeError, ValueError):
             continue
     manual_products = (
-        (await db.execute(select(ProductCategory).where(
-            (ProductCategory.id.in_(manual_ids)) | (ProductCategory.name.in_(names))
-        ))).scalars().all()
-        if manual_ids or names else []
+        (
+            await db.execute(
+                select(ProductCategory).where(
+                    (ProductCategory.id.in_(manual_ids)) | (ProductCategory.name.in_(names))
+                )
+            )
+        )
+        .scalars()
+        .all()
+        if manual_ids or names
+        else []
     )
     manual_by_id = {product.id: product for product in manual_products}
     manual_by_name = {product.name: product for product in manual_products}
 
-    existing_items = (await db.execute(
-        select(PurchaseItem).where(
-            PurchaseItem.list_id == plist.id,
-            PurchaseItem.status != "cancelled",
+    existing_items = (
+        (
+            await db.execute(
+                select(PurchaseItem).where(
+                    PurchaseItem.list_id == plist.id,
+                    PurchaseItem.status != "cancelled",
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
     existing_product_ids = {item.product_id for item in existing_items}
 
     added_count = 0
@@ -186,13 +201,22 @@ async def create_from_advice(
             continue
         est_cost = _to_d(product.default_price)
         est_total = (qty * est_cost).quantize(Decimal("0.01"))
-        db.add(PurchaseItem(
-            list_id=plist.id, merchant_id=merchant_id,
-            recommendation_id=rec.id, product_id=rec.product_id,
-            sku_id=rec.sku_id, recommended_qty=qty, actual_qty=qty,
-            unit=product.unit, estimated_unit_cost=est_cost,
-            estimated_cost=est_total, status="pending", reason=rec.suggestion,
-        ))
+        db.add(
+            PurchaseItem(
+                list_id=plist.id,
+                merchant_id=merchant_id,
+                recommendation_id=rec.id,
+                product_id=rec.product_id,
+                sku_id=rec.sku_id,
+                recommended_qty=qty,
+                actual_qty=qty,
+                unit=product.unit,
+                estimated_unit_cost=est_cost,
+                estimated_cost=est_total,
+                status="pending",
+                reason=rec.suggestion,
+            )
+        )
         existing_product_ids.add(rec.product_id)
         added_count += 1
 
@@ -226,27 +250,43 @@ async def create_from_advice(
         est_total = (qty * est_cost).quantize(Decimal("0.01"))
         unit = str(raw.get("unit") or product.unit)[:20]
         source = str(raw.get("from") or raw.get("source") or "手工添加")[:100]
-        db.add(PurchaseItem(
-            list_id=plist.id, merchant_id=merchant_id,
-            product_id=product.id, recommended_qty=qty, actual_qty=qty,
-            unit=unit, estimated_unit_cost=est_cost,
-            estimated_cost=est_total, status="pending", reason=source,
-        ))
+        db.add(
+            PurchaseItem(
+                list_id=plist.id,
+                merchant_id=merchant_id,
+                product_id=product.id,
+                recommended_qty=qty,
+                actual_qty=qty,
+                unit=unit,
+                estimated_unit_cost=est_cost,
+                estimated_cost=est_total,
+                status="pending",
+                reason=source,
+            )
+        )
         existing_product_ids.add(product.id)
         added_count += 1
 
     if manual_items and matched_manual_count == 0 and not recs:
         await db.rollback()
         names_text = "、".join(unmatched_names[:5])
-        raise HTTPException(status_code=400, detail=f"商品目录中未找到：{names_text}，请先在商品目录添加")
+        raise HTTPException(
+            status_code=400, detail=f"商品目录中未找到：{names_text}，请先在商品目录添加"
+        )
 
     await db.flush()
-    active_items = (await db.execute(
-        select(PurchaseItem).where(
-            PurchaseItem.list_id == plist.id,
-            PurchaseItem.status != "cancelled",
+    active_items = (
+        (
+            await db.execute(
+                select(PurchaseItem).where(
+                    PurchaseItem.list_id == plist.id,
+                    PurchaseItem.status != "cancelled",
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
     plist.item_count = len(active_items)
     plist.total_estimated_cost = sum(
         (_to_d(item.estimated_cost) for item in active_items), Decimal("0")
@@ -294,7 +334,9 @@ async def get_today_list(
         return {"code": 0, "data": None}
 
     items_query = (
-        select(PurchaseItem).where(PurchaseItem.list_id == plist.id).order_by(PurchaseItem.created_at.asc())
+        select(PurchaseItem)
+        .where(PurchaseItem.list_id == plist.id)
+        .order_by(PurchaseItem.created_at.asc())
     )
     items_result = await db.execute(items_query)
     items = items_result.scalars().all()
@@ -311,25 +353,39 @@ async def get_today_list(
         "code": 0,
         "data": {
             "list_id": str(plist.id),
+            "order_no": _gen_order_no(plist),
             "status": plist.status,
             "payment_status": plist.payment_status,
             "paid_amount": float(plist.paid_amount),
-            "total_estimated_cost": float(plist.total_estimated_cost) if plist.total_estimated_cost else 0,
-            "total_actual_cost": float(plist.total_actual_cost) if plist.total_actual_cost else None,
+            "total_estimated_cost": float(plist.total_estimated_cost)
+            if plist.total_estimated_cost
+            else 0,
+            "total_actual_cost": float(plist.total_actual_cost)
+            if plist.total_actual_cost
+            else None,
             "item_count": plist.item_count,
             "created_at": plist.created_at.isoformat() if plist.created_at else None,
             "confirmed_at": plist.confirmed_at.isoformat() if plist.confirmed_at else None,
             "accepted_at": plist.accepted_at.isoformat() if plist.accepted_at else None,
+            "expected_arrival_date": plist.expected_arrival_date.isoformat()
+            if plist.expected_arrival_date
+            else None,
             "items": [
                 {
                     "item_id": str(item.id),
                     "product_id": item.product_id,
                     "product_name": product_names.get(item.product_id, f"商品{item.product_id}"),
-                    "recommended_qty": float(item.recommended_qty) if item.recommended_qty else None,
+                    "recommended_qty": float(item.recommended_qty)
+                    if item.recommended_qty
+                    else None,
                     "actual_qty": float(item.actual_qty),
                     "unit": item.unit,
-                    "estimated_unit_cost": float(item.estimated_unit_cost) if item.estimated_unit_cost else None,
-                    "actual_unit_cost": float(item.actual_unit_cost) if item.actual_unit_cost else None,
+                    "estimated_unit_cost": float(item.estimated_unit_cost)
+                    if item.estimated_unit_cost
+                    else None,
+                    "actual_unit_cost": float(item.actual_unit_cost)
+                    if item.actual_unit_cost
+                    else None,
                     "estimated_cost": float(item.estimated_cost) if item.estimated_cost else None,
                     "actual_cost": float(item.actual_cost) if item.actual_cost else None,
                     "status": item.status,
@@ -353,6 +409,175 @@ async def get_today_list(
 
 
 # ---------------------------------------------------------------------------
+# 采购历史
+# ---------------------------------------------------------------------------
+
+
+@router.get("/history", response_model=AnyResponse)
+async def get_purchase_history(
+    status: str | None = None,
+    days: int = 30,
+    page: int = 1,
+    limit: int = 20,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """List historical purchase lists with optional status filter and pagination."""
+    from datetime import timedelta
+
+    from sqlalchemy import func
+
+    merchant_id = merchant.id
+    base_filters = [PurchaseList.merchant_id == merchant_id]
+
+    if status:
+        base_filters.append(PurchaseList.status == status)
+    else:
+        base_filters.append(
+            PurchaseList.status.in_(["stored", "completed", "cancelled", "returned"])
+        )
+
+    if days and days > 0:
+        cutoff = utc_now() - timedelta(days=days)
+        base_filters.append(PurchaseList.created_at >= cutoff)
+
+    # Count total
+    count_query = select(func.count()).select_from(PurchaseList).where(*base_filters)
+    total = (await db.execute(count_query)).scalar() or 0
+
+    # Fetch page
+    query = select(PurchaseList).where(*base_filters).order_by(PurchaseList.created_at.desc())
+    offset_val = (page - 1) * limit
+    query = query.offset(offset_val).limit(limit)
+    lists = (await db.execute(query)).scalars().all()
+
+    # Batch load item counts
+    list_ids = [purchase_list.id for purchase_list in lists]
+    item_counts: dict = {}
+    if list_ids:
+        count_items_q = (
+            select(PurchaseItem.list_id, func.count(PurchaseItem.id))
+            .where(PurchaseItem.list_id.in_(list_ids))
+            .group_by(PurchaseItem.list_id)
+        )
+        for row in (await db.execute(count_items_q)).all():
+            item_counts[row[0]] = row[1]
+
+    return {
+        "code": 0,
+        "data": [
+            {
+                "list_id": str(purchase_list.id),
+                "order_no": _gen_order_no(purchase_list),
+                "status": purchase_list.status,
+                "payment_status": purchase_list.payment_status,
+                "item_count": purchase_list.item_count or item_counts.get(purchase_list.id, 0),
+                "total_estimated_cost": float(purchase_list.total_estimated_cost)
+                if purchase_list.total_estimated_cost
+                else 0,
+                "total_actual_cost": float(purchase_list.total_actual_cost)
+                if purchase_list.total_actual_cost
+                else None,
+                "paid_amount": float(purchase_list.paid_amount) if purchase_list.paid_amount else 0,
+                "created_at": purchase_list.created_at.isoformat()
+                if purchase_list.created_at
+                else None,
+                "stored_at": purchase_list.stored_at.isoformat()
+                if purchase_list.stored_at
+                else None,
+            }
+            for purchase_list in lists
+        ],
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": (total + limit - 1) // limit,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# 确认采购单 (draft → confirmed)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{list_id}/confirm-order", response_model=AnyResponse)
+async def confirm_purchase_order(
+    list_id: uuid.UUID,
+    body: dict = Body(default={}),
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Formal confirm: draft → confirmed. Sets expected_arrival_date from supplier lead_time."""
+    plist = await db.scalar(select(PurchaseList).where(PurchaseList.id == list_id))
+    if not plist or plist.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="采购清单不存在")
+    if plist.status != "draft":
+        raise HTTPException(status_code=409, detail=f"只有草稿状态可确认，当前: {plist.status}")
+
+    # Calculate expected arrival date from supplier lead_time_hours
+    lead_hours = 24  # default
+    items = (
+        (
+            await db.execute(
+                select(PurchaseItem).where(
+                    PurchaseItem.list_id == list_id,
+                    PurchaseItem.status != "cancelled",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # Find the shortest lead time among assigned suppliers
+    supplier_ids = {i.supplier_id for i in items if i.supplier_id}
+    if supplier_ids:
+        suppliers = (
+            (await db.execute(select(Supplier).where(Supplier.id.in_(supplier_ids))))
+            .scalars()
+            .all()
+        )
+        leads = [
+            s.lead_time_hours for s in suppliers if s.lead_time_hours and s.lead_time_hours > 0
+        ]
+        if leads:
+            lead_hours = min(leads)
+
+    from datetime import timedelta
+
+    plist.status = "confirmed"
+    plist.confirmed_at = utc_now()
+    plist.expected_arrival_date = utc_now() + timedelta(hours=lead_hours)
+
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="purchase_confirm_order",
+            target_table="purchase_lists",
+            target_id=str(plist.id),
+            after_data={"status": "confirmed", "lead_hours": lead_hours},
+            reason=body.get("notes", "确认采购单"),
+            operator="merchant",
+        )
+    )
+    await db.commit()
+
+    return {
+        "code": 0,
+        "message": "采购单已确认",
+        "data": {
+            "list_id": str(plist.id),
+            "status": "confirmed",
+            "expected_arrival_date": plist.expected_arrival_date.isoformat()
+            if plist.expected_arrival_date
+            else None,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # 编辑 / 取消采购项
 # ---------------------------------------------------------------------------
 
@@ -360,8 +585,8 @@ async def get_today_list(
 @router.put("/item/{item_id}", response_model=AnyResponse)
 async def update_purchase_item(
     item_id: uuid.UUID,
+    body: PurchaseItemUpdateRequest,
     merchant: Merchant = Depends(get_current_merchant),
-    body: dict = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(PurchaseItem).where(
@@ -375,15 +600,15 @@ async def update_purchase_item(
     if item.status == "purchased":
         raise HTTPException(status_code=400, detail="已采购的项目不能修改")
 
-    if "actual_qty" in body:
-        item.actual_qty = Decimal(str(body["actual_qty"]))
-    if "actual_unit_cost" in body:
-        item.actual_unit_cost = Decimal(str(body["actual_unit_cost"]))
+    if body.actual_qty is not None:
+        item.actual_qty = Decimal(str(body.actual_qty))
+    if body.actual_unit_cost is not None:
+        item.actual_unit_cost = Decimal(str(body.actual_unit_cost))
         item.actual_cost = (item.actual_qty * item.actual_unit_cost).quantize(Decimal("0.01"))
     elif item.actual_unit_cost:
         item.actual_cost = (item.actual_qty * item.actual_unit_cost).quantize(Decimal("0.01"))
-    if "supplier_id" in body and body["supplier_id"]:
-        item.supplier_id = uuid.UUID(body["supplier_id"])
+    if body.supplier_id is not None:
+        item.supplier_id = body.supplier_id
 
     if item.recommended_qty and item.recommended_qty > 0:
         item.deviation_ratio = round(
@@ -392,7 +617,8 @@ async def update_purchase_item(
 
     await db.commit()
     return {
-        "code": 0, "message": "采购项已更新",
+        "code": 0,
+        "message": "采购项已更新",
         "data": {
             "item_id": str(item.id),
             "actual_qty": float(item.actual_qty),
@@ -481,7 +707,7 @@ async def record_acceptance(
             item.tare_weight = Decimal(str(spec.tare_weight))
         if spec.net_weight is not None:
             item.net_weight = Decimal(str(spec.net_weight))
-        if spec.actual_unit_cost is not None and spec.actual_unit_cost > 0:
+        if spec.actual_unit_cost is not None:
             item.actual_unit_cost = Decimal(str(spec.actual_unit_cost))
             item.actual_cost = (item.accepted_qty * item.actual_unit_cost).quantize(Decimal("0.01"))
         item.quality_ok = spec.quality_ok
@@ -503,26 +729,29 @@ async def record_acceptance(
     if body.notes:
         plist.notes = (plist.notes or "") + "\n验收: " + body.notes
 
-    db.add(AuditLog(
-        merchant_id=merchant.id,
-        action="purchase_acceptance",
-        target_table="purchase_lists",
-        target_id=str(plist.id),
-        after_data={
-            "items_processed": processed,
-            "total_accepted": float(total_accepted),
-            "total_shortage": float(total_shortage),
-            "total_damaged": float(total_damaged),
-            "total_rejected": float(total_rejected),
-        },
-        reason=body.notes or "到货验收",
-        operator="merchant",
-    ))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="purchase_acceptance",
+            target_table="purchase_lists",
+            target_id=str(plist.id),
+            after_data={
+                "items_processed": processed,
+                "total_accepted": float(total_accepted),
+                "total_shortage": float(total_shortage),
+                "total_damaged": float(total_damaged),
+                "total_rejected": float(total_rejected),
+            },
+            reason=body.notes or "到货验收",
+            operator="merchant",
+        )
+    )
 
     await db.commit()
 
     return {
-        "code": 0, "message": f"验收完成，{processed}项",
+        "code": 0,
+        "message": f"验收完成，{processed}项",
         "data": {
             "list_id": str(plist.id),
             "status": plist.status,
@@ -554,7 +783,9 @@ async def confirm_acceptance(
     if plist is None or plist.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="采购清单不存在")
     if plist.status != "accepted":
-        raise HTTPException(status_code=409, detail=f"必须先完成验收才能入库，当前状态: {plist.status}")
+        raise HTTPException(
+            status_code=409, detail=f"必须先完成验收才能入库，当前状态: {plist.status}"
+        )
 
     all_items_query = select(PurchaseItem).where(
         PurchaseItem.list_id == list_id,
@@ -582,7 +813,7 @@ async def confirm_acceptance(
         sku_id = await resolve_sku_id(db, plist.merchant_id, product_id=item.product_id)
 
         # Use accepted_qty if available, otherwise actual_qty (for backward compat)
-        qty_to_store = item.accepted_qty or item.actual_qty
+        qty_to_store = item.accepted_qty if item.accepted_qty is not None else item.actual_qty
         if qty_to_store <= 0:
             continue
 
@@ -608,9 +839,14 @@ async def confirm_acceptance(
         await db.flush()
 
         await create_batch(
-            db, merchant_id=plist.merchant_id, product_id=item.product_id,
-            product_name=product_name, batch_label=batch_label,
-            quantity=abs(qty_to_store), sku_id=sku_id,
+            db,
+            merchant_id=plist.merchant_id,
+            product_id=item.product_id,
+            product_name=product_name,
+            batch_label=batch_label,
+            quantity=abs(qty_to_store),
+            sku_id=sku_id,
+            unit_cost=item.actual_unit_cost or item.estimated_unit_cost,
         )
 
         item.inventory_record_id = record.id
@@ -629,30 +865,37 @@ async def confirm_acceptance(
 
         total_actual_cost += actual_cost
         confirmed_count += 1
-        created_records.append({
-            "item_id": str(item.id), "product_id": item.product_id,
-            "product_name": product_name, "qty": float(qty_to_store),
-            "unit_cost": float(unit_cost) if unit_cost else None,
-            "record_id": str(record.id),
-        })
+        created_records.append(
+            {
+                "item_id": str(item.id),
+                "product_id": item.product_id,
+                "product_name": product_name,
+                "qty": float(qty_to_store),
+                "unit_cost": float(unit_cost) if unit_cost else None,
+                "record_id": str(record.id),
+            }
+        )
 
     plist.status = "stored"
     plist.total_actual_cost = total_actual_cost.quantize(Decimal("0.01"))
     plist.stored_at = now
 
-    db.add(AuditLog(
-        merchant_id=plist.merchant_id,
-        action="purchase_accept_confirm",
-        target_table="purchase_lists",
-        target_id=str(plist.id),
-        after_data={"confirmed_count": confirmed_count, "total_cost": float(total_actual_cost)},
-        reason=body.notes or "确认验收入库",
-        operator="merchant",
-    ))
+    db.add(
+        AuditLog(
+            merchant_id=plist.merchant_id,
+            action="purchase_accept_confirm",
+            target_table="purchase_lists",
+            target_id=str(plist.id),
+            after_data={"confirmed_count": confirmed_count, "total_cost": float(total_actual_cost)},
+            reason=body.notes or "确认验收入库",
+            operator="merchant",
+        )
+    )
     await db.commit()
 
     return {
-        "code": 0, "message": f"验收确认完成，共入库{confirmed_count}项",
+        "code": 0,
+        "message": f"验收确认完成，共入库{confirmed_count}项",
         "data": {
             "list_id": str(plist.id),
             "status": plist.status,
@@ -679,27 +922,63 @@ async def pay_supplier(
     if not supplier or supplier.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="供应商不存在")
 
-    payment = await record_supplier_payment(
-        db,
-        merchant_id=merchant.id,
-        supplier_id=body.supplier_id,
-        amount=Decimal(str(body.amount)),
-        note=body.note or f"{body.method}付款",
-        idempotency_key=body.idempotency_key,
-    )
+    try:
+        payment = await record_supplier_payment(
+            db,
+            merchant_id=merchant.id,
+            supplier_id=body.supplier_id,
+            payable_ids=body.payable_ids,
+            amount=Decimal(str(body.amount)),
+            note=body.note or f"{body.method}付款",
+            idempotency_key=body.idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    db.add(AuditLog(
-        merchant_id=merchant.id, action="supplier_payment",
-        target_table="supplier_payables", target_id=str(payment.id),
-        after_data={"supplier_id": str(body.supplier_id), "amount": body.amount, "method": body.method},
-        reason=body.note, operator="merchant",
-    ))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="supplier_payment",
+            target_table="supplier_payables",
+            target_id=str(payment.id),
+            after_data={
+                "supplier_id": str(body.supplier_id),
+                "amount": body.amount,
+                "method": body.method,
+            },
+            reason=body.note,
+            operator="merchant",
+        )
+    )
     await db.commit()
 
     new_balance = await get_supplier_balance(db, merchant.id, body.supplier_id)
 
+    # Auto-complete: if all purchase lists for this supplier are fully paid, mark them completed
+    if new_balance <= 0:
+        # Find stored lists for this supplier that are fully paid
+        stored_lists = (
+            (
+                await db.execute(
+                    select(PurchaseList).where(
+                        PurchaseList.merchant_id == merchant.id,
+                        PurchaseList.status == "stored",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for pl in stored_lists:
+            if pl.payment_status == "paid":
+                pl.status = "completed"
+                pl.completed_at = utc_now()
+
+    await db.commit()
+
     return {
-        "code": 0, "message": f"已向供应商付款 ¥{body.amount}",
+        "code": 0,
+        "message": f"已向供应商付款 ¥{body.amount}",
         "data": {
             "payment_id": str(payment.id),
             "supplier_id": str(body.supplier_id),
@@ -764,52 +1043,64 @@ async def return_purchase_item(
     return_amount = (return_qty * unit_cost).quantize(Decimal("0.01"))
 
     # Reverse inventory
-    db.add(InventoryRecord(
-        merchant_id=merchant.id,
-        product_id=item.product_id,
-        sku_id=item.sku_id,
-        quantity=-return_qty,  # negative = stock decrease
-        unit=item.unit,
-        unit_cost=unit_cost,
-        total_amount=return_amount,
-        event_type="purchase_return",
-        event_time=utc_now(),
-        source="purchase_list",
-        notes=f"退货给供应商: {body.reason}",
-        idempotency_key=f"purchase-return:{item.id}:{return_qty}",
-    ))
+    db.add(
+        InventoryRecord(
+            merchant_id=merchant.id,
+            product_id=item.product_id,
+            sku_id=item.sku_id,
+            quantity=-return_qty,  # negative = stock decrease
+            unit=item.unit,
+            unit_cost=unit_cost,
+            total_amount=return_amount,
+            event_type="purchase_return",
+            event_time=utc_now(),
+            source="purchase_list",
+            notes=f"退货给供应商: {body.reason}",
+            idempotency_key=f"purchase-return:{item.id}:{return_qty}",
+        )
+    )
 
     # Offset payable if requested
     if body.offset_payable and item.supplier_id:
-        db.add(SupplierPayable(
-            merchant_id=merchant.id,
-            supplier_id=item.supplier_id,
-            direction="payment",  # 退货 = 减少应付，等同于付款方向
-            amount=return_amount,
-            purchase_list_id=item.list_id,
-            note=f"退货抵扣: {body.reason}",
-            settled=True,
-            idempotency_key=f"purchase-return-payable:{item.id}",
-        ))
+        db.add(
+            SupplierPayable(
+                merchant_id=merchant.id,
+                supplier_id=item.supplier_id,
+                direction="payment",  # 退货 = 减少应付，等同于付款方向
+                amount=return_amount,
+                purchase_list_id=item.list_id,
+                note=f"退货抵扣: {body.reason}",
+                settled=True,
+                idempotency_key=f"purchase-return-payable:{item.id}",
+            )
+        )
 
     item.returned_qty = (item.returned_qty or Decimal("0")) + return_qty
     remaining = (item.accepted_qty or item.actual_qty) - (item.returned_qty or Decimal("0"))
     if remaining <= 0:
         item.status = "returned"
 
-    db.add(AuditLog(
-        merchant_id=merchant.id, action="purchase_return",
-        target_table="purchase_items", target_id=str(item.id),
-        after_data={
-            "return_qty": float(return_qty), "reason": body.reason,
-            "return_amount": float(return_amount), "offset_payable": body.offset_payable,
-        },
-        reason=body.reason, operator="merchant",
-    ))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="purchase_return",
+            target_table="purchase_items",
+            target_id=str(item.id),
+            after_data={
+                "return_qty": float(return_qty),
+                "reason": body.reason,
+                "return_amount": float(return_amount),
+                "offset_payable": body.offset_payable,
+            },
+            reason=body.reason,
+            operator="merchant",
+        )
+    )
     await db.commit()
 
     return {
-        "code": 0, "message": f"已退货 {float(return_qty)}{item.unit}，抵扣 ¥{float(return_amount)}",
+        "code": 0,
+        "message": f"已退货 {float(return_qty)}{item.unit}，抵扣 ¥{float(return_amount)}",
         "data": {
             "item_id": str(item.id),
             "return_qty": float(return_qty),
@@ -864,7 +1155,10 @@ async def confirm_purchase(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Legacy: direct confirm without acceptance step. For new flow use /acceptance + /acceptance/confirm."""
+    """Legacy direct confirmation.
+
+    New integrations should use /acceptance followed by /acceptance/confirm.
+    """
     list_query = select(PurchaseList).where(PurchaseList.id == list_id)
     list_result = await db.execute(list_query)
     plist = list_result.scalar_one_or_none()
@@ -895,20 +1189,30 @@ async def confirm_purchase(
 
         batch_label = f"{product_name}-{now.strftime('%m%d%H%M%S')}"
         record = InventoryRecord(
-            merchant_id=plist.merchant_id, product_id=item.product_id, sku_id=sku_id,
-            quantity=abs(item.actual_qty), unit=item.unit,
+            merchant_id=plist.merchant_id,
+            product_id=item.product_id,
+            sku_id=sku_id,
+            quantity=abs(item.actual_qty),
+            unit=item.unit,
             unit_cost=item.actual_unit_cost or item.estimated_unit_cost,
             total_amount=item.actual_cost or item.estimated_cost,
-            event_type="purchase", event_time=now, source="purchase_list",
+            event_type="purchase",
+            event_time=now,
+            source="purchase_list",
             batch_label=batch_label,
         )
         db.add(record)
         await db.flush()
 
         await create_batch(
-            db, merchant_id=plist.merchant_id, product_id=item.product_id,
-            product_name=product_name, batch_label=batch_label,
-            quantity=abs(item.actual_qty), sku_id=sku_id,
+            db,
+            merchant_id=plist.merchant_id,
+            product_id=item.product_id,
+            product_name=product_name,
+            batch_label=batch_label,
+            quantity=abs(item.actual_qty),
+            sku_id=sku_id,
+            unit_cost=item.actual_unit_cost or item.estimated_unit_cost,
         )
 
         item.inventory_record_id = record.id
@@ -926,28 +1230,39 @@ async def confirm_purchase(
 
         total_actual_cost += item.actual_cost or item.estimated_cost or Decimal("0")
         confirmed_count += 1
-        created_records.append({
-            "item_id": str(item.id), "product_id": item.product_id,
-            "product_name": product_name, "qty": float(item.actual_qty),
-            "record_id": str(record.id),
-        })
+        created_records.append(
+            {
+                "item_id": str(item.id),
+                "product_id": item.product_id,
+                "product_name": product_name,
+                "qty": float(item.actual_qty),
+                "record_id": str(record.id),
+            }
+        )
 
     plist.status = "stored"
     plist.total_actual_cost = total_actual_cost.quantize(Decimal("0.01"))
     plist.stored_at = now
 
-    db.add(AuditLog(
-        merchant_id=plist.merchant_id, action="purchase_confirm",
-        target_table="purchase_lists", target_id=str(plist.id),
-        after_data={"confirmed_count": confirmed_count, "total_cost": float(total_actual_cost)},
-        reason=body.get("notes", "批量确认采购"), operator="merchant",
-    ))
+    db.add(
+        AuditLog(
+            merchant_id=plist.merchant_id,
+            action="purchase_confirm",
+            target_table="purchase_lists",
+            target_id=str(plist.id),
+            after_data={"confirmed_count": confirmed_count, "total_cost": float(total_actual_cost)},
+            reason=body.get("notes", "批量确认采购"),
+            operator="merchant",
+        )
+    )
     await db.commit()
 
     return {
-        "code": 0, "message": f"采购完成，共入库{confirmed_count}项",
+        "code": 0,
+        "message": f"采购完成，共入库{confirmed_count}项",
         "data": {
-            "list_id": str(plist.id), "status": plist.status,
+            "list_id": str(plist.id),
+            "status": plist.status,
             "confirmed_count": confirmed_count,
             "total_actual_cost": float(total_actual_cost),
             "records": created_records,
@@ -964,3 +1279,11 @@ def _fmt_q(value) -> str:
     if value is None:
         return "?"
     return str(float(value))
+
+
+def _gen_order_no(plist: PurchaseList) -> str:
+    """Generate a human-readable order number from the purchase list."""
+    if not plist or not plist.created_at:
+        return f"PO-{str(plist.id)[:8].upper()}"
+    d = plist.created_at
+    return f"PO-{d.strftime('%Y%m%d')}-{str(plist.id)[:6].upper()}"

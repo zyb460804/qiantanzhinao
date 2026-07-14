@@ -38,16 +38,25 @@ class BatchLifecycle(Base):
     remaining_qty: Mapped[Decimal] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
     expiry_date: Mapped[datetime | None] = mapped_column(sa.DateTime)
 
-    # 状态机: pending_acceptance/sellable/near_expiry/locked/sold_out/wasted/returned/recalled/destroyed/removed
+    # 临期批次级促销；不得改写 SKU 的常规售价。
+    promotion_price: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))
+    promotion_start_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
+    promotion_end_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
+
+    # 状态机: pending_acceptance/sellable/near_expiry/locked/sold_out/wasted/returned/
+    # recalled/destroyed/removed
     status: Mapped[str] = mapped_column(sa.String(20), default="sellable")
 
     # --- 一批一码追溯字段 (section 4.13) ---
-    supplier_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, sa.ForeignKey("suppliers.id"))
-    supplier_name: Mapped[str | None] = mapped_column(sa.String(50))       # 供应商名(冗余)
-    origin: Mapped[str | None] = mapped_column(sa.String(100))             # 产地
-    unit_cost: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))   # 实际单位成本
-    certificates: Mapped[str | None] = mapped_column(sa.Text)              # 合格证/检疫证 JSON
-    inspection_result: Mapped[str | None] = mapped_column(sa.String(50))   # 快检结果: pass/fail/pending
+    # Historical schema keeps this relation application-enforced for SQLite compatibility.
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)
+    supplier_name: Mapped[str | None] = mapped_column(sa.String(50))  # 供应商名(冗余)
+    origin: Mapped[str | None] = mapped_column(sa.String(100))  # 产地
+    unit_cost: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 实际单位成本
+    certificates: Mapped[str | None] = mapped_column(sa.Text)  # 合格证/检疫证 JSON
+    inspection_result: Mapped[str | None] = mapped_column(
+        sa.String(50)
+    )  # 快检结果: pass/fail/pending
 
     # --- 锁定/下架/召回 (section 4.14) ---
     locked_at: Mapped[datetime | None] = mapped_column(sa.DateTime)

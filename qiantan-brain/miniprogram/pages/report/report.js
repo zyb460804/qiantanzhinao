@@ -45,15 +45,24 @@ Page({
     adoptionTotal: 0,
     adoptionRate: 0,
     healthLevel: '',
+    errorText: '',
   },
 
   onLoad: function () {
+    this._seenReportDataVersion = app.getReportDataVersion();
     this.setData({ skinClass: 'skin-' + app.resolveSkin() });
     this.setData({ refreshTime: this._formatTime(new Date()) });
     this.loadReport('daily');
   },
 
   onShow: function () {
+    var currentVersion = app.getReportDataVersion();
+    if (this._seenReportDataVersion !== currentVersion) {
+      this._seenReportDataVersion = currentVersion;
+      this._tabCache = {};
+      if (!this.data.loading) this.loadReport(this.data.activeTab);
+      return;
+    }
     // 如果 page 被回收(activeTab 已非初始 daily)或数据为空,重新加载当前 tab
     if (!this.data.loading && !this.data.hasData) {
       this.loadReport(this.data.activeTab);
@@ -63,6 +72,8 @@ Page({
   onPullDownRefresh: function () {
     var self = this;
     var tab = this.data.activeTab;
+    this._tabCache = {};
+    this._seenReportDataVersion = app.getReportDataVersion();
     this.loadReport(tab, function () {
       wx.stopPullDownRefresh();
       app.showToast('报告已更新', 'success');
@@ -76,7 +87,8 @@ Page({
   switchTab: function (e) {
     var tab = e.currentTarget.dataset.tab;
     if (!tab || tab === this.data.activeTab) return;
-    // 缓存当前 Tab 数据避免白屏闪烁
+
+    // 缓存当前 Tab 数据
     var oldTab = this.data.activeTab;
     this._tabCache = this._tabCache || {};
     this._tabCache[oldTab] = {
@@ -90,22 +102,42 @@ Page({
       aiSummary: this.data.aiSummary,
       actionItems: this.data.actionItems,
       healthLevel: this.data.healthLevel,
+      rangeLabel: this.data.rangeLabel,
+      hasData: this.data.hasData,
+      errorText: this.data.errorText,
+      showAdoption: this.data.showAdoption,
+      adoptionAdopted: this.data.adoptionAdopted,
+      adoptionTotal: this.data.adoptionTotal,
+      adoptionRate: this.data.adoptionRate,
     };
-    // 如果有该 Tab 缓存，直接恢复（单次 setData 避免 WeChat 批处理丢弃 activeTab）
+
     var cached = this._tabCache[tab];
     if (cached) {
+      // 有缓存：直接恢复（合并为一次 setData 避免批处理丢弃 activeTab）
       this.setData({
         activeTab: tab,
-        hasData: true,
+        hasData: cached.hasData,
         loading: false,
-        dailyData: cached.dailyData, weeklyData: cached.weeklyData, trendData: cached.trendData,
-        metrics: cached.metrics, salesRanking: cached.salesRanking, maxRankQty: cached.maxRankQty,
-        wasteList: cached.wasteList, aiSummary: cached.aiSummary, actionItems: cached.actionItems,
+        dailyData: cached.dailyData,
+        weeklyData: cached.weeklyData,
+        trendData: cached.trendData,
+        metrics: cached.metrics,
+        salesRanking: cached.salesRanking,
+        maxRankQty: cached.maxRankQty,
+        wasteList: cached.wasteList,
+        aiSummary: cached.aiSummary,
+        actionItems: cached.actionItems,
         healthLevel: cached.healthLevel,
+        rangeLabel: cached.rangeLabel,
+        errorText: cached.errorText || '',
+        showAdoption: cached.showAdoption,
+        adoptionAdopted: cached.adoptionAdopted,
+        adoptionTotal: cached.adoptionTotal,
+        adoptionRate: cached.adoptionRate,
       });
       this._renderDerived();
     } else {
-      // 合并 setData：activeTab + loading 在一次调用中完成，避免批处理竞态
+      // 无缓存：发起请求（合并 activeTab + loading 为一次 setData）
       this.setData({ activeTab: tab, loading: true, hasData: false });
       this.loadReport(tab);
     }
@@ -121,10 +153,12 @@ Page({
   loadReport: function (tab, onSuccess, onError) {
     var self = this;
     var tabName = tab || this.data.activeTab || 'daily';
+    this._reportRequestSeq = (this._reportRequestSeq || 0) + 1;
+    var requestSeq = this._reportRequestSeq;
+    var isStale = function () { return requestSeq !== self._reportRequestSeq || self.data.activeTab !== tabName; };
 
-    // 合并 setData：activeTab + loading + hasData 在一次调用中完成
-    // 避免多次 setData 导致的 WeChat 批处理丢弃 activeTab
-    this.setData({ activeTab: tabName, loading: true, hasData: false });
+    // 合并 activeTab + loading 为一次 setData
+    this.setData({ activeTab: tabName, loading: true, hasData: false, errorText: '' });
 
     // app.request 依赖 app 作为 this，不能脱离对象直接调用。
     var req = function (options) { return app.request(options); };
@@ -135,8 +169,10 @@ Page({
         req({ url: '/reports/daily' }).catch(function () { return null; }),
         req({ url: '/reports/trends?days=7' }).catch(function () { return null; }),
       ]).then(function (results) {
+        if (isStale()) return;
         var daily = results[0];
         var trends = results[1] || [];
+        if (daily && !results[1]) wx.showToast({ title: '趋势数据加载失败，已显示核心指标', icon: 'none' });
 
         if (!daily) {
           self.setData({
@@ -144,6 +180,7 @@ Page({
             hasData: false,
             trendData: trends,
             rangeLabel: '今日经营报告',
+            errorText: '今日报告加载失败，请下拉重试',
           });
           self._renderDerived();
           if (onError) onError();
@@ -168,8 +205,10 @@ Page({
         req({ url: '/reports/weekly' }).catch(function () { return null; }),
         req({ url: '/reports/trends?days=7' }).catch(function () { return null; }),
       ]).then(function (results) {
+        if (isStale()) return;
         var weekly = results[0];
         var trends = weekly && weekly.daily_trends ? weekly.daily_trends : (results[1] || []);
+        if (weekly && !weekly.daily_trends && !results[1]) wx.showToast({ title: '趋势数据加载失败，已显示核心指标', icon: 'none' });
 
         if (!weekly) {
           self.setData({
@@ -177,6 +216,7 @@ Page({
             hasData: false,
             trendData: trends,
             rangeLabel: '近7日经营报告',
+            errorText: '近7日报告加载失败，请下拉重试',
           });
           self._renderDerived();
           if (onError) onError();
@@ -196,85 +236,39 @@ Page({
         if (onSuccess) onSuccess();
       });
     } else {
-      // 近30日：拉取30天趋势,聚合核心指标
-      req({ url: '/reports/trends?days=30' })
+      // 近30日月报：调用后端 /reports/monthly 端点
+      req({ url: '/reports/monthly' })
         .catch(function () { return null; })
-        .then(function (trends) {
-          // 强制转为数组：兼容后端返回 {data:[...]} 或直接返回数组
-          if (!Array.isArray(trends)) {
-            trends = (trends && trends.data && Array.isArray(trends.data)) ? trends.data
-                   : (trends && trends.items && Array.isArray(trends.items)) ? trends.items
-                   : [];
-          }
-          if (trends.length === 0) {
+        .then(function (monthly) {
+          if (isStale()) return;
+          if (!monthly) {
             self.setData({
               loading: false,
               hasData: false,
               trendData: [],
-              rangeLabel: '近30日经营报告 · 暂无数据',
+              rangeLabel: '近30日经营报告',
+              errorText: '近30日报告加载失败，请下拉重试',
             });
             self._renderDerived();
             if (onError) onError();
             return;
           }
 
-          try {
-            // 聚合30天数据
-            var totalRevenue = 0, totalCost = 0, totalProfit = 0;
-            trends.forEach(function (d) {
-              totalRevenue += Number(d.revenue) || 0;
-              totalCost += Number(d.cost) || 0;
-              totalProfit += Number(d.profit) || 0;
-            });
+          var trends = (monthly.daily_trends && monthly.daily_trends.length)
+            ? monthly.daily_trends
+            : [];
 
-            // 用利润率估算健康分(0-100)
-            var profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue * 100) : 0;
-            var healthScore = Math.max(0, Math.min(100, Math.round(profitMargin * 2)));
-
-            // 用聚合数据填充 weeklyData 供渲染复用
-            var monthlyAgg = {
-              period: '近30日',
-              week_revenue: totalRevenue,
-              week_profit: totalProfit,
-              last_week_revenue: 0,
-              revenue_change_pct: 0,
-              daily_trends: trends,
-              sales_ranking: [],
-              waste_ranking: [],
-              adoption_rate: 0,
-              recommendation_total: 0,
-              recommendation_adopted: 0,
-              health_score: healthScore,
-              ai_summary: '近30日数据汇总:累计营业额 ' + self._money(totalRevenue) +
-                          ' 元,毛利润 ' + self._money(totalProfit) + ' 元,毛利率 ' +
-                          self._pct(profitMargin) + '。' +
-                          (profitMargin < 15 ? '毛利率偏低,建议优化采购成本或调整售价。' :
-                           profitMargin > 40 ? '毛利率良好,可考虑适当扩大进货量。' :
-                           '毛利率处于正常区间,保持当前经营节奏。'),
-            };
-
-            self.setData({
-              weeklyData: monthlyAgg,
-              trendData: trends,
-              rangeLabel: '近30日经营报告',
-              refreshTime: self._formatTime(new Date()),
-              loading: false,
-              hasData: true,
-            });
-            self._renderWeekly();
-            self._renderDerived();
-            if (onSuccess) onSuccess();
-          } catch (e) {
-            // 聚合过程中任何异常都不应该卡页面
-            self.setData({
-              loading: false,
-              hasData: false,
-              trendData: [],
-              rangeLabel: '近30日经营报告 · 数据异常',
-            });
-            app.logError('report/monthly', e, { silent: true });
-            if (onError) onError();
-          }
+          self.setData({
+            weeklyData: monthly,
+            trendData: trends,
+            rangeLabel: '近30日经营报告 · ' + (monthly.period || ''),
+            refreshTime: self._formatTime(new Date()),
+            loading: false,
+            hasData: true,
+          });
+          self._renderWeekly();
+          self._renderDerived();
+          if (onSuccess) onSuccess();
         });
     }
   },
@@ -304,12 +298,12 @@ Page({
       metrics: {
         revenueDisplay: this._money(d.revenue),
         costDisplay: this._money(d.cost),
-        profitDisplay: this._money(d.profit),
+        profitDisplay: this._money(d.estimated_gross_profit != null ? d.estimated_gross_profit : d.profit),
         wasteDisplay: this._money(d.waste_amount || 0),
         revenueChangePct: changePct,
         revenueChangeAbs: this._pct(changePct) + (changeAbs !== 0 ? ' ¥' + this._money(Math.abs(changeAbs)) : ''),
-        profitMargin: (d.revenue > 0 && d.profit !== undefined)
-          ? this._pct((Number(d.profit) / Number(d.revenue) * 100)) : null,
+        profitMargin: d.revenue > 0
+          ? this._pct((Number(d.estimated_gross_profit != null ? d.estimated_gross_profit : d.profit || 0) / Number(d.revenue) * 100)) : null,
       },
       salesRanking: this._formatRanking(d.top_products || []),
       wasteList: this._formatSlowList(d.slow_moving || []),
@@ -337,13 +331,13 @@ Page({
     this.setData({
       metrics: {
         revenueDisplay: this._money(w.week_revenue),
-        costDisplay: this._money(Number(w.week_revenue || 0) - Number(w.week_profit || 0)),
-        profitDisplay: this._money(w.week_profit),
+        costDisplay: this._money(w.week_purchase_cost != null ? w.week_purchase_cost : Number(w.week_revenue || 0) - Number(w.week_profit || 0)),
+        profitDisplay: this._money(w.week_gross_profit != null ? w.week_gross_profit : w.week_profit),
         wasteDisplay: this._money(this._sumWasteAmount(w.waste_ranking || [])),
         revenueChangePct: changePct,
         revenueChangeAbs: this._pct(changePct),
         profitMargin: (w.week_revenue > 0)
-          ? this._pct((Number(w.week_profit) / Number(w.week_revenue) * 100)) : null,
+          ? this._pct((Number(w.week_gross_profit != null ? w.week_gross_profit : w.week_profit || 0) / Number(w.week_revenue) * 100)) : null,
       },
       salesRanking: this._formatRanking(w.sales_ranking || []),
       wasteList: this._formatWasteList(w.waste_ranking || []),

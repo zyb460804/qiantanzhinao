@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from app.schemas.auth import (
     WechatLoginRequest,
     WechatLoginResponse,
 )
+from app.schemas.common import AnyResponse
 
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -133,7 +134,50 @@ async def logout(
     if creds and creds.credentials:
         try:
             payload = decode_access_token(creds.credentials)
-            await revoke_token(db, payload.get("jti"), payload.get("exp"))
+            jti = payload.get("jti")
+            if jti:
+                await revoke_token(db, str(jti), payload.get("exp"))
         except HTTPException:
             pass  # 令牌已无效，注销幂等成功
     return LogoutResponse(code=0, message="已退出登录")
+
+
+@router.get("/me/preferences", response_model=AnyResponse)
+async def get_preferences(
+    merchant: Merchant = Depends(get_current_merchant),
+):
+    """获取当前商户的经营偏好设置（方言、营业时段、城市、风险偏好等）。"""
+    prefs = merchant.preferences or {}
+    return {
+        "code": 0,
+        "data": {
+            "voice_dialect": prefs.get("voice_dialect", "mandarin"),
+            "business_hours": prefs.get("business_hours", "morning"),
+            "notification_enabled": prefs.get("notification_enabled", True),
+            "risk_profile": prefs.get("risk_profile", "neutral"),
+            "merchant_city": prefs.get("merchant_city", "上海"),
+        },
+    }
+
+
+@router.put("/me/preferences", response_model=AnyResponse)
+async def update_preferences(
+    body: dict = Body(...),
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新当前商户的经营偏好设置。存入 merchant.preferences JSON 字段。"""
+    allowed_keys = {
+        "voice_dialect",
+        "business_hours",
+        "notification_enabled",
+        "risk_profile",
+        "merchant_city",
+    }
+    current = merchant.preferences or {}
+    for key in allowed_keys:
+        if key in body:
+            current[key] = body[key]
+    merchant.preferences = current
+    await db.commit()
+    return {"code": 0, "data": current}

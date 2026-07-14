@@ -19,10 +19,24 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+
 # ── 15 类商品（名称必须与 inference.py 中 CLASSES 完全一致）─────────────
 CLASSES = [
-    "白菜", "菠菜", "生菜", "土豆", "萝卜", "胡萝卜", "红薯", "洋葱",
-    "豆腐", "豆皮", "黄瓜", "番茄", "西瓜", "茄子", "辣椒",
+    "白菜",
+    "菠菜",
+    "生菜",
+    "土豆",
+    "萝卜",
+    "胡萝卜",
+    "红薯",
+    "洋葱",
+    "豆腐",
+    "豆皮",
+    "黄瓜",
+    "番茄",
+    "西瓜",
+    "茄子",
+    "辣椒",
 ]
 
 # 每个类别分配一个可区分的代表色 (R, G, B)。
@@ -66,9 +80,7 @@ def make_image(class_name: str, seed: int) -> Image.Image:
 
     color = CLASS_COLORS.get(class_name, (150, 150, 150))
     # 加入轻微随机抖动，让同类图像不完全相同
-    jittered = tuple(
-        max(0, min(255, c + rng.randint(-15, 15))) for c in color
-    )
+    jittered = tuple(max(0, min(255, c + rng.randint(-15, 15))) for c in color)
 
     # 像素级框（中心 0.5,0.5，尺寸 0.4x0.4 → 边距 0.3~0.7）
     m0, m1 = 0.30, 0.70
@@ -146,11 +158,14 @@ def main():
         description="生成合成占位数据集（仅用于管线冒烟测试）",
     )
     parser.add_argument(
-        "--out", default="datasets/products",
+        "--out",
+        default="datasets/products",
         help="数据集根目录 (含 images/ 与 labels/)",
     )
     parser.add_argument(
-        "--per-class", type=int, default=30,
+        "--per-class",
+        type=int,
+        default=30,
         help="每个类别的训练图片数量 (默认 30)",
     )
     args = parser.parse_args()
@@ -159,7 +174,7 @@ def main():
         from PIL import Image, ImageDraw  # noqa: F401
     except ImportError:
         print("错误: 未安装 Pillow。请先安装: pip install pillow")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     out_root = Path(args.out).resolve()
     generate(out_root, args.per_class)

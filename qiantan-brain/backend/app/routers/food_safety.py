@@ -39,6 +39,7 @@ router = APIRouter(prefix="/api/v1/food-safety", tags=["food-safety"])
 # 批次管理
 # ═══════════════════════════════════════════════════════════
 
+
 @router.get("/batches", response_model=AnyResponse)
 async def list_batches(
     status: str | None = None,
@@ -48,20 +49,42 @@ async def list_batches(
 ):
     """List batches, optionally filtered by status."""
     filters = [BatchLifecycle.merchant_id == merchant.id]
-    if status: filters.append(BatchLifecycle.status == status)
-    rows = (await db.execute(
-        select(BatchLifecycle).where(*filters).order_by(BatchLifecycle.purchase_date.desc()).limit(min(limit, 200))
-    )).scalars().all()
-    return {"code": 0, "data": [
-        {"batch_id": str(b.id), "batch_label": b.batch_label, "product_id": b.product_id,
-         "sku_id": str(b.sku_id) if b.sku_id else None, "supplier_name": b.supplier_name,
-         "origin": b.origin, "purchase_qty": float(b.purchase_qty), "remaining_qty": float(b.remaining_qty),
-         "unit_cost": float(b.unit_cost) if b.unit_cost else None,
-         "status": b.status, "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
-         "inspection_result": b.inspection_result, "locked_reason": b.locked_reason,
-         "purchase_date": b.purchase_date.isoformat() if b.purchase_date else None}
-        for b in rows
-    ]}
+    if status:
+        filters.append(BatchLifecycle.status == status)
+    rows = (
+        (
+            await db.execute(
+                select(BatchLifecycle)
+                .where(*filters)
+                .order_by(BatchLifecycle.purchase_date.desc())
+                .limit(min(limit, 200))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "code": 0,
+        "data": [
+            {
+                "batch_id": str(b.id),
+                "batch_label": b.batch_label,
+                "product_id": b.product_id,
+                "sku_id": str(b.sku_id) if b.sku_id else None,
+                "supplier_name": b.supplier_name,
+                "origin": b.origin,
+                "purchase_qty": float(b.purchase_qty),
+                "remaining_qty": float(b.remaining_qty),
+                "unit_cost": float(b.unit_cost) if b.unit_cost else None,
+                "status": b.status,
+                "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
+                "inspection_result": b.inspection_result,
+                "locked_reason": b.locked_reason,
+                "purchase_date": b.purchase_date.isoformat() if b.purchase_date else None,
+            }
+            for b in rows
+        ],
+    }
 
 
 @router.get("/batches/{batch_id}/trace", response_model=AnyResponse)
@@ -119,11 +142,16 @@ async def generate_batch_qr(
     # Persist QR data on the batch
     batch.qr_data = json.dumps(qr_payload, ensure_ascii=False)
 
-    db.add(AuditLog(
-        merchant_id=merchant.id, action="batch_generate_qr",
-        target_table="batch_lifecycles", target_id=str(batch.id),
-        after_data={"trace_code": trace_code}, operator="merchant",
-    ))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="batch_generate_qr",
+            target_table="batch_lifecycles",
+            target_id=str(batch.id),
+            after_data={"trace_code": trace_code},
+            operator="merchant",
+        )
+    )
     await db.commit()
 
     return {
@@ -148,9 +176,7 @@ async def lookup_trace(
     inspection result, certificates, and recall status. Never exposes cost/profit.
     """
     # Search all batches for this trace_code in qr_data JSON
-    query = select(BatchLifecycle).where(
-        BatchLifecycle.qr_data.contains(trace_code)
-    ).limit(1)
+    query = select(BatchLifecycle).where(BatchLifecycle.qr_data.contains(trace_code)).limit(1)
     result = await db.execute(query)
     batch = result.scalar_one_or_none()
 
@@ -182,7 +208,8 @@ async def lookup_trace(
 
 @router.post("/batches/{batch_id}/inspect", response_model=AnyResponse)
 async def record_inspection(
-    batch_id: uuid.UUID, body: dict,
+    batch_id: uuid.UUID,
+    body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -193,9 +220,16 @@ async def record_inspection(
     result = body.get("result", "pass")
     batch.inspection_result = result
 
-    db.add(AuditLog(merchant_id=merchant.id, action="batch_inspect",
-        target_table="batch_lifecycles", target_id=str(batch.id),
-        after_data={"result": result}, operator="merchant"))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="batch_inspect",
+            target_table="batch_lifecycles",
+            target_id=str(batch.id),
+            after_data={"result": result},
+            operator="merchant",
+        )
+    )
     await db.commit()
     return {"code": 0, "message": f"快检结果已记录: {result}"}
 
@@ -204,28 +238,41 @@ async def record_inspection(
 # 锁定/解锁/召回/销毁 (section 4.14 不合格流程)
 # ═══════════════════════════════════════════════════════════
 
+
 @router.post("/batches/{batch_id}/lock", response_model=AnyResponse)
 async def lock(
-    batch_id: uuid.UUID, body: dict = Body(default={}),
+    batch_id: uuid.UUID,
+    body: dict = Body(default={}),
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
     """Lock a batch — POS will immediately stop selling from this batch."""
     try:
-        batch = await lock_batch(db, batch_id, merchant.id,
-            reason=body.get("reason", "快检不合格"), locked_by="merchant")
+        batch = await lock_batch(
+            db, batch_id, merchant.id, reason=body.get("reason", "快检不合格"), locked_by="merchant"
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
-    db.add(AuditLog(merchant_id=merchant.id, action="batch_lock",
-        target_table="batch_lifecycles", target_id=str(batch.id),
-        after_data={"status": "locked", "reason": batch.locked_reason}, operator="merchant"))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="batch_lock",
+            target_table="batch_lifecycles",
+            target_id=str(batch.id),
+            after_data={"status": "locked", "reason": batch.locked_reason},
+            operator="merchant",
+        )
+    )
     await db.commit()
 
     # Calculate remaining stock and affected orders
     remaining = float(batch.remaining_qty)
-    return {"code": 0, "message": f"批次已锁定，剩余 {remaining} 禁止销售",
-            "data": {"batch_id": str(batch.id), "remaining_qty": remaining, "status": "locked"}}
+    return {
+        "code": 0,
+        "message": f"批次已锁定，剩余 {remaining} 禁止销售",
+        "data": {"batch_id": str(batch.id), "remaining_qty": remaining, "status": "locked"},
+    }
 
 
 @router.post("/batches/{batch_id}/unlock", response_model=AnyResponse)
@@ -239,47 +286,74 @@ async def unlock(
         batch = await unlock_batch(db, batch_id, merchant.id)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    db.add(AuditLog(merchant_id=merchant.id, action="batch_unlock",
-        target_table="batch_lifecycles", target_id=str(batch.id),
-        after_data={"status": "sellable"}, operator="merchant"))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="batch_unlock",
+            target_table="batch_lifecycles",
+            target_id=str(batch.id),
+            after_data={"status": "sellable"},
+            operator="merchant",
+        )
+    )
     await db.commit()
     return {"code": 0, "message": "批次已解锁，恢复正常销售"}
 
 
 @router.post("/batches/{batch_id}/recall", response_model=AnyResponse)
 async def recall(
-    batch_id: uuid.UUID, body: dict = Body(default={}),
+    batch_id: uuid.UUID,
+    body: dict = Body(default={}),
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
     """Recall a locked batch."""
     try:
-        batch = await recall_batch(db, batch_id, merchant.id, reason=body.get("reason", "食品安全召回"))
+        batch = await recall_batch(
+            db, batch_id, merchant.id, reason=body.get("reason", "食品安全召回")
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    db.add(AuditLog(merchant_id=merchant.id, action="batch_recall",
-        target_table="batch_lifecycles", target_id=str(batch.id),
-        after_data={"status": "recalled"}, reason=body.get("reason"), operator="merchant"))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="batch_recall",
+            target_table="batch_lifecycles",
+            target_id=str(batch.id),
+            after_data={"status": "recalled"},
+            reason=body.get("reason"),
+            operator="merchant",
+        )
+    )
     await db.commit()
     return {"code": 0, "message": "批次已召回"}
 
 
 @router.post("/batches/{batch_id}/destroy", response_model=AnyResponse)
 async def destroy(
-    batch_id: uuid.UUID, body: dict = Body(default={}),
+    batch_id: uuid.UUID,
+    body: dict = Body(default={}),
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
     """Destroy a recalled batch — final disposal with waste record."""
     try:
-        batch = await destroy_batch(db, batch_id, merchant.id,
-            reason=body.get("reason", "不合格销毁"))
+        batch = await destroy_batch(
+            db, batch_id, merchant.id, reason=body.get("reason", "不合格销毁")
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    db.add(AuditLog(merchant_id=merchant.id, action="batch_destroy",
-        target_table="batch_lifecycles", target_id=str(batch.id),
-        after_data={"status": "destroyed", "remaining_qty": float(batch.remaining_qty)},
-        reason=body.get("reason"), operator="merchant"))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="batch_destroy",
+            target_table="batch_lifecycles",
+            target_id=str(batch.id),
+            after_data={"status": "destroyed", "remaining_qty": float(batch.remaining_qty)},
+            reason=body.get("reason"),
+            operator="merchant",
+        )
+    )
     await db.commit()
     return {"code": 0, "message": f"批次已销毁，剩余 {float(batch.remaining_qty)} 已记录报损"}
 
@@ -288,6 +362,7 @@ async def destroy(
 # 每日自查
 # ═══════════════════════════════════════════════════════════
 
+
 @router.get("/daily-checklist", response_model=AnyResponse)
 async def daily_checklist(
     merchant: Merchant = Depends(get_current_merchant),
@@ -295,53 +370,71 @@ async def daily_checklist(
 ):
     """Return daily food safety checklist with current status."""
     # Expired batches
-    expired = (await db.execute(
-        select(func.count(BatchLifecycle.id)).where(
-            BatchLifecycle.merchant_id == merchant.id, BatchLifecycle.remaining_qty > 0,
-            BatchLifecycle.expiry_date < utc_now(),
+    expired = (
+        await db.execute(
+            select(func.count(BatchLifecycle.id)).where(
+                BatchLifecycle.merchant_id == merchant.id,
+                BatchLifecycle.remaining_qty > 0,
+                BatchLifecycle.expiry_date < utc_now(),
+            )
         )
-    )).scalar() or 0
+    ).scalar() or 0
 
     # Locked batches
-    locked = (await db.execute(
-        select(func.count(BatchLifecycle.id)).where(
-            BatchLifecycle.merchant_id == merchant.id, BatchLifecycle.status == "locked"
+    locked = (
+        await db.execute(
+            select(func.count(BatchLifecycle.id)).where(
+                BatchLifecycle.merchant_id == merchant.id, BatchLifecycle.status == "locked"
+            )
         )
-    )).scalar() or 0
+    ).scalar() or 0
 
     # Batches without inspection
-    uninspected = (await db.execute(
-        select(func.count(BatchLifecycle.id)).where(
-            BatchLifecycle.merchant_id == merchant.id, BatchLifecycle.remaining_qty > 0,
-            BatchLifecycle.inspection_result.is_(None),
+    uninspected = (
+        await db.execute(
+            select(func.count(BatchLifecycle.id)).where(
+                BatchLifecycle.merchant_id == merchant.id,
+                BatchLifecycle.remaining_qty > 0,
+                BatchLifecycle.inspection_result.is_(None),
+            )
         )
-    )).scalar() or 0
+    ).scalar() or 0
 
     # Failed inspection batches
-    failed = (await db.execute(
-        select(BatchLifecycle).where(
-            BatchLifecycle.merchant_id == merchant.id, BatchLifecycle.inspection_result == "fail",
-            BatchLifecycle.status != "destroyed",
+    failed = (
+        (
+            await db.execute(
+                select(BatchLifecycle).where(
+                    BatchLifecycle.merchant_id == merchant.id,
+                    BatchLifecycle.inspection_result == "fail",
+                    BatchLifecycle.status != "destroyed",
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    return {"code": 0, "data": {
-        "expired_batches": int(expired),
-        "locked_batches": int(locked),
-        "uninspected_batches": int(uninspected),
-        "failed_inspections": [
-            {"batch_id": str(b.id), "batch_label": b.batch_label, "status": b.status}
-            for b in failed
-        ],
-        "checklist": [
-            {"item": "检查过期批次", "status": "danger" if expired > 0 else "ok"},
-            {"item": "检查快检未完成批次", "status": "warn" if uninspected > 0 else "ok"},
-            {"item": "检查锁定批次", "status": "danger" if locked > 0 else "ok"},
-            {"item": "检查不合格批次是否已处理", "status": "danger" if failed else "ok"},
-            {"item": "冷柜温度检查", "status": "pending"},
-            {"item": "环境清洁", "status": "pending"},
-        ],
-    }}
+    return {
+        "code": 0,
+        "data": {
+            "expired_batches": int(expired),
+            "locked_batches": int(locked),
+            "uninspected_batches": int(uninspected),
+            "failed_inspections": [
+                {"batch_id": str(b.id), "batch_label": b.batch_label, "status": b.status}
+                for b in failed
+            ],
+            "checklist": [
+                {"item": "检查过期批次", "status": "danger" if expired > 0 else "ok"},
+                {"item": "检查快检未完成批次", "status": "warn" if uninspected > 0 else "ok"},
+                {"item": "检查锁定批次", "status": "danger" if locked > 0 else "ok"},
+                {"item": "检查不合格批次是否已处理", "status": "danger" if failed else "ok"},
+                {"item": "冷柜温度检查", "status": "pending"},
+                {"item": "环境清洁", "status": "pending"},
+            ],
+        },
+    }
 
 
 @router.get("/batches/{batch_id}/affected-orders", response_model=AnyResponse)
@@ -356,20 +449,34 @@ async def affected_orders(
         raise HTTPException(status_code=404, detail="批次不存在")
 
     # Find inventory records linked to this batch
-    inv_records = (await db.execute(
-        select(InventoryRecord).where(
-            InventoryRecord.merchant_id == merchant.id,
-            InventoryRecord.batch_label == batch.batch_label,
-            InventoryRecord.event_type.in_(("sale", "refund")),
+    inv_records = (
+        (
+            await db.execute(
+                select(InventoryRecord).where(
+                    InventoryRecord.merchant_id == merchant.id,
+                    InventoryRecord.batch_label == batch.batch_label,
+                    InventoryRecord.event_type.in_(("sale", "refund")),
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    return {"code": 0, "data": {
-        "batch_id": str(batch.id), "batch_label": batch.batch_label,
-        "remaining_qty": float(batch.remaining_qty),
-        "affected_records": [
-            {"record_id": str(r.id), "qty": float(r.quantity), "notes": r.notes,
-             "time": r.event_time.isoformat() if r.event_time else None}
-            for r in inv_records
-        ],
-    }}
+    return {
+        "code": 0,
+        "data": {
+            "batch_id": str(batch.id),
+            "batch_label": batch.batch_label,
+            "remaining_qty": float(batch.remaining_qty),
+            "affected_records": [
+                {
+                    "record_id": str(r.id),
+                    "qty": float(r.quantity),
+                    "notes": r.notes,
+                    "time": r.event_time.isoformat() if r.event_time else None,
+                }
+                for r in inv_records
+            ],
+        },
+    }

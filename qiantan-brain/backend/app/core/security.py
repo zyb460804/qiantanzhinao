@@ -152,6 +152,13 @@ async def get_current_merchant(
     merchant = await db.get(Merchant, merchant_id)
     if merchant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="商户不存在")
+
+    # ── 注入租户上下文（SaaS 多租户门禁链的入口）──
+    # 过渡期：tenant_id 可为空（旧商户未回填），跳过但不阻断
+    # 迁移完成后：改为 if merchant.tenant_id is None → 403 FORBIDDEN
+    from app.core.tenant_context import set_tenant_id
+
+    set_tenant_id(merchant.tenant_id)
     return merchant
 
 

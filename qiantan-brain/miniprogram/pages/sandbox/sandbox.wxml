@@ -23,7 +23,7 @@
       <view class="price-field"><text class="field-label">进货单价</text><view class="money-input"><text>¥</text><input type="digit" value="{{unitCost}}" data-field="unitCost" bindinput="onFieldInput" placeholder="0.5"/><text class="unit">/斤</text></view></view>
       <view class="price-field"><text class="field-label">计划售价</text><view class="money-input"><text>¥</text><input type="digit" value="{{unitPrice}}" data-field="unitPrice" bindinput="onFieldInput" placeholder="2.0"/><text class="unit">/斤</text></view></view>
     </view>
-    <button class="run-button" bindtap="runSimulation" loading="{{loading}}"><text class="run-mark">算</text>{{loading ? '正在推演...' : '开始经营试算'}}</button>
+    <button class="run-button" bindtap="runSimulation" loading="{{loading}}" disabled="{{loading || productsEmpty}}"><text class="run-mark">算</text>{{loading ? '正在推演...' : '开始经营试算'}}</button>
   </view>
 
   <view wx:if="{{result && result.single}}">

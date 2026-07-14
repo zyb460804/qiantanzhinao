@@ -1,0 +1,136 @@
+name: CI — 千摊智脑
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  # ── 后端质量门禁 ──
+  backend:
+    name: Backend (lint + test + import)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: qiantan_test
+          POSTGRES_USER: qiantan
+          POSTGRES_PASSWORD: testpass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      # ═══ 第 1 道门禁：导入检查（5 秒发现 bcrypt 类问题）═══
+      - name: Import check
+        run: python -c "import app.main"
+
+      # ═══ 第 2 道门禁：Lint（Ruff）═══
+      - name: Ruff
+        run: ruff check app/ --select F,E,I,B --statistics
+
+      # ═══ 第 3 道门禁：测试收集（验证无导入层崩溃）═══
+      - name: Test collection
+        run: pytest --collect-only -q
+        env:
+          DATABASE_URL: postgresql+asyncpg://qiantan:testpass@localhost:5432/qiantan_test
+          JWT_SECRET: ci-test-secret-at-least-32-bytes-long
+          WECHAT_APPID: wx_test
+          WECHAT_SECRET: test_secret
+
+      # ═══ 第 4 道门禁：单元测试 ═══
+      - name: Unit tests
+        run: pytest tests/ -x -m "not slow and not integration" --tb=short
+        env:
+          DATABASE_URL: postgresql+asyncpg://qiantan:testpass@localhost:5432/qiantan_test
+          JWT_SECRET: ci-test-secret-at-least-32-bytes-long
+          WECHAT_APPID: wx_test
+          WECHAT_SECRET: test_secret
+
+      # ═══ 第 5 道门禁：Alembic 迁移完整性 ═══
+      - name: Alembic check
+        run: |
+          alembic upgrade head
+          alembic check
+        env:
+          DATABASE_URL: postgresql+asyncpg://qiantan:testpass@localhost:5432/qiantan_test
+
+  # ── 管理前端质量门禁 ──
+  admin-frontend:
+    name: Admin Frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/admin-web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: backend/admin-web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: ESLint
+        run: npx eslint src/ --max-warnings 0
+
+      - name: Production build
+        run: npm run build
+
+  # ── Docker 构建验证 ──
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t qiantan-backend:ci ./backend
+
+      - name: Smoke test
+        run: |
+          docker run --rm -d --name qiantan-ci \
+            -e DATABASE_URL=sqlite+aiosqlite:///./test.db \
+            -e DEBUG=true \
+            -e JWT_SECRET=ci-test-secret-at-least-32-bytes-long \
+            -e RUN_MIGRATIONS_ON_STARTUP=false \
+            -p 8000:8000 \
+            qiantan-backend:ci
+          sleep 5
+          curl -f http://localhost:8000/api/v1/health || (docker logs qiantan-ci && exit 1)
+          docker stop qiantan-ci

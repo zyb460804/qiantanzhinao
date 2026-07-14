@@ -184,3 +184,50 @@
 @keyframes shimmer { 0% { background-position:100% 0; } 100% { background-position:-100% 0; } }
 @keyframes card-rise { from { opacity:0; transform:translateY(12rpx); } to { opacity:1; transform:translateY(0); } }
 @keyframes fade-in { from { opacity:0; } to { opacity:1; } }
+
+/* 2026 统一设计升级：采购流程页 */
+.purchase-page { padding-bottom: 110rpx; }
+.purchase-hero { margin-bottom: 0; }
+.purchase-flow { display: flex; align-items: flex-start; margin: 18rpx 0 24rpx; padding: 20rpx 16rpx; background: var(--paper); border: 1.5rpx solid var(--ring); border-radius: 22rpx; box-shadow: var(--shadow-sm); }
+.purchase-step { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 7rpx; color: var(--muted); text-align: center; }
+.step-index { display: flex; align-items: center; justify-content: center; width: 38rpx; height: 38rpx; background: var(--paper-2); border-radius: 50%; font-family: var(--font-num); font-size: 19rpx; font-weight: 850; }
+.purchase-step.active .step-index { color: #fff; background: var(--green-700); }
+.step-name { font-size: 18rpx; line-height: 1.25; }
+.purchase-step.active .step-name { color: var(--green-800); font-weight: 700; }
+.step-connector { width: 22rpx; height: 2rpx; margin-top: 18rpx; background: var(--line); }
+.status-bar { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }
+.purchase-card { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }
+.purchase-card.purchased { border-color: var(--green-200); }
+.card-head { padding-bottom: 16rpx; border-bottom: 1rpx solid var(--line-soft); }
+.bottom-action { border-top: 1rpx solid var(--ring); box-shadow: 0 -10rpx 30rpx rgba(18,61,48,.08); }
+
+/* 预计到货 */
+.expected-arrival { display: flex; align-items: center; gap: 12rpx; margin-top: 10rpx; padding: 12rpx 18rpx; background: var(--green-50); border-radius: 12rpx; }
+.arrival-label { color: var(--muted); font-size: 21rpx; font-weight: 650; }
+.arrival-date { color: var(--green-800); font-size: 21rpx; font-weight: 700; }
+
+/* 采购历史 */
+.history-toggle { display: flex; align-items: center; justify-content: space-between; margin-top: 24rpx; padding: 18rpx 22rpx; background: var(--paper); border-radius: 14rpx; box-shadow: var(--shadow-sm); }
+.history-toggle-text { color: var(--ink); font-size: 24rpx; font-weight: 700; }
+.history-toggle-arrow { color: var(--green-700); font-size: 22rpx; font-weight: 650; }
+.history-list { margin-top: 12rpx; display: flex; flex-direction: column; gap: 10rpx; }
+.history-card { padding: 16rpx 20rpx; background: var(--paper-2); border-radius: 12rpx; border-left: 4rpx solid var(--line); }
+.history-top { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
+.history-no { color: var(--ink); font-size: 22rpx; font-weight: 650; font-family: monospace; }
+.history-meta { display: flex; gap: 16rpx; margin-top: 6rpx; }
+.history-meta text { color: var(--muted); font-size: 20rpx; }
+
+/* 预计到货 */
+.expected-arrival { display: flex; align-items: center; gap: 12rpx; margin-top: 10rpx; padding: 10rpx 28rpx; }
+.arrival-label { color: var(--muted); font-size: 21rpx; }
+.arrival-date { color: var(--green-700); font-size: 21rpx; font-weight: 650; }
+
+/* 采购历史 */
+.history-toggle { display: flex; align-items: center; justify-content: space-between; margin-top: 32rpx; padding: 20rpx 28rpx; }
+.history-toggle-text { color: var(--ink); font-size: 25rpx; font-weight: 720; }
+.history-toggle-arrow { color: var(--green-700); font-size: 23rpx; font-weight: 700; }
+.history-list { display: flex; flex-direction: column; gap: 12rpx; padding: 0 28rpx; }
+.history-card { padding: 18rpx 22rpx; background: var(--paper-2); border-radius: 14rpx; }
+.history-top { display: flex; align-items: center; justify-content: space-between; }
+.history-no { color: var(--ink); font-size: 23rpx; font-weight: 680; font-family: monospace; }
+.history-meta { display: flex; gap: 18rpx; margin-top: 8rpx; color: var(--muted); font-size: 21rpx; }

@@ -1,12 +1,10 @@
-"""
-经营行为模型 — Merchant Behavior Learning Engine.
-Tracks adoption patterns, learns preferences, adapts recommendations over time.
+"""经营行为学习引擎 — 跟踪建议采纳并动态调整商户采购画像。"""
 
-Phase 1: Rule-based preference tracking with feedback loop.
-Phase 2: ML-driven personalization (when enough data accumulates).
-"""
+from __future__ import annotations
 
 import logging
+import uuid
+from typing import Any, TypedDict
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,13 +16,19 @@ from app.models.recommendation import Recommendation
 
 logger = logging.getLogger(__name__)
 
-# ── Preference Profiles ─────────────────────────────────────────────────
 
-PROFILES = {
+class ProfileDefinition(TypedDict):
+    label: str
+    adopt_rate_threshold: float
+    quantity_multiplier: float
+    description: str
+
+
+PROFILES: dict[str, ProfileDefinition] = {
     "conservative": {
         "label": "保守型",
-        "adopt_rate_threshold": 0.85,  # Only adopts high-confidence recs
-        "quantity_multiplier": 0.85,  # Buys 85% of recommended qty
+        "adopt_rate_threshold": 0.85,
+        "quantity_multiplier": 0.85,
         "description": "倾向于少量多频次采购",
     },
     "balanced": {
@@ -36,133 +40,162 @@ PROFILES = {
     "aggressive": {
         "label": "进取型",
         "adopt_rate_threshold": 0.50,
-        "quantity_multiplier": 1.20,  # Buys 20% more than recommended
+        "quantity_multiplier": 1.20,
         "description": "倾向于一次多进，愿意承担风险",
     },
 }
 
 
 def classify_purchase_style(adoption_rate: float, avg_deviation: float) -> str:
-    """Classify merchant purchase style from behavioral data.
-
-    adoption_rate: fraction of recommendations adopted (0-1)
-    avg_deviation: average % difference between recommended and actual qty
-                   positive = bought more, negative = bought less
-    """
+    """Classify merchant purchase style from adoption and quantity deviation."""
     if adoption_rate > 0.8 and avg_deviation < -0.1:
         return "conservative"
-    elif adoption_rate < 0.5 or avg_deviation > 0.15:
+    if adoption_rate < 0.5 or avg_deviation > 0.15:
         return "aggressive"
     return "balanced"
 
 
+def _purchase_style(data: dict[str, Any]) -> str:
+    value = data.get("purchase_style")
+    return value if isinstance(value, str) and value in PROFILES else "balanced"
+
+
+def _non_negative_int(value: Any) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _optional_rate(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return None
+    return min(max(rate, 0.0), 1.0)
+
+
 async def record_adoption(
     db: AsyncSession,
-    merchant_id,
-    recommendation_id,
+    merchant_id: uuid.UUID,
+    recommendation_id: uuid.UUID,
     was_adopted: bool,
     actual_quantity: float | None = None,
-) -> dict:
-    """Record whether a merchant adopted a recommendation and with what deviation."""
+) -> dict[str, Any]:
+    """Record feedback for one merchant-owned recommendation and refresh its profile."""
+    recommendation = await db.scalar(
+        select(Recommendation).where(
+            Recommendation.id == recommendation_id,
+            Recommendation.merchant_id == merchant_id,
+        )
+    )
+    if recommendation is None:
+        raise LookupError("建议不存在或不属于当前商户")
 
-    # 1. Update the recommendation record
-    query = select(Recommendation).where(Recommendation.id == recommendation_id)
-    result = await db.execute(query)
-    rec = result.scalar_one_or_none()
-    if rec:
-        rec.was_adopted = was_adopted
-        if actual_quantity is not None and rec.recommended_qty and rec.recommended_qty > 0:
-            rec.actual_deviation = round(
-                (actual_quantity - rec.recommended_qty) / rec.recommended_qty, 3
-            )
-        await db.commit()
+    recommendation.was_adopted = was_adopted
+    if (
+        actual_quantity is not None
+        and recommendation.recommended_qty is not None
+        and recommendation.recommended_qty > 0
+    ):
+        recommended_quantity = float(recommendation.recommended_qty)
+        recommendation.actual_deviation = round(
+            (actual_quantity - recommended_quantity) / recommended_quantity,
+            3,
+        )
 
-    # 2. Update merchant preference profile
-    pref_query = select(MerchantPreference).where(MerchantPreference.merchant_id == merchant_id)
-    pref_result = await db.execute(pref_query)
-    pref = pref_result.scalar_one_or_none()
-
-    if not pref:
-        pref = MerchantPreference(
+    preference = await db.scalar(
+        select(MerchantPreference).where(MerchantPreference.merchant_id == merchant_id)
+    )
+    if preference is None:
+        preference = MerchantPreference(
             merchant_id=merchant_id,
             risk_profile="neutral",
-            purchase_style="balanced",
+            preference_data={},
         )
-        db.add(pref)
+        db.add(preference)
 
-    # Recompute adoption rate from last 30 days
     thirty_days_ago = utc_days_ago(30)
     stats_query = select(
-        func.count(Recommendation.id).label("total"),
-        func.sum(case((Recommendation.was_adopted, 1), else_=0)).label("adopted"),
-        func.avg(
-            case(
-                (Recommendation.actual_deviation.isnot(None), Recommendation.actual_deviation),
-                else_=0,
-            )
-        ).label("avg_dev"),
+        func.count(Recommendation.id),
+        func.sum(case((Recommendation.was_adopted.is_(True), 1), else_=0)),
+        func.avg(Recommendation.actual_deviation),
     ).where(
         Recommendation.merchant_id == merchant_id,
         Recommendation.created_at >= thirty_days_ago,
+        Recommendation.was_adopted.is_not(None),
     )
-    stats_result = await db.execute(stats_query)
-    stats = stats_result.one()
+    total_raw, adopted_raw, avg_deviation_raw = (await db.execute(stats_query)).one()
 
-    total = stats.total or 0
-    adopted = stats.adopted or 0
-    avg_dev = float(stats.avg_dev or 0)
+    total = int(total_raw or 0)
+    adopted = int(adopted_raw or 0)
+    corrections = max(total - adopted, 0)
+    adoption_rate = adopted / total if total else None
+    correction_rate = corrections / total if total else None
+    avg_deviation = float(avg_deviation_raw or 0)
 
-    if total >= 5:  # Only reclassify with enough data
-        adoption_rate = adopted / total
-        pref.purchase_style = classify_purchase_style(adoption_rate, avg_dev)
-        pref.avg_adoption_rate = round(adoption_rate, 3)
+    behavior_data: dict[str, Any] = dict(preference.preference_data or {})
+    purchase_style = _purchase_style(behavior_data)
+    if total >= 5 and adoption_rate is not None:
+        purchase_style = classify_purchase_style(adoption_rate, avg_deviation)
 
-    pref.total_voice_logs = (pref.total_voice_logs or 0) + 1
-    if not was_adopted:
-        pref.total_corrections = (pref.total_corrections or 0) + 1
-
+    behavior_data.update(
+        {
+            "purchase_style": purchase_style,
+            "avg_adoption_rate": round(adoption_rate, 3) if adoption_rate is not None else None,
+            "correction_rate": round(correction_rate, 3) if correction_rate is not None else None,
+            "total_decisions": total,
+            "total_corrections": corrections,
+        }
+    )
+    preference.preference_data = behavior_data
     await db.commit()
 
-    profile = PROFILES.get(pref.purchase_style, PROFILES["balanced"])
+    profile = PROFILES[purchase_style]
     return {
-        "purchase_style": pref.purchase_style,
+        "purchase_style": purchase_style,
         "profile_label": profile["label"],
         "recommended_multiplier": profile["quantity_multiplier"],
-        "total_decisions_recorded": total + 1,
+        "total_decisions_recorded": total,
     }
 
 
-async def get_merchant_profile(db: AsyncSession, merchant_id) -> dict:
-    """Get merchant's behavioral profile for personalization."""
-    query = select(MerchantPreference).where(MerchantPreference.merchant_id == merchant_id)
-    result = await db.execute(query)
-    pref = result.scalar_one_or_none()
-
-    if not pref:
+async def get_merchant_profile(
+    db: AsyncSession,
+    merchant_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Get the persisted behavioral profile used to personalize recommendations."""
+    preference = await db.scalar(
+        select(MerchantPreference).where(MerchantPreference.merchant_id == merchant_id)
+    )
+    if preference is None:
         return {
             "purchase_style": "balanced",
             "profile_label": "均衡型（默认）",
             "quantity_multiplier": 1.0,
             "total_decisions": 0,
             "adoption_rate": None,
+            "correction_rate": None,
+            "risk_profile": "neutral",
         }
 
-    profile = PROFILES.get(pref.purchase_style, PROFILES["balanced"])
+    behavior_data: dict[str, Any] = dict(preference.preference_data or {})
+    purchase_style = _purchase_style(behavior_data)
+    profile = PROFILES[purchase_style]
     return {
-        "purchase_style": pref.purchase_style,
+        "purchase_style": purchase_style,
         "profile_label": profile["label"],
         "quantity_multiplier": profile["quantity_multiplier"],
-        "total_decisions": (pref.total_voice_logs or 0),
-        "adoption_rate": float(pref.avg_adoption_rate) if pref.avg_adoption_rate else None,
-        "risk_profile": pref.risk_profile,
+        "total_decisions": _non_negative_int(behavior_data.get("total_decisions")),
+        "adoption_rate": _optional_rate(behavior_data.get("avg_adoption_rate")),
+        "correction_rate": _optional_rate(behavior_data.get("correction_rate")),
+        "risk_profile": preference.risk_profile,
     }
 
 
-def personalize_recommendation(raw_recommended_qty: float, profile: dict) -> float:
-    """Apply personalization multiplier to raw recommendation.
-
-    Conservative merchants get a lower recommendation (safer),
-    aggressive merchants get a higher one.
-    """
-    mult = profile.get("quantity_multiplier", 1.0)
-    return round(raw_recommended_qty * mult, 1)
+def personalize_recommendation(raw_recommended_qty: float, profile: dict[str, Any]) -> float:
+    """Apply the learned quantity multiplier to a raw recommendation."""
+    multiplier = float(profile.get("quantity_multiplier", 1.0))
+    return round(raw_recommended_qty * multiplier, 1)

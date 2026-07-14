@@ -35,9 +35,16 @@ class StocktakeSession(Base):
 
 
 class StocktakeItem(Base):
-    """Per-product line item within a stocktake session."""
+    """Per-product snapshot line within a stocktake session."""
 
     __tablename__ = "stocktake_items"
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "session_id",
+            "product_id",
+            name="uq_stocktake_item_session_product",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(
@@ -50,8 +57,10 @@ class StocktakeItem(Base):
         sa.Integer, sa.ForeignKey("product_categories.id"), nullable=False
     )
     book_qty: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False)
-    actual_qty: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False)
-    variance: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False)
+    # Rows are created when the session starts so book_qty is a real snapshot.
+    # actual_qty/variance stay NULL until the operator submits this line.
+    actual_qty: Mapped[float | None] = mapped_column(sa.Numeric(10, 2))
+    variance: Mapped[float | None] = mapped_column(sa.Numeric(10, 2))
     unit: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="斤")
     # Possible cause: natural_loss / unrecorded_sale / weighing_error / theft / unknown
     variance_reason: Mapped[str | None] = mapped_column(sa.String(50))

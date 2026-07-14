@@ -1,9 +1,17 @@
 <!-- 财务管理 -->
 <wxs src="/utils/format.wxs" module="fmt" />
 <view class="page-shell fin-page {{skin}}">
-  <view class="page-hero"><text class="eyebrow">FINANCE · 财务</text><text class="hero-title">财务管理</text></view>
-  <view class="tab-row">
-    <view wx:for="{{[{k:'expenses',l:'费用'},{k:'report',l:'月报'},{k:'invoices',l:'发票'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
+  <view class="page-hero fin-hero">
+    <text class="eyebrow">FINANCE · 财务</text><text class="hero-title">财务管理</text>
+    <text class="hero-desc">费用、利润、票据与支付对账集中管理，让每笔钱都有去向。</text>
+    <view class="fin-hero-metrics">
+      <view><text class="fin-hero-num">{{expensesLoaded ? expenses.length : '—'}}</text><text class="fin-hero-label">费用记录</text></view>
+      <view><text class="fin-hero-num">{{invoicesLoaded ? invoices.length : '—'}}</text><text class="fin-hero-label">归档发票</text></view>
+      <view><text class="fin-hero-num">{{reportLoaded && monthlyReport ? '¥' + fmt.fixed(monthlyReport.net_profit, 0) : '—'}}</text><text class="fin-hero-label">本月净利</text></view>
+    </view>
+  </view>
+  <view class="tab-row fin-tabs">
+    <view wx:for="{{[{k:'expenses',l:'费用'},{k:'report',l:'月报'},{k:'invoices',l:'发票'},{k:'recon',l:'对账'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
   </view>
 
   <!-- 费用 -->
@@ -18,8 +26,11 @@
       <text class="chip {{expFilterCategory==='rent'?'active':''}}" data-cat="rent" bindtap="changeExpCat">租金</text>
       <text class="chip {{expFilterCategory==='utility'?'active':''}}" data-cat="utility" bindtap="changeExpCat">水电</text>
       <text class="chip {{expFilterCategory==='labor'?'active':''}}" data-cat="labor" bindtap="changeExpCat">人工</text>
+      <text class="chip {{expFilterCategory==='fee'?'active':''}}" data-cat="fee" bindtap="changeExpCat">手续费</text>
+      <text class="chip {{expFilterCategory==='other'?'active':''}}" data-cat="other" bindtap="changeExpCat">其他</text>
     </view>
-    <view wx:if="{{!expenses.length}}" class="empty-state"><text>暂无费用记录</text></view>
+    <view wx:if="{{loading}}" class="empty-state"><text>费用加载中…</text></view>
+    <view wx:elif="{{!expenses.length}}" class="empty-state"><text>暂无费用记录</text></view>
     <view wx:else class="cat-list">
       <view wx:for="{{expenses}}" wx:key="id" class="cat-item">
         <view class="cat-main"><text class="cat-name">{{item.category==='rent'?'租金':item.category==='utility'?'水电':item.category==='labor'?'人工':item.category==='fee'?'手续费':'其他'}}</text><text class="cat-meta">{{item.description||''}} · {{item.expense_date}}</text></view>
@@ -32,7 +43,7 @@
   <!-- 月报 -->
   <block wx:if="{{tab==='report'}}">
     <view class="section-head"><text class="section-title">月度报表</text></view>
-    <picker mode="month" value="{{month}}" bindchange="changeMonth">
+    <picker mode="date" fields="month" value="{{month}}" bindchange="changeMonth">
       <view class="form-input month-input">{{month}} ▾</view>
     </picker>
     <view wx:if="{{reportLoading}}" class="empty-state"><text>加载中…</text></view>
@@ -55,7 +66,8 @@
   <!-- 发票 -->
   <block wx:if="{{tab==='invoices'}}">
     <view class="section-head"><text class="section-title">发票归档</text><text class="link" bindtap="openInvForm">+ 归档</text></view>
-    <view wx:if="{{!invoices.length}}" class="empty-state"><text>暂无发票</text></view>
+    <view wx:if="{{invoiceLoading}}" class="empty-state"><text>发票加载中…</text></view>
+    <view wx:elif="{{!invoices.length}}" class="empty-state"><text>暂无发票</text></view>
     <view wx:else class="cat-list">
       <view wx:for="{{invoices}}" wx:key="id" class="cat-item">
         <view class="cat-main"><text class="cat-name">{{item.invoice_number}}</text><text class="cat-meta">{{item.supplier_name||''}} · {{item.invoice_date}}</text></view>
@@ -64,29 +76,77 @@
     </view>
   </block>
 
+  <!-- 支付渠道对账 -->
+  <block wx:if="{{tab==='recon'}}">
+    <view class="section-head"><text class="section-title">支付渠道对账</text></view>
+    <view class="recon-toolbar">
+      <picker mode="date" value="{{reconDate}}" bindchange="changeReconDate">
+        <view class="recon-date">{{reconDate}} ▾</view>
+      </picker>
+      <view class="recon-channel">
+        <text class="type-chip {{reconChannel==='wechat'?'active':''}}" data-channel="wechat" bindtap="changeReconChannel">微信</text>
+        <text class="type-chip {{reconChannel==='alipay'?'active':''}}" data-channel="alipay" bindtap="changeReconChannel">支付宝</text>
+      </view>
+      <button class="recon-upload" loading="{{reconUploading}}" disabled="{{reconUploading}}" bindtap="chooseReconBill">{{reconUploading?'导入中':'导入账单'}}</button>
+    </view>
+
+    <view wx:if="{{reconResult}}" class="recon-summary status-{{reconResult.status}}">
+      <view><text class="recon-summary-label">系统金额</text><text class="recon-summary-value">¥{{fmt.fixed(reconResult.system_total,2)}}</text></view>
+      <view><text class="recon-summary-label">渠道金额</text><text class="recon-summary-value">¥{{fmt.fixed(reconResult.channel_total,2)}}</text></view>
+      <view><text class="recon-summary-label">差异</text><text class="recon-summary-value">¥{{fmt.fixed(reconResult.diff_amount,2)}}</text></view>
+      <view><text class="recon-summary-label">匹配</text><text class="recon-summary-value">{{reconResult.matched_count}} 笔</text></view>
+    </view>
+
+    <view wx:if="{{reconLoading}}" class="empty-state"><text>对账任务加载中…</text></view>
+    <view wx:elif="{{!reconTasks.length}}" class="empty-state"><text>暂无对账任务</text></view>
+    <view wx:else class="recon-list">
+      <view wx:for="{{reconTasks}}" wx:key="id" class="recon-item {{selectedReconTaskId===item.id?'selected':''}}" data-id="{{item.id}}" bindtap="openReconTask">
+        <view class="recon-item-head"><text class="recon-item-title">{{item.channel==='wechat'?'微信':'支付宝'}} · {{item.date}}</text><text class="recon-status {{item.status}}">{{item.statusText}}</text></view>
+        <view class="recon-item-money"><text>系统 ¥{{fmt.fixed(item.system_total,2)}}</text><text>渠道 ¥{{fmt.fixed(item.channel_total,2)}}</text><text>差额 ¥{{fmt.fixed(item.diff_amount,2)}}</text></view>
+        <view class="recon-item-foot"><text>匹配 {{item.matched_count}} · 系统未匹配 {{item.unmatched_system}} · 渠道未匹配 {{item.unmatched_channel}}</text><text class="recon-rerun" data-date="{{item.date}}" data-channel="{{item.channel}}" catchtap="rerunReconciliation">重跑</text></view>
+      </view>
+    </view>
+
+    <view wx:if="{{selectedReconTaskId}}" class="recon-differences">
+      <text class="report-sub">差异明细</text>
+      <view wx:if="{{!reconDifferences.length}}" class="recon-clear">当前没有对账差异</view>
+      <view wx:for="{{reconDifferences}}" wx:key="id" class="recon-diff">
+        <view class="recon-diff-main"><text class="recon-diff-type">{{item.diff_type==='system_only'?'系统有、渠道无':item.diff_type==='channel_only'?'渠道有、系统无':'金额不一致'}}</text><text class="recon-diff-ref">{{item.system_ref||item.channel_ref||'无交易号'}}</text><text class="recon-diff-money">系统 {{item.system_amount==null?'—':'¥'+fmt.fixed(item.system_amount,2)}} · 渠道 {{item.channel_amount==null?'—':'¥'+fmt.fixed(item.channel_amount,2)}}</text></view>
+        <button wx:if="{{item.status==='open'}}" class="recon-resolve" data-id="{{item.id}}" bindtap="resolveReconDifference">处理</button>
+        <text wx:else class="recon-done">已处理</text>
+      </view>
+    </view>
+  </block>
+
   <!-- Expense modal -->
   <view wx:if="{{showExpForm}}" class="picker-mask" bindtap="closeExpForm">
-    <view class="picker-sheet" catchtap=""><text class="picker-title">记录费用</text>
+    <view class="picker-sheet" catchtap="stopMaskTap"><text class="picker-title">记录费用</text>
       <view class="type-row"><view wx:for="{{[{k:'rent',l:'租金'},{k:'utility',l:'水电'},{k:'labor',l:'人工'},{k:'fee',l:'手续费'},{k:'other',l:'其他'}]}}" wx:key="k" class="type-chip {{expForm.category===item.k?'active':''}}" data-field="category" data-val="{{item.k}}" bindtap="onExpField">{{item.l}}</view></view>
       <input class="form-input" type="digit" placeholder="金额" value="{{expForm.amount}}" data-field="amount" bindinput="onExpField"/>
       <input class="form-input" placeholder="描述" value="{{expForm.description}}" data-field="description" bindinput="onExpField"/>
+      <text class="form-label">支付方式</text>
+      <view class="type-row payment-row">
+        <view class="type-chip {{expForm.payment_method==='cash'?'active':''}}" data-field="payment_method" data-val="cash" bindtap="onExpField">现金</view>
+        <view class="type-chip {{expForm.payment_method==='wechat'?'active':''}}" data-field="payment_method" data-val="wechat" bindtap="onExpField">微信</view>
+        <view class="type-chip {{expForm.payment_method==='bank_transfer'?'active':''}}" data-field="payment_method" data-val="bank_transfer" bindtap="onExpField">银行转账</view>
+      </view>
       <picker mode="date" value="{{expForm.expense_date}}" data-field="expense_date" bindchange="onExpField">
         <view class="form-input">{{expForm.expense_date || '选择日期'}}</view>
       </picker>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeExpForm">取消</button><button class="btn-primary" bindtap="saveExpense">保存</button></view>
+      <view class="picker-actions"><button class="btn-secondary" disabled="{{expenseSubmitting}}" bindtap="closeExpForm">取消</button><button class="btn-primary" loading="{{expenseSubmitting}}" disabled="{{expenseSubmitting}}" bindtap="saveExpense">{{expenseSubmitting?'保存中':'保存'}}</button></view>
     </view>
   </view>
 
   <!-- Invoice modal -->
   <view wx:if="{{showInvForm}}" class="picker-mask" bindtap="closeInvForm">
-    <view class="picker-sheet" catchtap=""><text class="picker-title">发票归档</text>
+    <view class="picker-sheet" catchtap="stopMaskTap"><text class="picker-title">发票归档</text>
       <input class="form-input" placeholder="发票号码" value="{{invForm.invoice_number}}" data-field="invoice_number" bindinput="onInvField"/>
       <input class="form-input" placeholder="开票方" value="{{invForm.supplier_name}}" data-field="supplier_name" bindinput="onInvField"/>
       <input class="form-input" type="digit" placeholder="金额" value="{{invForm.amount}}" data-field="amount" bindinput="onInvField"/>
       <picker mode="date" value="{{invForm.invoice_date}}" data-field="invoice_date" bindchange="onInvField">
         <view class="form-input">{{invForm.invoice_date || '选择日期'}}</view>
       </picker>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeInvForm">取消</button><button class="btn-primary" bindtap="saveInvoice">归档</button></view>
+      <view class="picker-actions"><button class="btn-secondary" disabled="{{invoiceSubmitting}}" bindtap="closeInvForm">取消</button><button class="btn-primary" loading="{{invoiceSubmitting}}" disabled="{{invoiceSubmitting}}" bindtap="saveInvoice">{{invoiceSubmitting?'归档中':'归档'}}</button></view>
     </view>
   </view>
 </view>

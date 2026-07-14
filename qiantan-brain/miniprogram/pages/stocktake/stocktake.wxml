@@ -1,8 +1,13 @@
 <!-- 库存盘点 · 核对实际库存，校准数字孪生 -->
 <view class="page-shell stocktake-page {{skinClass}}">
 
+  <view class="page-hero stocktake-hero" wx:if="{{activeTab === 'stocktake' && !completed}}">
+    <view><text class="eyebrow">STOCKTAKE · 库存校准</text><text class="hero-title">库存盘点</text><text class="hero-desc">核对账面与实物，完成后自动生成库存调整记录。</text></view>
+    <view class="stocktake-hero-mark">盘</view>
+  </view>
+
   <!-- Tab 切换栏 -->
-  <view class="tab-bar">
+  <view class="tab-bar stocktake-tabs">
     <view class="tab-item {{activeTab === 'stocktake' ? 'active' : ''}}" data-tab="stocktake" bindtap="switchTab">开始盘点</view>
     <view class="tab-item {{activeTab === 'history' ? 'active' : ''}}" data-tab="history" bindtap="switchTab">盘点历史</view>
   </view>
@@ -12,20 +17,14 @@
 
     <!-- ── 未开始盘点 ── -->
     <block wx:if="{{!sessionId && !completed}}">
-      <view class="page-hero page-hero--breathing">
-        <text class="eyebrow">STOCKTAKE · 库存盘点</text>
-        <text class="hero-title">库存盘点</text>
-        <text class="hero-desc">核对实际库存，校准数字孪生</text>
-      </view>
-
       <view class="start-card">
         <view class="start-icon-wrap">
           <text class="start-icon">⚖</text>
         </view>
         <text class="start-title">开始一次盘点</text>
         <text class="start-desc">逐项核对货架实际数量，系统将自动计算差异并生成库存调整记录。</text>
-        <button class="btn-primary start-btn" bindtap="startStocktake" loading="{{loading}}">
-          {{loading ? '正在准备...' : '开始盘点'}}
+        <button class="btn-primary start-btn" bindtap="startStocktake" loading="{{submitting}}">
+          {{submitting ? '正在准备...' : '开始盘点'}}
         </button>
       </view>
     </block>

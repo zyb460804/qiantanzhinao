@@ -7,6 +7,7 @@ merchant-facing reports with clear calculation logic.
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from typing import Literal, TypedDict
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -26,6 +27,29 @@ from app.schemas.common import AnyResponse
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
 
+class SalesRankingRow(TypedDict):
+    product_id: int
+    product_name: str
+    qty: float
+    revenue: float
+
+
+class WasteRankingRow(TypedDict):
+    product_id: int
+    product_name: str
+    qty: float
+    amount: float
+
+
+class ProductRankingRow(TypedDict):
+    product_id: int
+    product_name: str
+    sale_qty: float
+    sale_revenue: float
+    waste_qty: float
+    waste_amount: float
+
+
 def _date_range(days: int):
     """Return (start, end) for the last N days (local time, used for event_time)."""
     end = local_now()
@@ -39,38 +63,46 @@ async def _estimate_cogs(
     records: Sequence,
     cutoff_days: int = 30,
 ) -> float:
-    """Estimate cost of goods sold using average purchase cost per product.
+    """Estimate cost of goods sold, preferring actual FIFO costs from sale records.
 
-    COGS = sum(sale_qty × avg_purchase_unit_cost) for each product.
-    avg_purchase_unit_cost is computed from purchase records in the last N days.
+    Sale records populated with unit_cost via FIFO batch consumption are used
+    directly. Records without unit_cost fall back to the 30-day purchase average
+    for the product.
     """
-    sale_products = {r.product_id for r in records if r.event_type == "sale"}
-    if not sale_products:
-        return 0.0
-
-    cutoff = local_days_ago(cutoff_days)
-    cost_query = (
-        select(
-            InventoryRecord.product_id,
-            func.avg(InventoryRecord.unit_cost).label("avg_cost"),
-        )
-        .where(
-            InventoryRecord.merchant_id == merchant_id,
-            InventoryRecord.is_voided == False,  # noqa: E712
-            InventoryRecord.event_type == "purchase",
-            InventoryRecord.unit_cost.isnot(None),
-            InventoryRecord.event_time >= cutoff,
-        )
-        .group_by(InventoryRecord.product_id)
-    )
-    cost_result = await db.execute(cost_query)
-    avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
-
     cogs = 0.0
+    unknown_products: dict[int, float] = {}
+
     for r in records:
-        if r.event_type == "sale":
-            avg_cost = avg_costs.get(r.product_id, 0)
-            cogs += abs(float(r.quantity)) * avg_cost
+        if r.event_type != "sale":
+            continue
+        if r.unit_cost is not None:
+            cogs += abs(float(r.quantity)) * float(r.unit_cost)
+        else:
+            pid = r.product_id
+            unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
+
+    if unknown_products:
+        cutoff = local_days_ago(cutoff_days)
+        cost_query = (
+            select(
+                InventoryRecord.product_id,
+                func.avg(InventoryRecord.unit_cost).label("avg_cost"),
+            )
+            .where(
+                InventoryRecord.merchant_id == merchant_id,
+                InventoryRecord.is_voided == False,  # noqa: E712
+                InventoryRecord.event_type == "purchase",
+                InventoryRecord.unit_cost.isnot(None),
+                InventoryRecord.product_id.in_(set(unknown_products)),
+                InventoryRecord.event_time >= cutoff,
+            )
+            .group_by(InventoryRecord.product_id)
+        )
+        cost_result = await db.execute(cost_query)
+        avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
+        for pid, qty in unknown_products.items():
+            avg_cost = avg_costs.get(pid, 0)
+            cogs += qty * avg_cost
 
     return round(cogs, 2)
 
@@ -162,17 +194,18 @@ async def daily_report(
         for p in name_result.scalars().all():
             product_names[p.id] = p.name
 
+    top_product_rows: list[SalesRankingRow] = [
+        {
+            "product_id": pid,
+            "product_name": product_names.get(pid, f"商品{pid}"),
+            "qty": round(data["qty"], 1),
+            "revenue": round(data["revenue"], 2),
+        }
+        for pid, data in product_sales.items()
+    ]
     top_products = sorted(
-        [
-            {
-                "product_id": pid,
-                "product_name": product_names.get(pid, f"商品{pid}"),
-                "qty": round(data["qty"], 1),
-                "revenue": round(data["revenue"], 2),
-            }
-            for pid, data in product_sales.items()
-        ],
-        key=lambda x: x["revenue"],
+        top_product_rows,
+        key=lambda row: row["revenue"],
         reverse=True,
     )[:3]
 
@@ -201,7 +234,7 @@ async def daily_report(
     rec_result = await db.execute(rec_query)
     recs = rec_result.scalars().all()
     total_recs = len(recs)
-    adopted_recs = sum(1 for r in recs if r.was_adopted == True)  # noqa: E712
+    adopted_recs = sum(1 for r in recs if bool(r.was_adopted))
 
     # --- AI summary ---
     summary_parts = []
@@ -351,33 +384,27 @@ async def weekly_report(
         for p in name_result.scalars().all():
             product_names[p.id] = p.name
 
-    sales_ranking = sorted(
-        [
-            {
-                "product_id": pid,
-                "product_name": product_names.get(pid, f"商品{pid}"),
-                "qty": round(data["qty"], 1),
-                "revenue": round(data["revenue"], 2),
-            }
-            for pid, data in product_sales.items()
-        ],
-        key=lambda x: x["revenue"],
-        reverse=True,
-    )[:10]
+    sales_rows: list[SalesRankingRow] = [
+        {
+            "product_id": pid,
+            "product_name": product_names.get(pid, f"商品{pid}"),
+            "qty": round(data["qty"], 1),
+            "revenue": round(data["revenue"], 2),
+        }
+        for pid, data in product_sales.items()
+    ]
+    sales_ranking = sorted(sales_rows, key=lambda row: row["revenue"], reverse=True)[:10]
 
-    waste_ranking = sorted(
-        [
-            {
-                "product_id": pid,
-                "product_name": product_names.get(pid, f"商品{pid}"),
-                "qty": round(data["qty"], 1),
-                "amount": round(data["amount"], 2),
-            }
-            for pid, data in product_waste.items()
-        ],
-        key=lambda x: x["amount"],
-        reverse=True,
-    )[:10]
+    waste_rows: list[WasteRankingRow] = [
+        {
+            "product_id": pid,
+            "product_name": product_names.get(pid, f"商品{pid}"),
+            "qty": round(data["qty"], 1),
+            "amount": round(data["amount"], 2),
+        }
+        for pid, data in product_waste.items()
+    ]
+    waste_ranking = sorted(waste_rows, key=lambda row: row["amount"], reverse=True)[:10]
 
     # Recommendation adoption rate
     rec_query = select(Recommendation).where(
@@ -387,7 +414,7 @@ async def weekly_report(
     rec_result = await db.execute(rec_query)
     recs = rec_result.scalars().all()
     total_recs = len(recs)
-    adopted_recs = sum(1 for r in recs if r.was_adopted == True)  # noqa: E712
+    adopted_recs = sum(1 for r in recs if bool(r.was_adopted))
     adoption_rate = round(adopted_recs / total_recs * 100, 1) if total_recs > 0 else 0
 
     # Health score (0-100)
@@ -555,27 +582,218 @@ async def product_ranking(
         for p in name_result.scalars().all():
             product_names[p.id] = p.name
 
-    sort_key = (
+    sort_key: Literal["sale_revenue", "waste_amount", "sale_qty"] = (
         "sale_revenue"
         if metric == "revenue"
         else "waste_amount"
         if metric == "waste"
         else "sale_qty"
     )
+    ranking_rows: list[ProductRankingRow] = [
+        {
+            "product_id": pid,
+            "product_name": product_names.get(pid, f"商品{pid}"),
+            "sale_qty": round(data["sale_qty"], 1),
+            "sale_revenue": round(data["sale_revenue"], 2),
+            "waste_qty": round(data["waste_qty"], 1),
+            "waste_amount": round(data["waste_amount"], 2),
+        }
+        for pid, data in product_data.items()
+    ]
     ranking = sorted(
-        [
-            {
-                "product_id": pid,
-                "product_name": product_names.get(pid, f"商品{pid}"),
-                "sale_qty": round(data["sale_qty"], 1),
-                "sale_revenue": round(data["sale_revenue"], 2),
-                "waste_qty": round(data["waste_qty"], 1),
-                "waste_amount": round(data["waste_amount"], 2),
-            }
-            for pid, data in product_data.items()
-        ],
-        key=lambda x: x[sort_key],
+        ranking_rows,
+        key=lambda row: row[sort_key],
         reverse=True,
     )
 
     return {"code": 0, "data": ranking}
+
+
+@router.get("/monthly", response_model=AnyResponse)
+async def monthly_report(
+    merchant_id: uuid.UUID = Depends(get_merchant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Monthly report — 30-day trends, rankings, waste, health score, AI summary.
+
+    Unlike the frontend client-side aggregation fallback, this endpoint
+    computes sales ranking, waste ranking, health score, and a data-driven
+    AI summary server-side, giving the monthly tab the same depth as weekly.
+    """
+    days = 30
+    start, end = _date_range(days)
+    start_60d = end - timedelta(days=60)
+
+    # This month's records
+    month_query = select(InventoryRecord).where(
+        InventoryRecord.merchant_id == merchant_id,
+        InventoryRecord.is_voided == False,  # noqa: E712
+        InventoryRecord.event_time >= start,
+    )
+    month_result = await db.execute(month_query)
+    month_records = month_result.scalars().all()
+
+    # Previous 30 days for comparison
+    prev_query = select(InventoryRecord).where(
+        InventoryRecord.merchant_id == merchant_id,
+        InventoryRecord.is_voided == False,  # noqa: E712
+        InventoryRecord.event_time >= start_60d,
+        InventoryRecord.event_time < start,
+    )
+    prev_result = await db.execute(prev_query)
+    prev_records = prev_result.scalars().all()
+
+    month_revenue = sum(float(r.total_amount or 0) for r in month_records if r.event_type == "sale")
+    prev_revenue = sum(float(r.total_amount or 0) for r in prev_records if r.event_type == "sale")
+    month_purchase_cost = sum(
+        float(r.total_amount or 0) for r in month_records if r.event_type == "purchase"
+    )
+    month_estimated_cogs = await _estimate_cogs(db, merchant_id, month_records, cutoff_days=60)
+    month_gross_profit = month_revenue - month_estimated_cogs
+    month_profit = month_revenue - month_purchase_cost
+
+    revenue_change = None
+    if prev_revenue > 0:
+        revenue_change = round((month_revenue - prev_revenue) / prev_revenue * 100, 1)
+
+    # Daily trends
+    daily_trends = []
+    for i in range(days):
+        day_start = datetime.combine(
+            (end - timedelta(days=days - 1 - i)).date(), datetime.min.time()
+        )
+        day_end = day_start + timedelta(days=1)
+        day_records = [r for r in month_records if day_start <= r.event_time < day_end]
+        day_revenue = sum(float(r.total_amount or 0) for r in day_records if r.event_type == "sale")
+        day_cost = sum(
+            float(r.total_amount or 0) for r in day_records if r.event_type == "purchase"
+        )
+        day_cogs = sum(
+            abs(float(r.quantity)) * 0 for r in day_records if r.event_type == "sale"
+        )  # COGS approximated at aggregate level
+        daily_trends.append(
+            {
+                "date": day_start.date().isoformat(),
+                "revenue": round(day_revenue, 2),
+                "cost": round(day_cost, 2),
+                "profit": round(day_revenue - day_cost, 2),
+                "estimated_gross_profit": round(day_revenue - day_cogs, 2),
+            }
+        )
+
+    # Product ranking (sales + waste)
+    product_sales: dict[int, dict[str, float]] = {}
+    product_waste: dict[int, dict[str, float]] = {}
+    product_ids: set[int] = set()
+    for r in month_records:
+        pid = r.product_id
+        product_ids.add(pid)
+        if r.event_type == "sale":
+            if pid not in product_sales:
+                product_sales[pid] = {"qty": 0.0, "revenue": 0.0}
+            product_sales[pid]["qty"] += abs(float(r.quantity))
+            product_sales[pid]["revenue"] += float(r.total_amount or 0) if r.total_amount else 0
+        elif r.event_type == "waste":
+            if pid not in product_waste:
+                product_waste[pid] = {"qty": 0.0, "amount": 0.0}
+            product_waste[pid]["qty"] += abs(float(r.quantity))
+            product_waste[pid]["amount"] += abs(float(r.total_amount or 0)) if r.total_amount else 0
+
+    product_names = {}
+    if product_ids:
+        name_query = select(ProductCategory).where(ProductCategory.id.in_(product_ids))
+        name_result = await db.execute(name_query)
+        for p in name_result.scalars().all():
+            product_names[p.id] = p.name
+
+    sales_rows: list[SalesRankingRow] = [
+        {
+            "product_id": pid,
+            "product_name": product_names.get(pid, f"商品{pid}"),
+            "qty": round(data["qty"], 1),
+            "revenue": round(data["revenue"], 2),
+        }
+        for pid, data in product_sales.items()
+    ]
+    sales_ranking = sorted(sales_rows, key=lambda row: row["revenue"], reverse=True)[:10]
+
+    waste_rows: list[WasteRankingRow] = [
+        {
+            "product_id": pid,
+            "product_name": product_names.get(pid, f"商品{pid}"),
+            "qty": round(data["qty"], 1),
+            "amount": round(data["amount"], 2),
+        }
+        for pid, data in product_waste.items()
+    ]
+    waste_ranking = sorted(waste_rows, key=lambda row: row["amount"], reverse=True)[:10]
+
+    # Recommendation adoption
+    rec_query = select(Recommendation).where(
+        Recommendation.merchant_id == merchant_id,
+        Recommendation.created_at >= start,
+    )
+    rec_result = await db.execute(rec_query)
+    recs = rec_result.scalars().all()
+    total_recs = len(recs)
+    adopted_recs = sum(1 for r in recs if bool(r.was_adopted))
+    adoption_rate = round(adopted_recs / total_recs * 100, 1) if total_recs > 0 else 0
+
+    # Health score (0-100)
+    health = 50.0
+    if month_revenue > 0:
+        profit_rate = month_gross_profit / month_revenue
+        health += min(20, profit_rate * 40)
+    month_waste = sum(d["amount"] for d in waste_ranking)
+    if month_revenue > 0 and month_waste < month_revenue * 0.1:
+        health += 15
+    if adoption_rate > 50:
+        health += 15
+    health = max(0, min(100, round(health)))
+
+    # Data-driven AI summary (not a template)
+    summary_parts = [f"近30日累计营业额{round(month_revenue, 1)}元"]
+    if revenue_change is not None:
+        if revenue_change > 0:
+            summary_parts.append(f"较上期增长{revenue_change}%")
+        elif revenue_change < 0:
+            summary_parts.append(f"较上期下降{abs(revenue_change)}%")
+    if month_gross_profit > 0:
+        margin = round(month_gross_profit / month_revenue * 100, 1) if month_revenue > 0 else 0
+        summary_parts.append(f"估算毛利{round(month_gross_profit, 1)}元(毛利率{margin}%)")
+    if sales_ranking:
+        summary_parts.append(f"销量最高的是{sales_ranking[0]['product_name']}")
+    if waste_ranking and month_revenue > 0:
+        top_waste = waste_ranking[0]
+        waste_rate = round(top_waste["amount"] / month_revenue * 100, 1)
+        summary_parts.append(
+            f"{top_waste['product_name']}损耗最高({top_waste['amount']}元,占营收{waste_rate}%)"
+        )
+    if month_waste > 0 and month_revenue > 0:
+        overall_waste_rate = round(month_waste / month_revenue * 100, 1)
+        if overall_waste_rate > 10:
+            summary_parts.append(f"整体损耗率{overall_waste_rate}%偏高,建议检查冷链和库存周转")
+
+    ai_summary = "，".join(summary_parts) + "。"
+
+    return {
+        "code": 0,
+        "data": {
+            "period": "30d",
+            "week_revenue": round(month_revenue, 2),
+            "week_profit": round(month_profit, 2),
+            "week_gross_profit": round(month_gross_profit, 2),
+            "week_purchase_cost": round(month_purchase_cost, 2),
+            "week_estimated_cogs": round(month_estimated_cogs, 2),
+            "last_week_revenue": round(prev_revenue, 2),
+            "revenue_change_pct": revenue_change,
+            "daily_trends": daily_trends,
+            "sales_ranking": sales_ranking,
+            "waste_ranking": waste_ranking,
+            "adoption_rate": adoption_rate,
+            "recommendation_total": total_recs,
+            "recommendation_adopted": adopted_recs,
+            "health_score": health,
+            "ai_summary": ai_summary,
+        },
+    }

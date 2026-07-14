@@ -21,6 +21,7 @@ import argparse
 import sys
 from pathlib import Path
 
+
 # 项目根目录: ml/ 的上一级
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # inference.py 期望的 ONNX 部署路径
@@ -53,7 +54,7 @@ def train(data_yaml: str, epochs: int, imgsz: int, batch: int, device: str):
         print(f"错误: 数据集配置文件不存在: {data_path}")
         sys.exit(1)
 
-    print(f"\n[1/4] 加载预训练模型: yolov8n.pt")
+    print("\n[1/4] 加载预训练模型: yolov8n.pt")
     model = YOLO("yolov8n.pt")
 
     print(f"[2/4] 开始训练: epochs={epochs}, imgsz={imgsz}, batch={batch}")

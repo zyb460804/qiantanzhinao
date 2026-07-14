@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "千摊智脑 API"
     app_version: str = "0.1.0"
+    app_env: str = os.getenv("APP_ENV", "development")
     debug: bool = True
 
     # PostgreSQL (production/Docker) or SQLite (dev fallback)
@@ -51,6 +52,21 @@ class Settings(BaseSettings):
     wechat_appid: str = os.getenv("WECHAT_APPID", "")
     wechat_secret: str = os.getenv("WECHAT_SECRET", "")
 
+    # 微信支付 API v3 交易账单下载。私钥只保存文件路径，不进入数据库或日志。
+    wechat_pay_mch_id: str = os.getenv("WECHAT_PAY_MCH_ID", "")
+    wechat_pay_serial_no: str = os.getenv("WECHAT_PAY_SERIAL_NO", "")
+    wechat_pay_private_key_path: str = os.getenv("WECHAT_PAY_PRIVATE_KEY_PATH", "")
+    wechat_pay_api_base: str = os.getenv(
+        "WECHAT_PAY_API_BASE", "https://api.mch.weixin.qq.com"
+    )
+
+    # 支付宝开放平台账单下载。
+    alipay_app_id: str = os.getenv("ALIPAY_APP_ID", "")
+    alipay_private_key_path: str = os.getenv("ALIPAY_PRIVATE_KEY_PATH", "")
+    alipay_gateway: str = os.getenv(
+        "ALIPAY_GATEWAY", "https://openapi.alipay.com/gateway.do"
+    )
+
     # ------------------------------------------------------------------
     # JWT（P0-1 鉴权）：身份只来自 token，绝不来自请求体
     # ------------------------------------------------------------------
@@ -59,6 +75,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))  # 默认 7 天
 
+    # 管理后台使用独立短会话，并通过 HttpOnly Cookie 交付给浏览器。
+    admin_jwt_expire_minutes: int = int(os.getenv("ADMIN_JWT_EXPIRE_MINUTES", "30"))
+    admin_cookie_name: str = os.getenv("ADMIN_COOKIE_NAME", "admin_session")
+
     # 鉴权回退开关（仅 dev/测试用）。
     # 为 True 时 get_current_merchant 允许从 query/header 取 merchant_id（过渡兼容）。
     # 生产环境必须为 False —— 身份只能来自 token，否则多租户隔离形同虚设。
@@ -66,6 +86,41 @@ class Settings(BaseSettings):
 
     # CORS：逗号分隔的白名单；"*" 仅允许本地 dev，生产必须收紧
     cors_origins: str = os.getenv("CORS_ORIGINS", "*")
+
+    # ------------------------------------------------------------------
+    # 视觉识别模型（ONNX 推理）
+    # ------------------------------------------------------------------
+    vision_model_path: str = os.getenv("VISION_MODEL_PATH", "")
+    vision_model_device: str = os.getenv("VISION_MODEL_DEVICE", "cpu")
+    vision_confidence_threshold: float = float(
+        os.getenv("VISION_CONFIDENCE_THRESHOLD", "0.5")
+    )
+    vision_strict_mode: bool = (
+        os.getenv("VISION_STRICT_MODE", "false").lower() == "true"
+    )
+
+    # ------------------------------------------------------------------
+    # Sentry error tracking
+    # ------------------------------------------------------------------
+    sentry_dsn: str = os.getenv("SENTRY_DSN", "")
+    sentry_environment: str = os.getenv("SENTRY_ENVIRONMENT", "")
+    sentry_traces_sample_rate: float = float(
+        os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")
+    )
+
+    # ------------------------------------------------------------------
+    # Audit log archiving
+    # ------------------------------------------------------------------
+    audit_archive_days: int = int(os.getenv("AUDIT_ARCHIVE_DAYS", "90"))
+    audit_archive_enabled: bool = (
+        os.getenv("AUDIT_ARCHIVE_ENABLED", "true").lower() == "true"
+    )
+
+    # ------------------------------------------------------------------
+    # Backup
+    # ------------------------------------------------------------------
+    backup_dir: str = os.getenv("BACKUP_DIR", "./backups")
+    backup_retention_daily: int = int(os.getenv("BACKUP_RETENTION_DAILY", "7"))
 
     model_config = SettingsConfigDict(
         env_file=".env",

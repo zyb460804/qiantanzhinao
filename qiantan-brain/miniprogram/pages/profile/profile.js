@@ -32,6 +32,7 @@ Page({
       { page: 'ops', name: '经营管理', glyph: '管', tone: 'corn' },
       { page: 'devices', name: '设备管理', glyph: '设', tone: 'blue' },
       { page: 'finance', name: '财务管理', glyph: '财', tone: 'green' },
+      { page: 'supplier', name: '供应商档案', glyph: '供', tone: 'corn' },
     ],
 
     // ⑤ 摊位设置
@@ -44,6 +45,9 @@ Page({
     hoursOptions: ['早市 (6:00-12:00)', '午市 (12:00-18:00)', '晚市 (18:00-24:00)', '全天'],
     hoursValues: ['morning', 'noon', 'evening', 'all'],
     hoursIndex: 0,
+    cityOptions: ['上海', '北京', '广州', '深圳', '杭州', '南京', '成都', '武汉', '重庆', '西安'],
+    cityIndex: 0,
+    merchantCity: '上海',
 
     // ⑦ 关于
     appVersion: '1.0.0',
@@ -181,7 +185,34 @@ Page({
       voiceDialect: storedDialect, riskProfile: storedRisk,
       businessHours: storedHours, notificationEnabled: storedNotify,
       dialectIndex: di >= 0 ? di : 0, hoursIndex: hi >= 0 ? hi : 0,
+      merchantCity: app.getCity(),
+      cityIndex: Math.max(0, this.data.cityOptions.indexOf(app.getCity())),
     });
+    // 从后端同步偏好设置（跨设备同步）
+    var self = this;
+    app.request({ url: '/auth/me/preferences', auth: true }).then(function (prefs) {
+      if (!prefs) return;
+      var dialect = prefs.voice_dialect || storedDialect;
+      var risk = prefs.risk_profile || storedRisk;
+      var hours = prefs.business_hours || storedHours;
+      var notify = prefs.notification_enabled !== undefined ? prefs.notification_enabled : storedNotify;
+      var city = prefs.merchant_city || app.getCity();
+      var di2 = self.data.dialectValues.indexOf(dialect);
+      var hi2 = self.data.hoursValues.indexOf(hours);
+      var ci2 = Math.max(0, self.data.cityOptions.indexOf(city));
+      self.setData({
+        voiceDialect: dialect, riskProfile: risk,
+        businessHours: hours, notificationEnabled: notify,
+        dialectIndex: di2 >= 0 ? di2 : 0, hoursIndex: hi2 >= 0 ? hi2 : 0,
+        merchantCity: city, cityIndex: ci2,
+      });
+      // 同步到本地缓存
+      wx.setStorageSync('voiceDialect', dialect);
+      wx.setStorageSync('riskProfile', risk);
+      wx.setStorageSync('businessHours', hours);
+      wx.setStorageSync('notificationEnabled', notify);
+      app.setCity(city);
+    }).catch(function () { /* 后端同步失败时使用本地设置，静默处理 */ });
   },
 
   onNameChange: function (e) { this.setData({ merchantName: e.detail.value }); },
@@ -194,6 +225,10 @@ Page({
     var index = Number(e.detail.value) || 0;
     this.setData({ hoursIndex: index, businessHours: this.data.hoursValues[index] });
   },
+  onCityChange: function (e) {
+    var index = Number(e.detail.value) || 0;
+    this.setData({ cityIndex: index, merchantCity: this.data.cityOptions[index] });
+  },
   onNotificationToggle: function () {
     this.setData({ notificationEnabled: !this.data.notificationEnabled });
   },
@@ -204,7 +239,19 @@ Page({
     wx.setStorageSync('riskProfile', this.data.riskProfile);
     wx.setStorageSync('businessHours', this.data.businessHours);
     wx.setStorageSync('notificationEnabled', this.data.notificationEnabled);
+    app.setCity(this.data.merchantCity);
     app.globalData.merchantName = this.data.merchantName;
+    // 推送偏好到后端（跨设备同步）
+    app.request({
+      url: '/auth/me/preferences', method: 'PUT',
+      data: {
+        voice_dialect: this.data.voiceDialect,
+        risk_profile: this.data.riskProfile,
+        business_hours: this.data.businessHours,
+        notification_enabled: this.data.notificationEnabled,
+        merchant_city: this.data.merchantCity,
+      },
+    }).then(function () {}).catch(function () {});
     wx.showToast({ title: '偏好已保存', icon: 'success' });
   },
 

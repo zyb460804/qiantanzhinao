@@ -1,0 +1,318 @@
+<!-- 供应商管理 — 档案·评分·关联商品·黑名单 -->
+<wxs src="/utils/format.wxs" module="fmt" />
+<view class="page-shell supplier-page {{skinClass}}">
+
+  <!-- Hero -->
+  <view class="page-hero supplier-hero">
+    <text class="eyebrow">SUPPLIER · 供应商档案</text>
+    <text class="hero-title">供应商管理</text>
+    <text class="hero-desc">管理供应商档案、质量评分与商品关联</text>
+  </view>
+
+  <!-- 统计条 -->
+  <view class="supplier-stats">
+    <view class="supplier-stat">
+      <text class="stat-num">{{totalCount}}</text>
+      <text class="stat-label">供应商</text>
+    </view>
+    <view class="stat-divider"></view>
+    <view class="supplier-stat">
+      <text class="stat-num {{avgScore >= 80 ? 'ok' : avgScore >= 60 ? 'warn' : ''}}">{{avgScore || '—'}}</text>
+      <text class="stat-label">均分</text>
+    </view>
+    <view class="stat-divider"></view>
+    <view class="supplier-stat">
+      <text class="stat-num {{blacklistedCount > 0 ? 'bad' : ''}}">{{blacklistedCount}}</text>
+      <text class="stat-label">黑名单</text>
+    </view>
+  </view>
+
+  <!-- 搜索栏 -->
+  <view class="search-bar">
+    <view class="search-input-wrap">
+      <text class="search-icon">🔍</text>
+      <input class="search-input" value="{{searchKeyword}}" bindinput="onSearchInput" placeholder="搜索供应商名称、联系人、品类…" placeholder-class="search-placeholder" />
+      <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="onSearchClear">✕</text>
+    </view>
+    <view class="search-add-btn" bindtap="openForm">
+      <text>+ 新增</text>
+    </view>
+  </view>
+
+  <!-- Loading -->
+  <view wx:if="{{loading}}" class="supplier-skeleton">
+    <view wx:for="{{[1,2,3]}}" wx:key="*this" class="skel-card">
+      <view class="sk-line w60"></view>
+      <view class="sk-line w40"></view>
+      <view class="sk-line w80"></view>
+    </view>
+  </view>
+
+  <!-- Empty -->
+  <view wx:elif="{{suppliers.length === 0}}" class="empty-state surface">
+    <text class="empty-icon">📋</text>
+    <text class="empty-title" wx:if="{{!searchKeyword}}">暂无供应商档案</text>
+    <text class="empty-title" wx:else>未找到匹配的供应商</text>
+    <text class="empty-desc" wx:if="{{!searchKeyword}}">添加供应商档案，记录联系方式、供货品类与质量评分</text>
+    <button wx:if="{{!searchKeyword}}" class="btn-primary empty-action" bindtap="openForm">添加供应商</button>
+  </view>
+
+  <!-- 供应商列表 -->
+  <view wx:else class="supplier-list">
+    <view wx:for="{{suppliers}}" wx:key="supplier_id" class="supplier-card {{item.is_blacklisted ? 'blacklisted' : ''}} {{expandedId === item.supplier_id ? 'expanded' : ''}}">
+
+      <!-- 卡片头部（始终可见） -->
+      <view class="sup-card-head" data-id="{{item.supplier_id}}" bindtap="toggleExpand">
+        <view class="sup-card-left">
+          <view class="sup-avatar {{item._scoreColor}}">{{item.name.slice(0, 1)}}</view>
+          <view class="sup-card-info">
+            <view class="sup-card-title-row">
+              <text class="sup-name">{{item.name}}</text>
+              <text wx:if="{{item.is_blacklisted}}" class="tag tag-tomato">黑名单</text>
+              <text wx:if="{{item.composite_score != null}}" class="sup-score-chip {{item._scoreColor}}">{{fmt.fixed(item.composite_score, 1)}}分</text>
+            </view>
+            <view class="sup-card-meta">
+              <text wx:if="{{item.business_category}}">{{item.business_category}}</text>
+              <text wx:if="{{item.contact}}">{{item.contact}}</text>
+              <text wx:if="{{!item.business_category && !item.contact}}" class="muted">点击展开详情</text>
+            </view>
+          </view>
+        </view>
+        <view class="sup-card-right">
+          <text class="sup-balance {{item.current_balance > 0 ? 'warn' : ''}}">{{item.current_balance > 0 ? '欠¥' + fmt.fixed(item.current_balance, 0) : '已结清'}}</text>
+          <text class="expand-arrow {{expandedId === item.supplier_id ? 'open' : ''}}">›</text>
+        </view>
+      </view>
+
+      <!-- 展开详情 -->
+      <view wx:if="{{expandedId === item.supplier_id}}" class="sup-detail">
+        <!-- 基本信息 -->
+        <view class="detail-section">
+          <text class="detail-section-title">基本信息</text>
+          <view class="detail-grid">
+            <view class="detail-item">
+              <text class="detail-label">联系人</text>
+              <text class="detail-value">{{item.contact || '未填写'}}</text>
+            </view>
+            <view class="detail-item">
+              <text class="detail-label">地址</text>
+              <text class="detail-value">{{item.address || '未填写'}}</text>
+            </view>
+            <view class="detail-item">
+              <text class="detail-label">经营品类</text>
+              <text class="detail-value">{{item.business_category || '未填写'}}</text>
+            </view>
+            <view class="detail-item">
+              <text class="detail-label">最小起订量</text>
+              <text class="detail-value">{{item.min_order_qty ? fmt.fixed(item.min_order_qty, 1) : '无限制'}}</text>
+            </view>
+            <view class="detail-item">
+              <text class="detail-label">供货周期</text>
+              <text class="detail-value">{{item._leadTimeDisplay || '未设置'}}</text>
+            </view>
+            <view class="detail-item">
+              <text class="detail-label">默认账期</text>
+              <text class="detail-value">{{item._creditDisplay}}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 质量评分 -->
+        <view class="detail-section" wx:if="{{item.composite_score != null}}">
+          <text class="detail-section-title">质量评分</text>
+          <view class="score-bar-wrap">
+            <view class="score-bar">
+              <view class="score-fill {{item._scoreColor}}" style="width: {{item.composite_score}}%;"></view>
+            </view>
+            <text class="score-bar-label">{{item._scoreLabel}} · {{fmt.fixed(item.composite_score, 1)}}分</text>
+          </view>
+          <view class="detail-grid">
+            <view class="detail-item">
+              <text class="detail-label">缺斤率</text>
+              <text class="detail-value">{{expandedDetail.shortage_rate != null ? fmt.fixed(expandedDetail.shortage_rate, 1) + '%' : '—'}}</text>
+            </view>
+            <view class="detail-item">
+              <text class="detail-label">退货率</text>
+              <text class="detail-value">{{expandedDetail.return_rate != null ? fmt.fixed(expandedDetail.return_rate, 1) + '%' : '—'}}</text>
+            </view>
+            <view class="detail-item">
+              <text class="detail-label">质量问题率</text>
+              <text class="detail-value">{{expandedDetail.quality_issue_rate != null ? fmt.fixed(expandedDetail.quality_issue_rate, 1) + '%' : '—'}}</text>
+            </view>
+            <view class="detail-item">
+              <text class="detail-label">准时率</text>
+              <text class="detail-value">{{expandedDetail.on_time_rate != null ? fmt.fixed(expandedDetail.on_time_rate, 1) + '%' : '—'}}</text>
+            </view>
+          </view>
+          <button class="btn-sm btn-secondary" data-id="{{item.supplier_id}}" bindtap="recalculateScore" loading="{{scoringId === item.supplier_id}}">
+            重新计算评分
+          </button>
+        </view>
+
+        <view class="detail-section" wx:elif="{{!item.is_blacklisted}}">
+          <text class="detail-section-title">质量评分</text>
+          <text class="muted" style="font-size:24rpx;">暂无采购记录，无法评分</text>
+          <button class="btn-sm btn-secondary" style="margin-top:12rpx;" data-id="{{item.supplier_id}}" bindtap="recalculateScore" loading="{{scoringId === item.supplier_id}}">
+            尝试计算评分
+          </button>
+        </view>
+
+        <!-- 关联商品 -->
+        <view class="detail-section">
+          <view class="detail-section-head">
+            <text class="detail-section-title">关联商品</text>
+            <text class="section-link" data-id="{{item.supplier_id}}" bindtap="openProdForm">+ 关联</text>
+          </view>
+          <view wx:if="{{expandedProducts.length === 0}}" class="detail-empty">
+            <text>暂无关联商品</text>
+          </view>
+          <view wx:else class="prod-list">
+            <view wx:for="{{expandedProducts}}" wx:key="id" class="prod-item">
+              <view class="prod-info">
+                <text class="prod-sku">{{item.sku_name || item.sku_id}}</text>
+                <text class="prod-price" wx:if="{{item.last_price}}">¥{{fmt.fixed(item.last_price, 2)}}</text>
+                <text class="prod-moq" wx:if="{{item.min_order_qty}}">起订{{fmt.fixed(item.min_order_qty, 1)}}</text>
+              </view>
+              <text class="prod-remove" data-id="{{item.id}}" bindtap="removeProd">解除</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 操作按钮 -->
+        <view class="detail-actions">
+          <button class="btn-sm btn-secondary" data-id="{{item.supplier_id}}" bindtap="openForm">编辑</button>
+          <button class="btn-sm btn-primary btn-sm" data-id="{{item.supplier_id}}" bindtap="goPurchase">去采购</button>
+          <button class="btn-sm btn-secondary" data-id="{{item.supplier_id}}" bindtap="viewStatement">对账单</button>
+          <button class="btn-sm {{item.is_blacklisted ? 'btn-secondary' : 'btn-ghost'}}" data-id="{{item.supplier_id}}" bindtap="toggleBlacklist">
+            {{item.is_blacklisted ? '移出黑名单' : '加入黑名单'}}
+          </button>
+          <button class="btn-sm btn-ghost" style="color:var(--tomato);" data-id="{{item.supplier_id}}" data-name="{{item.name}}" bindtap="deactivateSupplier">停用</button>
+        </view>
+      </view>
+    </view>
+
+    <!-- 加载更多 -->
+    <view wx:if="{{suppliers.length < supplierTotal}}" class="load-more" bindtap="loadMore">
+      <text wx:if="{{!loadingMore}}">加载更多（{{suppliers.length}}/{{supplierTotal}}）</text>
+      <text wx:else>加载中…</text>
+    </view>
+  </view>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- 新增/编辑供应商表单弹窗 -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <view wx:if="{{showForm}}" class="picker-mask" bindtap="closeForm">
+    <view class="picker-sheet form-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">{{editId ? '编辑供应商' : '新增供应商'}}</text>
+
+      <scroll-view class="form-scroll" scroll-y="true">
+        <!-- 名称 -->
+        <view class="form-field">
+          <text class="form-label">名称 <text class="required">*</text></text>
+          <input class="form-input {{formErrors.name ? 'has-error' : ''}}" value="{{form.name}}" data-field="name" bindinput="onFormField" placeholder="供应商名称" placeholder-class="form-placeholder" />
+          <text wx:if="{{formErrors.name}}" class="form-error">{{formErrors.name}}</text>
+        </view>
+
+        <!-- 联系人 -->
+        <view class="form-field">
+          <text class="form-label">联系人</text>
+          <input class="form-input" value="{{form.contact}}" data-field="contact" bindinput="onFormField" placeholder="联系人姓名/电话" placeholder-class="form-placeholder" />
+        </view>
+
+        <!-- 地址 -->
+        <view class="form-field">
+          <text class="form-label">地址</text>
+          <input class="form-input" value="{{form.address}}" data-field="address" bindinput="onFormField" placeholder="供应商地址" placeholder-class="form-placeholder" />
+        </view>
+
+        <!-- 经营品类 -->
+        <view class="form-field">
+          <text class="form-label">经营品类</text>
+          <input class="form-input" value="{{form.business_category}}" data-field="business_category" bindinput="onFormField" placeholder="如：蔬菜、水果、肉类" placeholder-class="form-placeholder" />
+        </view>
+
+        <!-- 三列数字 -->
+        <view class="form-row-3">
+          <view class="form-field flex-1">
+            <text class="form-label">起订量</text>
+            <input class="form-input" type="digit" value="{{form.min_order_qty}}" data-field="min_order_qty" bindinput="onFormField" placeholder="0" placeholder-class="form-placeholder" />
+            <text wx:if="{{formErrors.min_order_qty}}" class="form-error">{{formErrors.min_order_qty}}</text>
+          </view>
+          <view class="form-field flex-1">
+            <text class="form-label">供货周期(h)</text>
+            <input class="form-input" type="number" value="{{form.lead_time_hours}}" data-field="lead_time_hours" bindinput="onFormField" placeholder="小时" placeholder-class="form-placeholder" />
+            <text wx:if="{{formErrors.lead_time_hours}}" class="form-error">{{formErrors.lead_time_hours}}</text>
+          </view>
+          <view class="form-field flex-1">
+            <text class="form-label">账期(天)</text>
+            <input class="form-input" type="number" value="{{form.default_credit_days}}" data-field="default_credit_days" bindinput="onFormField" placeholder="0" placeholder-class="form-placeholder" />
+            <text wx:if="{{formErrors.default_credit_days}}" class="form-error">{{formErrors.default_credit_days}}</text>
+          </view>
+        </view>
+      </scroll-view>
+
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeForm">取消</button>
+        <button class="btn-primary" bindtap="saveSupplier" loading="{{submitting}}">{{editId ? '保存' : '创建'}}</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- 黑名单确认弹窗 -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <view wx:if="{{showBlacklistConfirm}}" class="picker-mask" bindtap="cancelBlacklist">
+    <view class="picker-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">{{blacklistTarget.is_blacklisted ? '移出黑名单' : '加入黑名单'}}</text>
+      <text class="confirm-text">
+        {{blacklistTarget.is_blacklisted ? '确认将「' + blacklistTarget.name + '」移出黑名单？移出后可正常采购。' : '确认将「' + blacklistTarget.name + '」加入黑名单？加入后该供应商将不会出现在采购选择列表中。'}}
+      </text>
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="cancelBlacklist">取消</button>
+        <button class="btn-tomato" bindtap="confirmBlacklist">确认</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- 关联商品弹窗 -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <view wx:if="{{showProdForm}}" class="picker-mask" bindtap="closeProdForm">
+    <view class="picker-sheet form-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">关联商品</text>
+
+      <view class="form-field">
+        <text class="form-label">商品搜索</text>
+        <input class="form-input" value="{{skuSearchKeyword}}" bindinput="onSkuSearch" placeholder="搜索商品名称…" placeholder-class="form-placeholder" />
+      </view>
+
+      <!-- SKU列表 -->
+      <scroll-view class="sku-picker-list" scroll-y="true">
+        <view wx:if="{{filteredSkus.length === 0}}" class="detail-empty">
+          <text>{{allSkus.length === 0 ? '暂无商品，请先在商品管理中创建SKU' : '未找到匹配商品'}}</text>
+        </view>
+        <view wx:for="{{filteredSkus}}" wx:key="sku_id" class="sku-picker-item {{prodForm.sku_id === item.sku_id ? 'active' : ''}}" data-id="{{item.sku_id}}" data-name="{{item.name}}" bindtap="pickSku">
+          <text class="sku-picker-name">{{item.name}}</text>
+          <text wx:if="{{prodForm.sku_id === item.sku_id}}" class="sku-picker-check">✓</text>
+        </view>
+      </scroll-view>
+
+      <view class="form-row-2">
+        <view class="form-field flex-1">
+          <text class="form-label">报价</text>
+          <input class="form-input" type="digit" value="{{prodForm.last_price}}" data-field="last_price" bindinput="onProdField" placeholder="¥0.00" placeholder-class="form-placeholder" />
+        </view>
+        <view class="form-field flex-1">
+          <text class="form-label">起订量</text>
+          <input class="form-input" type="digit" value="{{prodForm.min_order_qty}}" data-field="min_order_qty" bindinput="onProdField" placeholder="0" placeholder-class="form-placeholder" />
+        </view>
+      </view>
+
+      <view class="picker-actions">
+        <button class="btn-secondary" bindtap="closeProdForm">取消</button>
+        <button class="btn-primary" bindtap="saveProd" disabled="{{!prodForm.sku_id}}">关联</button>
+      </view>
+    </view>
+  </view>
+
+</view>

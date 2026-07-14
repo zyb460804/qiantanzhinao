@@ -77,6 +77,7 @@ class SaleOrderItem(Base):
     quantity: Mapped[Decimal] = mapped_column(sa.Numeric(10, 2), nullable=False)
     unit: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="斤")
     unit_price: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))
+    unit_cost: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))
     total_amount: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 2))
     # --- 退款追踪（P0: POS 退款/退货）---
     refund_quantity: Mapped[Decimal] = mapped_column(sa.Numeric(10, 2), default=Decimal("0"))

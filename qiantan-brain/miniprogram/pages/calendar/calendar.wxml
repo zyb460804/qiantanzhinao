@@ -16,11 +16,18 @@
 
   <block wx:else>
   <view class="page-hero cal-hero">
-    <text class="eyebrow">SEASONAL CALENDAR · 时令经营</text>
-    <text class="hero-title">今天卖什么，看节气</text>
-    <text class="hero-desc">把节气、星期和天气，变成能直接做的备货与营销。</text>
-    <view class="today-pill"><icon name="calendar" size="30" color="var(--corn)" /><text>{{solarTerm}} · {{weekdayText}}</text></view>
-    <button class="btn-outline sm" style="margin-top:12rpx" bindtap="addToPurchase">将当令商品加入采购清单</button>
+    <view class="cal-hero-head">
+      <view class="cal-hero-copy">
+        <text class="eyebrow">SEASONAL CALENDAR · 时令经营</text>
+        <text class="hero-title">今天卖什么，看节气</text>
+        <text class="hero-desc">把节气、星期和天气，变成能直接执行的备货策略。</text>
+      </view>
+      <view class="term-orb"><text class="term-orb-name">{{solarTerm}}</text><text class="term-orb-day">{{weekdayText}}</text></view>
+    </view>
+    <view class="calendar-signals">
+      <text>{{termAdvice.length}} 条经营建议</text><text>·</text><text>{{plans.length}} 天天气策略</text>
+    </view>
+    <button class="season-purchase-btn" bindtap="addToPurchase">加入当令商品到采购清单 <text>›</text></button>
   </view>
 
   <!-- 星期条 -->

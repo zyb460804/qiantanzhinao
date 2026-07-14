@@ -378,6 +378,7 @@ async def confirm_voice(
             quantity=Decimal(str(abs(qty))),
             purchase_time=record.event_time,
             sku_id=sku_id,
+            unit_cost=unit_cost,
         )
     elif event_type in ("sale", "waste"):
         consumed_from_batches = await consume_batches_fifo(
@@ -460,7 +461,7 @@ async def void_voice_record(
 
     record_query = select(InventoryRecord).where(
         InventoryRecord.voice_log_id == log.id,
-        InventoryRecord.is_voided == False,  # noqa: E712
+        InventoryRecord.is_voided.is_(False),
     )
     record_result = await db.execute(record_query)
     record = record_result.scalar_one_or_none()
@@ -537,7 +538,7 @@ async def edit_confirmed_record(
 
     record_query = select(InventoryRecord).where(
         InventoryRecord.voice_log_id == log.id,
-        InventoryRecord.is_voided == False,  # noqa: E712
+        InventoryRecord.is_voided.is_(False),
     )
     record_result = await db.execute(record_query)
     old_record = record_result.scalar_one_or_none()
@@ -547,7 +548,7 @@ async def edit_confirmed_record(
     parsed = log.parsed_event or {}
     event_type = old_record.event_type
     new_product_name = body.product or parsed.get("product", "未知商品")
-    new_qty = body.quantity if body.quantity is not None else abs(old_record.quantity)
+    new_qty = Decimal(str(body.quantity if body.quantity is not None else abs(old_record.quantity)))
     new_unit = body.unit or old_record.unit
     new_unit_cost = body.unit_cost if body.unit_cost is not None else old_record.unit_cost
     new_unit_price = body.unit_price if body.unit_price is not None else old_record.unit_price
@@ -621,6 +622,7 @@ async def edit_confirmed_record(
             quantity=Decimal(str(abs(new_qty))),
             purchase_time=corrected_record.event_time,
             sku_id=new_sku_id,
+            unit_cost=unit_cost,
         )
     elif event_type in ("sale", "waste"):
         consumed = await consume_batches_fifo(

@@ -29,8 +29,10 @@ router = APIRouter(prefix="/api/v1/staff", tags=["staff"])
 
 class PermissionContext:
     """权限上下文 — 记录当前操作者身份和权限检查结果."""
-    def __init__(self, merchant_id: uuid.UUID, staff_id: uuid.UUID | None,
-                 role: str, permissions: set[str]):
+
+    def __init__(
+        self, merchant_id: uuid.UUID, staff_id: uuid.UUID | None, role: str, permissions: set[str]
+    ):
         self.merchant_id = merchant_id
         self.staff_id = staff_id
         self.role = role
@@ -44,6 +46,7 @@ def require_permission(permission: str):
     当前通过 X-Staff-Id header 区分员工（过渡方案），
     未来应改为员工 JWT token。
     """
+
     async def _check(
         request: Request,
         merchant: Merchant = Depends(get_current_merchant),
@@ -70,9 +73,12 @@ def require_permission(permission: str):
                 detail=f"角色 {role} 无权限执行 {permission}",
             )
         return PermissionContext(
-            merchant_id=merchant.id, staff_id=staff_id,
-            role=role, permissions=perms,
+            merchant_id=merchant.id,
+            staff_id=staff_id,
+            role=role,
+            permissions=perms,
         )
+
     return _check
 
 
@@ -84,10 +90,12 @@ def require_permission(permission: str):
 @router.get("/roles", response_model=AnyResponse)
 async def list_roles():
     """Return available roles and their permissions."""
-    return {"code": 0, "data": [
-        {"role": name, "permissions": sorted(perms)}
-        for name, perms in ROLE_PERMISSIONS.items()
-    ]}
+    return {
+        "code": 0,
+        "data": [
+            {"role": name, "permissions": sorted(perms)} for name, perms in ROLE_PERMISSIONS.items()
+        ],
+    }
 
 
 @router.get("", response_model=AnyResponse)
@@ -95,14 +103,30 @@ async def list_staff(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = (await db.execute(
-        select(StaffMember).where(StaffMember.merchant_id == merchant.id, StaffMember.is_active == True)  # noqa: E712
-    )).scalars().all()
-    return {"code": 0, "data": [
-        {"staff_id": str(s.id), "name": s.name, "phone": s.phone, "role": s.role,
-         "permissions": sorted(ROLE_PERMISSIONS.get(s.role, set()))}
-        for s in rows
-    ]}
+    rows = (
+        (
+            await db.execute(
+                select(StaffMember).where(
+                    StaffMember.merchant_id == merchant.id, StaffMember.is_active.is_(True)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "code": 0,
+        "data": [
+            {
+                "staff_id": str(s.id),
+                "name": s.name,
+                "phone": s.phone,
+                "role": s.role,
+                "permissions": sorted(ROLE_PERMISSIONS.get(s.role, set())),
+            }
+            for s in rows
+        ],
+    }
 
 
 @router.post("", response_model=AnyResponse)
@@ -113,11 +137,18 @@ async def create_staff(
 ):
     name = (body.get("name") or "").strip()
     role = body.get("role", "cashier")
-    if not name: raise HTTPException(status_code=400, detail="姓名不能为空")
-    if role not in ROLE_PERMISSIONS: raise HTTPException(status_code=400, detail=f"无效角色: {role}")
+    if not name:
+        raise HTTPException(status_code=400, detail="姓名不能为空")
+    if role not in ROLE_PERMISSIONS:
+        raise HTTPException(status_code=400, detail=f"无效角色: {role}")
 
-    s = StaffMember(merchant_id=merchant.id, name=name, phone=body.get("phone"),
-                    role=role, pin_code=body.get("pin_code"))
+    s = StaffMember(
+        merchant_id=merchant.id,
+        name=name,
+        phone=body.get("phone"),
+        role=role,
+        pin_code=body.get("pin_code"),
+    )
     db.add(s)
     await db.commit()
     await db.refresh(s)
@@ -126,18 +157,23 @@ async def create_staff(
 
 @router.put("/{staff_id}", response_model=AnyResponse)
 async def update_staff(
-    staff_id: uuid.UUID, body: dict,
+    staff_id: uuid.UUID,
+    body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
     s = await db.get(StaffMember, staff_id)
-    if not s or s.merchant_id != merchant.id: raise HTTPException(status_code=404, detail="员工不存在")
+    if not s or s.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="员工不存在")
     for f in ("name", "phone", "pin_code"):
-        if f in body: setattr(s, f, body[f])
+        if f in body:
+            setattr(s, f, body[f])
     if "role" in body:
-        if body["role"] not in ROLE_PERMISSIONS: raise HTTPException(status_code=400, detail="无效角色")
+        if body["role"] not in ROLE_PERMISSIONS:
+            raise HTTPException(status_code=400, detail="无效角色")
         s.role = body["role"]
-    if "is_active" in body: s.is_active = bool(body["is_active"])
+    if "is_active" in body:
+        s.is_active = bool(body["is_active"])
     await db.commit()
     return {"code": 0, "data": {"staff_id": str(s.id), "name": s.name, "role": s.role}}
 
@@ -149,7 +185,8 @@ async def deactivate_staff(
     db: AsyncSession = Depends(get_db),
 ):
     s = await db.get(StaffMember, staff_id)
-    if not s or s.merchant_id != merchant.id: raise HTTPException(status_code=404, detail="员工不存在")
+    if not s or s.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="员工不存在")
     s.is_active = False
     await db.commit()
     return {"code": 0, "message": f"已停用 {s.name}"}

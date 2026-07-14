@@ -133,14 +133,14 @@
     </view>
 
     <view class="btn-primary big-action-btn {{submitting ? 'btn-disabled' : ''}}" bindtap="confirmStockIn">
-      {{submitting ? '提交中…' : '确认入库'}}
+      {{submitting ? '提交中…' : (event_type === 'purchase' ? '确认入库' : '确认出库')}}
     </view>
   </block>
 
   <!-- 入库成功 -->
   <view class="card success-card" wx:if="{{submitted}}">
     <view class="success-circle"></view>
-    <text class="success-title">入库成功</text>
+    <text class="success-title">{{submitResult.event_type === 'purchase' ? '入库成功' : '出库成功'}}</text>
     <text class="success-desc">{{submitResult.product}} · {{submitResult.quantity}}{{submitResult.unit}}</text>
     <text class="success-meta" wx:if="{{submitResult.event_type}}">{{submitResult.event_type === 'purchase' ? '采购入库' : '销售出库'}}</text>
     <button class="btn-outline sm" style="margin-top:16rpx" bindtap="retakePhoto">继续识别下一件</button>

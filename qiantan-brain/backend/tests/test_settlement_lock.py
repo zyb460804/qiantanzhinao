@@ -7,8 +7,8 @@ with HTTP 409. This prevents back-dating fraud and keeps the books consistent.
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select

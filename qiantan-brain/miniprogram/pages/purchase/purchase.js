@@ -2,8 +2,11 @@
 var app = getApp();
 
 function money(v) { return Math.round(Number(v || 0) * 100) / 100; }
+function hasValue(v) { return v !== undefined && v !== null && v !== ''; }
 
 Page({
+  // 阻止弹窗/卡片内部 tap 冒泡到外层关闭区域。
+  stopMaskTap: function () {},
   data: {
     skinClass: '', loading: true, submitting: false,
     listData: null, editingItemId: '',
@@ -21,6 +24,8 @@ Page({
     // 退货
     showReturn: false, returnItemId: '', returnReason: '', returnQty: 0,
     returnSubmitting: false,
+    // 采购历史
+    showHistory: false, historyList: [], historyLoaded: false,
   },
 
   onLoad: function (options) {
@@ -92,8 +97,11 @@ Page({
 
   loadSuppliers: function () {
     var self = this;
-    app.request({ url: '/accounts/supplier-balance' }).then(function (data) {
-      self.setData({ suppliers: (data && data.items) || [] });
+    app.request({ url: '/catalog/suppliers', data: { limit: 200 } }).then(function (data) {
+      var items = (data && data.items) || [];
+      self.setData({ suppliers: items.map(function (s) {
+        return { supplier_id: s.supplier_id, supplier_name: s.name, balance: s.current_balance || 0 };
+      }) });
     }).catch(function () {});
   },
 
@@ -116,10 +124,10 @@ Page({
   _decorateItem: function (item) {
     var recQty = Number(item.recommended_qty) || 0;
     var actQty = Number(item.actual_qty);
-    if (isNaN(actQty) || actQty === 0) actQty = recQty;
+    if (!hasValue(item.actual_qty) || isNaN(actQty)) actQty = recQty;
     var estCost = Number(item.estimated_unit_cost) || 0;
     var actCost = Number(item.actual_unit_cost);
-    if (isNaN(actCost) || actCost === 0) actCost = estCost;
+    if (!hasValue(item.actual_unit_cost) || isNaN(actCost)) actCost = estCost;
     var actualSubtotal = money(actQty * actCost);
 
     var deviation = 0, deviationTone = 'flat';
@@ -174,6 +182,8 @@ Page({
 
     return {
       list_id: data.list_id, status: rawStatus,
+      order_no: data.order_no || '',
+      expected_arrival: data.expected_arrival_date || null,
       list_status_text: statusTexts[rawStatus] || rawStatus,
       list_status_tag: statusTags[rawStatus] || 'tag-amber',
       payment_status: data.payment_status || 'unpaid',
@@ -184,6 +194,7 @@ Page({
       purchased_count: purchasedCount,
       created_at: data.created_at, confirmed_at: data.confirmed_at, accepted_at: data.accepted_at,
       items: items,
+      can_confirm_order: rawStatus === 'draft',
     };
   },
 
@@ -198,64 +209,126 @@ Page({
       .catch(function () { self.setData({ submitting: false }); });
   },
 
+  // ── 确认采购单 (draft → confirmed) ─────────────────────
+
+  confirmOrder: function () {
+    var self = this;
+    if (this.data.submitting || !this.data.listData) return;
+    wx.showModal({
+      title: '确认采购单', content: '确认后将正式生成采购订单，确定吗？',
+      confirmText: '确认下单', cancelText: '再改改',
+      success: function (r) {
+        if (!r.confirm) return;
+        self.setData({ submitting: true });
+        app.request({ url: '/purchase/' + self.data.listData.list_id + '/confirm-order', method: 'POST', data: {} })
+          .then(function (data) {
+            self.setData({ submitting: false });
+            wx.showToast({ title: '采购单已确认', icon: 'success' });
+            self.loadList();
+          }).catch(function () { self.setData({ submitting: false }); });
+      },
+    });
+  },
+
+  // ── 采购历史 ──────────────────────────────────────────
+
+  loadHistory: function () {
+    var self = this;
+    app.request({ url: '/purchase/history', data: { days: 30, limit: 10 } }).then(function (data) {
+      var items = (data || []).map(function (h) {
+        var statusMap = { stored: '已入库', completed: '已完成', cancelled: '已取消', returned: '已退货' };
+        return {
+          list_id: h.list_id,
+          order_no: h.order_no || '',
+          status_text: statusMap[h.status] || h.status,
+          item_count: h.item_count,
+          total_cost: h.total_actual_cost || h.total_estimated_cost || 0,
+          payment_status: h.payment_status,
+          created_at: h.created_at,
+        };
+      });
+      self.setData({ historyList: items, historyLoaded: true });
+    }).catch(function () {});
+  },
+
+  toggleHistory: function () {
+    var show = !this.data.showHistory;
+    this.setData({ showHistory: show });
+    if (show && !this.data.historyLoaded) this.loadHistory();
+  },
+
   // ── 编辑数量与成本 ────────────────────────────────────
 
   startEdit: function (e) { this.setData({ editingItemId: e.currentTarget.dataset.id }); },
 
   editQty: function (e) {
     var itemId = e.currentTarget.dataset.id;
-    var num = parseFloat(e.detail.value) || 0;
+    var num = parseFloat(e.detail.value);
+    if (!isFinite(num) || num < 0) num = 0;
     var list = this.data.listData; if (!list) return;
     var idx = this._findItemIndex(list.items, itemId); if (idx < 0) return;
-    var item = list.items[idx];
-    var s = money(num * item.actual_unit_cost);
-    var dev = 0, tone = 'flat';
-    if (item.recommended_qty > 0) { dev = Math.round((num - item.recommended_qty) / item.recommended_qty * 100); tone = dev > 0 ? 'up' : (dev < 0 ? 'down' : 'flat'); }
-    this.setData({
-      ['listData.items[' + idx + '].actual_subtotal']: s,
-      ['listData.items[' + idx + '].deviation_percent']: dev,
-      ['listData.items[' + idx + '].deviation_tone']: tone,
-      'listData.total_actual_cost': this._recomputeTotal()
-    });
+    var items = list.items.slice();
+    var item = Object.assign({}, items[idx], { actual_qty: num });
+    item.actual_subtotal = money(num * item.actual_unit_cost);
+    item.deviation_percent = item.recommended_qty > 0 ? Math.round((num - item.recommended_qty) / item.recommended_qty * 100) : 0;
+    item.deviation_tone = item.deviation_percent > 0 ? 'up' : (item.deviation_percent < 0 ? 'down' : 'flat');
+    items[idx] = item;
+    this.setData({ 'listData.items': items, 'listData.total_actual_cost': this._recomputeTotal(items) });
   },
 
   editCost: function (e) {
     var itemId = e.currentTarget.dataset.id;
-    var num = parseFloat(e.detail.value) || 0;
+    var num = parseFloat(e.detail.value);
+    if (!isFinite(num) || num < 0) num = 0;
     var list = this.data.listData; if (!list) return;
     var idx = this._findItemIndex(list.items, itemId); if (idx < 0) return;
-    var item = list.items[idx];
-    this.setData({
-      ['listData.items[' + idx + '].actual_subtotal']: money(item.actual_qty * num),
-      'listData.total_actual_cost': this._recomputeTotal()
-    });
+    var items = list.items.slice();
+    var item = Object.assign({}, items[idx], { actual_unit_cost: num });
+    item.actual_subtotal = money(item.actual_qty * num);
+    items[idx] = item;
+    this.setData({ 'listData.items': items, 'listData.total_actual_cost': this._recomputeTotal(items) });
   },
 
   saveItem: function (e) {
     var itemId = e.currentTarget.dataset.id;
     var field = e.currentTarget.dataset.field;
-    var num = parseFloat(e.detail.value) || 0;
+    var num = parseFloat(e.detail.value);
+    if (!isFinite(num) || num < 0) { wx.showToast({ title: '数量和单价不能为负数', icon: 'none' }); this.loadList(); return; }
+    if (this.data.submitting) return;
     var list = this.data.listData; if (!list) return;
     var idx = this._findItemIndex(list.items, itemId); if (idx < 0) return;
-    var item = list.items[idx];
+    var items = list.items.slice();
+    var item = Object.assign({}, items[idx]);
+    if (field === 'qty') item.actual_qty = num;
+    else if (field === 'cost') item.actual_unit_cost = num;
+    item.actual_subtotal = money(item.actual_qty * item.actual_unit_cost);
+    items[idx] = item;
     var apiData = { actual_qty: item.actual_qty, actual_unit_cost: item.actual_unit_cost };
-    if (field === 'qty') { apiData.actual_qty = num; this.setData({ ['listData.items[' + idx + '].actual_qty']: num }); }
-    else if (field === 'cost') { apiData.actual_unit_cost = num; this.setData({ ['listData.items[' + idx + '].actual_unit_cost']: num }); }
-    this.setData({ ['listData.items[' + idx + '].actual_subtotal']: money(item.actual_qty * (field === 'cost' ? num : item.actual_unit_cost)), 'listData.total_actual_cost': this._recomputeTotal(), editingItemId: '' });
-    app.request({ url: '/purchase/item/' + itemId, method: 'PUT', data: apiData }).catch(function () {});
+    this.setData({ 'listData.items': items, 'listData.total_actual_cost': this._recomputeTotal(items), editingItemId: '', submitting: true });
+    var self = this;
+    app.request({ url: '/purchase/item/' + itemId, method: 'PUT', data: apiData }).then(function () {
+      self.setData({ submitting: false });
+    }).catch(function (err) {
+      self.setData({ submitting: false });
+      wx.showToast({ title: (err.body && err.body.detail) || '保存失败，已恢复服务端数据', icon: 'none' });
+      self.loadList();
+    });
   },
 
-  _recomputeTotal: function () {
-    var items = this.data.listData.items, total = 0;
-    for (var i = 0; i < items.length; i++) { if (items[i].status !== 'cancelled') total += items[i].actual_subtotal; }
+  _recomputeTotal: function (items) {
+    items = items || (this.data.listData && this.data.listData.items) || [];
+    var total = 0;
+    for (var i = 0; i < items.length; i++) { if (items[i].status !== 'cancelled') total += Number(items[i].actual_subtotal) || 0; }
     return money(total);
   },
 
   cancelItem: function (e) {
     var itemId = e.currentTarget.dataset.id, self = this;
+    if (this.data.submitting) return;
     wx.showModal({ title: '取消采购', content: '确认取消该采购项？', confirmColor: '#d9524a', success: function (r) {
       if (!r.confirm) return;
-      app.request({ url: '/purchase/item/' + itemId, method: 'DELETE' }).then(function () { wx.showToast({ title: '已取消', icon: 'none' }); self.loadList(); }).catch(function () {});
+      self.setData({ submitting: true });
+      app.request({ url: '/purchase/item/' + itemId, method: 'DELETE' }).then(function () { self.setData({ submitting: false }); wx.showToast({ title: '已取消', icon: 'none' }); self.loadList(); }).catch(function (err) { self.setData({ submitting: false }); wx.showToast({ title: (err.body && err.body.detail) || '取消失败', icon: 'none' }); self.loadList(); });
     }});
   },
 
@@ -266,13 +339,17 @@ Page({
   },
 
   selectSupplier: function (e) {
+    if (this.data.submitting) return;
     var supplierId = e.currentTarget.dataset.id;
     var supplierName = e.currentTarget.dataset.name;
     var itemId = this.data.supplierPickItemId;
     var list = this.data.listData; if (!list) return;
     var idx = this._findItemIndex(list.items, itemId); if (idx < 0) return;
-    this.setData({ ['listData.items[' + idx + '].supplier_id']: supplierId, ['listData.items[' + idx + '].supplier_name']: supplierName, showSupplierPicker: false });
-    app.request({ url: '/purchase/item/' + itemId, method: 'PUT', data: { supplier_id: supplierId } }).catch(function () {});
+    this.setData({ ['listData.items[' + idx + '].supplier_id']: supplierId, ['listData.items[' + idx + '].supplier_name']: supplierName, showSupplierPicker: false, submitting: true });
+    var self = this;
+    app.request({ url: '/purchase/item/' + itemId, method: 'PUT', data: { supplier_id: supplierId } }).then(function () {
+      self.setData({ submitting: false });
+    }).catch(function (err) { self.setData({ submitting: false }); wx.showToast({ title: (err.body && err.body.detail) || '供应商保存失败', icon: 'none' }); self.loadList(); });
   },
 
   closeSupplierPicker: function () { this.setData({ showSupplierPicker: false }); },
@@ -334,39 +411,46 @@ Page({
 
   submitAcceptance: function () {
     var self = this, list = this.data.listData;
-    if (!list) return;
+    if (!list || this.data.submitting) return;
     var items = [];
     var acc = this.data.acceptanceItems;
+    var invalidName = '';
     list.items.forEach(function (item) {
       if (item.status === 'cancelled') return;
       var a = acc[item.item_id] || {};
+      var arrivalQty = hasValue(a.arrival_qty) ? Number(a.arrival_qty) : Number(item.actual_qty);
+      var acceptedQty = hasValue(a.accepted_qty) ? Number(a.accepted_qty) : Number(item.actual_qty);
+      if (!isFinite(arrivalQty) || !isFinite(acceptedQty) || arrivalQty < 0 || acceptedQty < 0 || acceptedQty > arrivalQty) invalidName = invalidName || item.product_name;
       items.push({
-        item_id: item.item_id, arrival_qty: a.arrival_qty || item.actual_qty,
-        accepted_qty: a.accepted_qty || item.actual_qty,
-        shortage_qty: a.shortage_qty || 0, damaged_qty: a.damaged_qty || 0,
-        rejected_qty: a.rejected_qty || 0, returned_qty: a.returned_qty || 0,
-        replenish_qty: a.replenish_qty || 0,
-        package_count: a.package_count || null,
-        gross_weight: a.gross_weight || null, tare_weight: a.tare_weight || null,
-        net_weight: a.net_weight || null,
-        actual_unit_cost: a.actual_unit_cost || item.actual_unit_cost,
+        item_id: item.item_id, arrival_qty: arrivalQty,
+        accepted_qty: acceptedQty,
+        shortage_qty: hasValue(a.shortage_qty) ? Number(a.shortage_qty) : 0,
+        damaged_qty: hasValue(a.damaged_qty) ? Number(a.damaged_qty) : 0,
+        rejected_qty: hasValue(a.rejected_qty) ? Number(a.rejected_qty) : 0,
+        returned_qty: hasValue(a.returned_qty) ? Number(a.returned_qty) : 0,
+        replenish_qty: hasValue(a.replenish_qty) ? Number(a.replenish_qty) : 0,
+        package_count: hasValue(a.package_count) ? Number(a.package_count) : null,
+        gross_weight: hasValue(a.gross_weight) ? Number(a.gross_weight) : null,
+        tare_weight: hasValue(a.tare_weight) ? Number(a.tare_weight) : null,
+        net_weight: hasValue(a.net_weight) ? Number(a.net_weight) : null,
+        actual_unit_cost: hasValue(a.actual_unit_cost) ? Number(a.actual_unit_cost) : item.actual_unit_cost,
         quality_ok: a.quality_ok !== false,
         acceptance_notes: a.acceptance_notes || ''
       });
     });
+    if (invalidName) { wx.showToast({ title: invalidName + '的合格数量不能大于到货数量', icon: 'none' }); return; }
     this.setData({ submitting: true });
     app.request({ url: '/purchase/' + list.list_id + '/acceptance', method: 'POST', data: { items: items, notes: '' } })
-      .then(function (data) {
-        self.setData({ submitting: false });
-        wx.showToast({ title: '验收完成', icon: 'success' });
-        // Now confirm → batch + inventory + payable
-        app.request({ url: '/purchase/' + list.list_id + '/acceptance/confirm', method: 'POST', data: {} })
-          .then(function (result) {
-            self.setData({ confirmed: true, confirmResult: result, acceptanceMode: false });
-          }).catch(function (err) { wx.showToast({ title: (err.body && err.body.detail) || '入库失败', icon: 'none' }); });
+      .then(function () {
+        return app.request({ url: '/purchase/' + list.list_id + '/acceptance/confirm', method: 'POST', data: {} });
+      }).then(function (result) {
+        self.setData({ submitting: false, confirmed: true, confirmResult: result, acceptanceMode: false });
+        wx.showToast({ title: '验收并入库完成', icon: 'success' });
+        self.loadList();
       }).catch(function (err) {
         self.setData({ submitting: false });
-        wx.showToast({ title: (err.body && err.body.detail) || '验收失败', icon: 'none' });
+        wx.showToast({ title: (err.body && err.body.detail) || '验收或入库失败', icon: 'none' });
+        self.loadList();
       });
   },
 
@@ -387,18 +471,37 @@ Page({
 
   openPayment: function () {
     var list = this.data.listData; if (!list) return;
-    // Find the first supplier from items or pick manually
-    this.setData({ showPayment: true, paymentAmount: list.total_actual_cost, paymentNote: '' });
+    // 多供应商清单不能把整单金额默认付给某一个供应商。
+    this.setData({ showPayment: true, paymentSupplierId: '', paymentSupplierName: '', paymentAmount: 0, paymentNote: '', paymentPayableIds: [] });
     this.loadSuppliers();
   },
 
   closePayment: function () { this.setData({ showPayment: false }); },
 
   pickPaymentSupplier: function (e) {
+    var supplierId = e.currentTarget.dataset.id;
+    var amount = 0;
+    var list = this.data.listData;
+    if (list) {
+      list.items.forEach(function (item) {
+        if (item.supplier_id === supplierId && item.status !== 'cancelled') amount += Number(item.actual_subtotal) || 0;
+      });
+    }
+    var self = this;
     this.setData({
-      paymentSupplierId: e.currentTarget.dataset.id,
-      paymentSupplierName: e.currentTarget.dataset.name
+      paymentSupplierId: supplierId,
+      paymentSupplierName: e.currentTarget.dataset.name,
+      paymentAmount: money(amount),
+      paymentPayableIds: []
     });
+    app.request({ url: '/accounts/supplier/' + supplierId + '/statement' }).then(function (data) {
+      var openRows = (data.items || []).filter(function (row) {
+        return row.direction === 'purchase' && Number(row.remaining_amount) > 0;
+      });
+      var ids = openRows.map(function (row) { return row.id; });
+      var remaining = openRows.reduce(function (sum, row) { return sum + Number(row.remaining_amount || 0); }, 0);
+      self.setData({ paymentPayableIds: ids, paymentAmount: money(remaining) });
+    }).catch(function () {});
   },
 
   editPaymentAmount: function (e) { this.setData({ paymentAmount: parseFloat(e.detail.value) || 0 }); },
@@ -411,7 +514,7 @@ Page({
     if (!this.data.paymentAmount || this.data.paymentAmount <= 0) { wx.showToast({ title: '请输入金额', icon: 'none' }); return; }
     this.setData({ paymentSubmitting: true });
     app.request({ url: '/accounts/supplier-payment', method: 'POST', data: {
-      supplier_id: this.data.paymentSupplierId, amount: this.data.paymentAmount,
+      supplier_id: this.data.paymentSupplierId, payable_ids: this.data.paymentPayableIds, amount: this.data.paymentAmount,
       method: this.data.paymentMethod, note: this.data.paymentNote
     }}).then(function () {
       self.setData({ paymentSubmitting: false, showPayment: false });
@@ -481,4 +584,5 @@ Page({
 
   viewInventory: function () { wx.switchTab({ url: '/pages/inventory/inventory' }); },
   goHome: function () { wx.switchTab({ url: '/pages/index/index' }); },
+  goSupplier: function () { wx.navigateTo({ url: '/pages/supplier/supplier' }); },
 });

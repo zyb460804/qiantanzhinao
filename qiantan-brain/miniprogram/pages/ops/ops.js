@@ -3,7 +3,7 @@ var app = getApp();
 
 Page({
   data: {
-    skin: '', tab: 'waste', loading: false,
+    skin: '', tab: 'waste', loading: false, submitting: false,
     // 报损
     wasteReasons: [], wasteForm: { product_id: '', product_name: '', quantity: '', reason: '腐烂', notes: '' },
     products: [], showWasteForm: false, wasteRecords: [], wasteSubmitting: false,
@@ -14,7 +14,7 @@ Page({
     customerSearch: '',
     showRepayForm: false, repayForm: { customer_name: '', amount: '' }, repaySubmitting: false,
     // 导出
-    exportStart: '', exportEnd: '',
+    exportStart: '', exportEnd: '', exporting: false,
   },
 
   onShow: function () {
@@ -62,17 +62,19 @@ Page({
     var self = this;
     app.request({ url: '/ops/waste?limit=20' }).then(function (data) {
       self.setData({ wasteRecords: data || [] });
-    }).catch(function () { self.setData({ wasteRecords: [] }); });
+    }).catch(function () { self.setData({ wasteRecords: [] }); wx.showToast({ title: '报损记录加载失败', icon: 'none' }); });
   },
 
   openWasteForm: function () { this.setData({ showWasteForm: true, wasteForm: { product_id: '', product_name: '', quantity: '', reason: '腐烂', notes: '' } }); },
-  closeWasteForm: function () { this.setData({ showWasteForm: false }); },
+  closeWasteForm: function () { if (!this.data.wasteSubmitting) this.setData({ showWasteForm: false }); },
+  // 弹窗内容区域阻止 tap 冒泡，避免点击输入框时触发遮罩关闭。
+  stopMaskTap: function () {},
   pickWasteProduct: function (e) {
     var idx = e.currentTarget.dataset.index;
     var p = this.data.products[idx];
     this.setData({ 'wasteForm.product_id': p.product_id, 'wasteForm.product_name': p.sku_name || p.product_name });
   },
-  onWasteField: function (e) { var f = e.currentTarget.dataset.field; var v = e.detail.value; var wf = this.data.wasteForm; wf[f] = v; this.setData({ wasteForm: wf }); },
+  onWasteField: function (e) { var f = e.currentTarget.dataset.field; var d = {}; d['wasteForm.' + f] = e.detail.value; this.setData(d); },
   pickWasteReason: function (e) { this.setData({ 'wasteForm.reason': e.currentTarget.dataset.reason }); },
 
   submitWaste: function () {
@@ -101,30 +103,37 @@ Page({
     var self = this;
     app.request({ url: '/ops/expiry/clearance?within_hours=' + this.data.clearanceHours }).then(function (data) {
       self.setData({ clearanceItems: (data && data.items) || [] });
-    }).catch(function () { self.setData({ clearanceItems: [] }); });
+    }).catch(function () { self.setData({ clearanceItems: [] }); wx.showToast({ title: '临期商品加载失败', icon: 'none' }); });
   },
   changeClearanceHours: function (e) { this.setData({ clearanceHours: Number(e.currentTarget.dataset.h) }); this.loadClearance(); },
 
   quickDiscount: function (e) {
     var item = this.data.clearanceItems[e.currentTarget.dataset.index];
-    if (!item) return;
+    if (!item || this.data.submitting) return;
     var self = this;
     wx.showModal({
       title: '修改售价', editable: true,
       placeholderText: '输入新售价',
-      content: item.suggested_price ? String(item.suggested_price.toFixed(2)) : '',
+      content: item.suggested_price ? Number(item.suggested_price).toFixed(2) : '',
       success: function (res) {
         if (res.confirm && res.content) {
           var newPrice = parseFloat(res.content);
           if (isNaN(newPrice) || newPrice <= 0) { wx.showToast({ title: '请输入有效价格', icon: 'none' }); return; }
+          self.setData({ submitting: true });
           app.request({
-            url: '/catalog/skus/' + (item.sku_id || item.product_id),
-            method: 'PUT',
-            data: { selling_price: newPrice },
+            url: '/ops/expiry/clearance/' + item.batch_id + '/promotion',
+            method: 'POST',
+            data: {
+              promotion_price: newPrice,
+              start_at: new Date().toISOString(),
+              end_at: item.expiry_date,
+            },
           }).then(function () {
-            wx.showToast({ title: '售价已更新为 ¥' + newPrice.toFixed(2), icon: 'success' });
+            self.setData({ submitting: false });
+            wx.showToast({ title: '已设置该批次促销 ¥' + newPrice.toFixed(2), icon: 'success' });
             self.loadClearance();
           }).catch(function () {
+            self.setData({ submitting: false });
             wx.showToast({ title: '改价失败，请重试', icon: 'none' });
           });
         }
@@ -138,7 +147,7 @@ Page({
     app.request({ url: '/ops/customers' }).then(function (data) {
       var list = data || [];
       self.setData({ customers: list, filteredCustomers: list });
-    }).catch(function () { self.setData({ customers: [], filteredCustomers: [] }); });
+    }).catch(function () { self.setData({ customers: [], filteredCustomers: [] }); wx.showToast({ title: '客户账款加载失败', icon: 'none' }); });
   },
   onCustomerSearch: function (e) {
     var kw = (e.detail.value || '').trim().toLowerCase();
@@ -164,14 +173,17 @@ Page({
   openRepay: function (e) {
     this.setData({ showRepayForm: true, repayForm: { customer_name: e.currentTarget.dataset.name, amount: '' } });
   },
-  closeRepay: function () { this.setData({ showRepayForm: false }); },
-  onRepayField: function (e) { var f = e.currentTarget.dataset.field; var v = e.detail.value; var rf = this.data.repayForm; rf[f] = v; this.setData({ repayForm: rf }); },
+  closeRepay: function () { if (!this.data.repaySubmitting) this.setData({ showRepayForm: false }); },
+  onRepayField: function (e) { var f = e.currentTarget.dataset.field; var d = {}; d['repayForm.' + f] = e.detail.value; this.setData(d); },
   submitRepay: function () {
     var self = this, rf = this.data.repayForm;
     if (this.data.repaySubmitting) return;
-    if (!rf.amount || Number(rf.amount) <= 0) { wx.showToast({ title: '请输入金额', icon: 'none' }); return; }
+    var amount = Number(rf.amount);
+    if (!isFinite(amount) || amount <= 0) { wx.showToast({ title: '请输入有效金额', icon: 'none' }); return; }
+    var customer = (this.data.customers || []).find(function (c) { return c.customer_name === rf.customer_name; });
+    if (customer && amount > Number(customer.balance || 0)) { wx.showToast({ title: '回款金额不能超过当前欠款', icon: 'none' }); return; }
     this.setData({ repaySubmitting: true });
-    app.request({ url: '/ops/customers/repay', method: 'POST', data: { customer_name: rf.customer_name, amount: Number(rf.amount) } })
+    app.request({ url: '/ops/customers/repay', method: 'POST', data: { customer_name: rf.customer_name, amount: amount } })
       .then(function () {
         self.setData({ showRepayForm: false, repaySubmitting: false });
         wx.showToast({ title: '回款已记录', icon: 'success' }); self.loadCustomers();
@@ -203,7 +215,7 @@ Page({
         wx.shareFileMessage({
           filePath: filePath, fileName: type + '.csv',
           success: function () { wx.showToast({ title: '已导出 ' + rows.length + ' 行', icon: 'success' }); },
-          fail: function () { wx.showToast({ title: '分享已取消', icon: 'none' }); },
+          fail: function (err) { if (!(err && err.errMsg && err.errMsg.indexOf('cancel') >= 0)) wx.showToast({ title: '文件分享失败', icon: 'none' }); },
         });
       },
       fail: function () { wx.showToast({ title: '文件写入失败', icon: 'none' }); },
@@ -213,6 +225,7 @@ Page({
   doExport: function (e) {
     var type = e.currentTarget.dataset.type;
     var self = this;
+    if (this.data.exporting) return;
     var now = new Date();
     var pad = function (n) { return n < 10 ? '0' + n : String(n); };
     var today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
@@ -250,13 +263,16 @@ Page({
       wx.showToast({ title: '不支持的导出类型', icon: 'none' }); return;
     }
 
+    this.setData({ exporting: true });
     wx.showLoading({ title: '生成中...' });
     app.request({ url: url }).then(function (data) {
       wx.hideLoading();
+      self.setData({ exporting: false });
       var rows = Array.isArray(data) ? data : (data && data.rows ? data.rows : []);
       self._exportCSV(type, rows);
     }).catch(function (err) {
       wx.hideLoading();
+      self.setData({ exporting: false });
       wx.showToast({ title: (err && err.body && (err.body.detail || err.body.message)) || '导出失败，请稍后重试', icon: 'none' });
     });
   },

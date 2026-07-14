@@ -6,6 +6,7 @@ Page({
     activeTab: 'stocktake',
     skinClass: '',
     loading: false,
+    restoring: false,
     sessionId: null,
     stocktakeItems: [],
     submittedMap: {},
@@ -36,6 +37,8 @@ Page({
     this.setData({ skinClass: 'skin-' + app.resolveSkin() });
     if (this.data.activeTab === 'history') {
       this.loadHistory();
+    } else if (!this.data.sessionId && !this.data.completed) {
+      this.loadCurrentStocktake();
     }
   },
 
@@ -48,7 +51,11 @@ Page({
         wx.stopPullDownRefresh();
       });
     } else {
-      wx.stopPullDownRefresh();
+      this.loadCurrentStocktake().then(function () {
+        wx.stopPullDownRefresh();
+      }).catch(function () {
+        wx.stopPullDownRefresh();
+      });
     }
   },
 
@@ -62,8 +69,7 @@ Page({
         confirmText: '放弃盘点', cancelText: '继续盘点', confirmColor: '#d9524a',
         success: function (res) {
           if (res.confirm) {
-            self.setData({ activeTab: tab, sessionId: null, stocktakeItems: [], submittedMap: {}, completed: false, result: null });
-            if (tab === 'history') self.loadHistory();
+            self._cancelCurrentStocktake(tab);
           }
         },
       });
@@ -75,44 +81,121 @@ Page({
     }
   },
 
+  _cancelCurrentStocktake: function (nextTab) {
+    var self = this;
+    var sessionId = this.data.sessionId;
+    if (!sessionId || this.data.submitting) return;
+    this.setData({ submitting: true });
+    wx.showLoading({ title: '正在取消' });
+    app.request({
+      url: '/inventory/stocktake/' + sessionId + '/cancel',
+      method: 'POST'
+    }).then(function () {
+      self.setData({
+        activeTab: nextTab || 'stocktake',
+        submitting: false,
+        sessionId: null,
+        stocktakeItems: [],
+        submittedMap: {},
+        completed: false,
+        result: null,
+        progressCount: 0,
+        totalVariance: 0,
+        lossAmount: 0,
+        notes: '',
+        progressPercent: 0
+      });
+      wx.showToast({ title: '盘点已取消', icon: 'success' });
+      if (nextTab === 'history') self.loadHistory();
+    }).catch(function (err) {
+      self.setData({ submitting: false });
+      wx.showToast({ title: self._errorText(err, '取消盘点失败'), icon: 'none' });
+    }).then(function () {
+      wx.hideLoading();
+    });
+  },
+
   // ── 开始盘点 ─────────────────────────────────────────
+
+  _applySessionData: function (data) {
+    var self = this;
+    var submittedMap = {};
+    var items = ((data && data.items) || []).map(function (item) {
+      var submitted = item.submitted === true || item.actual_qty !== null && item.actual_qty !== undefined;
+      var variance = item.variance === null || item.variance === undefined ? null : Number(item.variance);
+      var reason = item.variance_reason || '';
+      if (submitted) {
+        submittedMap[item.product_id] = {
+          actual_qty: Number(item.actual_qty),
+          variance: variance,
+          reason: reason,
+          item_id: item.item_id,
+        };
+      }
+      return {
+        item_id: item.item_id,
+        product_id: item.product_id,
+        product_name: item.product_name,
+        unit: item.unit || '斤',
+        book_qty: Number(item.book_qty) || 0,
+        avg_cost: Number(item.avg_cost || item.unit_cost) || 0,
+        actual_qty: submitted ? String(item.actual_qty) : '',
+        variance: variance,
+        reason: reason,
+        submitted: submitted,
+      };
+    });
+    this.setData({
+      loading: false,
+      restoring: false,
+      sessionId: data ? data.session_id : null,
+      stocktakeItems: items,
+      completed: false,
+      result: null,
+      submittedMap: submittedMap,
+      notes: data && data.notes ? data.notes : '',
+      progressCount: 0,
+      totalVariance: 0,
+      lossAmount: 0,
+      progressPercent: 0,
+    }, function () {
+      self._recalcSummary();
+    });
+  },
+
+  loadCurrentStocktake: function () {
+    var self = this;
+    if (this.data.restoring) return Promise.resolve();
+    this.setData({ restoring: true });
+    return app.request({
+      url: '/inventory/stocktake/current'
+    }).then(function (data) {
+      if (data && data.session_id) {
+        self._applySessionData(data);
+      } else {
+        self.setData({ restoring: false });
+      }
+    }).catch(function (err) {
+      console.error('Restore stocktake fail:', err);
+      self.setData({ restoring: false });
+      throw err;
+    });
+  },
 
   startStocktake: function () {
     var self = this;
-    if (this.data.loading) return;
-    this.setData({ loading: true });
+    if (this.data.submitting) return;
+    this.setData({ submitting: true });
     app.request({
       url: '/inventory/stocktake/start',
       method: 'POST'
     }).then(function (data) {
-      var items = (data.items || []).map(function (item) {
-        return {
-          product_id: item.product_id,
-          product_name: item.product_name,
-          unit: item.unit || '斤',
-          book_qty: Number(item.book_qty) || 0,
-          avg_cost: Number(item.avg_cost || item.unit_cost) || 0,
-          actual_qty: '',
-          variance: null,
-          reason: '',
-          submitted: false,
-        };
-      });
-      self.setData({
-        loading: false,
-        sessionId: data.session_id,
-        stocktakeItems: items,
-        completed: false,
-        result: null,
-        submittedMap: {},
-        progressCount: 0,
-        totalVariance: 0,
-        lossAmount: 0,
-        progressPercent: 0,
-      });
+      self.setData({ submitting: false });
+      self._applySessionData(data);
     }).catch(function (err) {
       console.error('Start stocktake fail:', err);
-      self.setData({ loading: false });
+      self.setData({ submitting: false });
+      wx.showToast({ title: self._errorText(err, '开始盘点失败'), icon: 'none' });
     });
   },
 
@@ -131,7 +214,9 @@ Page({
       item.variance = null;
     }
     item.submitted = false;
-    this.setData({ stocktakeItems: items });
+    var submittedMap = Object.assign({}, this.data.submittedMap);
+    delete submittedMap[item.product_id];
+    this.setData({ stocktakeItems: items, submittedMap: submittedMap });
     this._recalcSummary();
   },
 
@@ -147,7 +232,9 @@ Page({
     item.actual_qty = String(newVal);
     item.variance = Math.round((newVal - item.book_qty) * 100) / 100;
     item.submitted = false;
-    this.setData({ stocktakeItems: items });
+    var submittedMap = Object.assign({}, this.data.submittedMap);
+    delete submittedMap[item.product_id];
+    this.setData({ stocktakeItems: items, submittedMap: submittedMap });
     this._recalcSummary();
     // 无差异时自动提交
     if (item.variance === 0) {
@@ -173,8 +260,8 @@ Page({
     var item = this.data.stocktakeItems[index];
     if (this.data.submitting) return;
     var actualNum = parseFloat(item.actual_qty);
-    if (isNaN(actualNum) || item.actual_qty === '') {
-      wx.showToast({ title: '请输入有效数量', icon: 'none' });
+    if (isNaN(actualNum) || item.actual_qty === '' || actualNum < 0) {
+      wx.showToast({ title: '实盘数量必须是非负数', icon: 'none' });
       return;
     }
     var reason = (item.variance === 0 || item.variance === null) ? 'unknown' : (item.reason || 'unknown');
@@ -208,7 +295,10 @@ Page({
       self._recalcSummary();
     }).catch(function (err) {
       console.error('Submit item fail:', err);
-      self.setData({ submitting: false });
+      var failedItems = self.data.stocktakeItems.slice();
+      if (failedItems[index]) failedItems[index]._submitting = false;
+      self.setData({ stocktakeItems: failedItems, submitting: false });
+      wx.showToast({ title: self._errorText(err, '保存盘点数量失败'), icon: 'none' });
     });
   },
 
@@ -266,6 +356,7 @@ Page({
     }).catch(function (err) {
       console.error('Complete stocktake fail:', err);
       self.setData({ completing: false });
+      wx.showToast({ title: self._errorText(err, '完成盘点失败'), icon: 'none' });
     });
   },
 
@@ -295,7 +386,13 @@ Page({
     }).catch(function (err) {
       console.error('Load history fail:', err);
       self.setData({ historyList: [] });
+      wx.showToast({ title: self._errorText(err, '盘点记录加载失败'), icon: 'none' });
+      return Promise.reject(err);
     });
+  },
+
+  _errorText: function (err, fallback) {
+    return (err && err.body && err.body.detail) || (err && err.message) || fallback;
   },
 
   _formatVariance: function (variance) {

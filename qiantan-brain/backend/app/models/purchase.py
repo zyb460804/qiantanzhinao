@@ -42,6 +42,7 @@ class PurchaseList(Base):
     paid_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
     confirmed_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
+    purchased_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
     accepted_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
     stored_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
     completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime)

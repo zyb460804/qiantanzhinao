@@ -31,35 +31,69 @@ async def list_pending(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    actions = (await db.execute(
-        select(AIAction).where(AIAction.merchant_id == merchant.id, AIAction.status == "pending")
-        .order_by(AIAction.created_at.desc())
-    )).scalars().all()
-    return {"code": 0, "data": [
-        {"id": str(a.id), "action_type": a.action_type, "title": a.title,
-         "payload": a.payload, "created_at": a.created_at.isoformat() if a.created_at else None}
-        for a in actions
-    ]}
+    actions = (
+        (
+            await db.execute(
+                select(AIAction)
+                .where(AIAction.merchant_id == merchant.id, AIAction.status == "pending")
+                .order_by(AIAction.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "code": 0,
+        "data": [
+            {
+                "id": str(a.id),
+                "action_type": a.action_type,
+                "title": a.title,
+                "payload": a.payload,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in actions
+        ],
+    }
 
 
 @router.get("/history", response_model=AnyResponse)
 async def list_history(
-    page: int = 1, limit: int = 20,
+    page: int = 1,
+    limit: int = 20,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
     offset = (page - 1) * limit
-    actions = (await db.execute(
-        select(AIAction).where(AIAction.merchant_id == merchant.id)
-        .order_by(AIAction.created_at.desc()).offset(offset).limit(limit)
-    )).scalars().all()
-    return {"code": 0, "data": [
-        {"id": str(a.id), "action_type": a.action_type, "title": a.title,
-         "status": a.status, "payload": a.payload, "result": a.result,
-         "created_at": a.created_at.isoformat() if a.created_at else None,
-         "executed_at": a.executed_at.isoformat() if a.executed_at else None}
-        for a in actions
-    ]}
+    actions = (
+        (
+            await db.execute(
+                select(AIAction)
+                .where(AIAction.merchant_id == merchant.id)
+                .order_by(AIAction.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "code": 0,
+        "data": [
+            {
+                "id": str(a.id),
+                "action_type": a.action_type,
+                "title": a.title,
+                "status": a.status,
+                "payload": a.payload,
+                "result": a.result,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "executed_at": a.executed_at.isoformat() if a.executed_at else None,
+            }
+            for a in actions
+        ],
+    }
 
 
 @router.post("/{action_id}/execute", response_model=AnyResponse)
@@ -91,7 +125,11 @@ async def execute_action(
         action.status = "rejected"
         action.executed_at = utc_now()
         await db.commit()
-        return {"code": 0, "message": "已拒绝", "data": {"id": str(action.id), "status": "rejected"}}
+        return {
+            "code": 0,
+            "message": "已拒绝",
+            "data": {"id": str(action.id), "status": "rejected"},
+        }
 
     result_data: dict = {}
     payload = action.payload or {}
@@ -109,27 +147,49 @@ async def execute_action(
                 raise ValueError("SKU 不存在")
             old_price = sku.default_sale_price or Decimal("0")
             sku.default_sale_price = new_price
-            db.add(PriceHistory(merchant_id=merchant.id, sku_id=sku.id,
-                old_price=old_price, new_price=new_price, reason="ai_discount",
-                source="ai", changed_by="ai_action"))
-            result_data = {"sku_id": str(sku_id), "old_price": float(old_price),
-                           "new_price": float(new_price), "sku_name": sku.name}
+            db.add(
+                PriceHistory(
+                    merchant_id=merchant.id,
+                    sku_id=sku.id,
+                    old_price=old_price,
+                    new_price=new_price,
+                    reason="ai_discount",
+                    source="ai",
+                    changed_by="ai_action",
+                )
+            )
+            result_data = {
+                "sku_id": str(sku_id),
+                "old_price": float(old_price),
+                "new_price": float(new_price),
+                "sku_name": sku.name,
+            }
 
         elif action.action_type == "purchase":
             # 生成采购单
             items = payload.get("items", [])
             if not items:
                 raise ValueError("采购清单为空")
-            plist = PurchaseList(merchant_id=merchant.id, status="draft",
+            plist = PurchaseList(
+                merchant_id=merchant.id,
+                status="draft",
                 total_estimated_cost=Decimal(str(payload.get("total_cost", 0))),
-                item_count=len(items))
+                item_count=len(items),
+            )
             db.add(plist)
             await db.flush()
             for item in items:
-                db.add(PurchaseItem(list_id=plist.id, merchant_id=merchant.id,
-                    product_id=item["product_id"], actual_qty=Decimal(str(item.get("qty", 0))),
-                    unit=item.get("unit", "斤"), estimated_unit_cost=Decimal(str(item.get("cost", 0))),
-                    status="pending"))
+                db.add(
+                    PurchaseItem(
+                        list_id=plist.id,
+                        merchant_id=merchant.id,
+                        product_id=item["product_id"],
+                        actual_qty=Decimal(str(item.get("qty", 0))),
+                        unit=item.get("unit", "斤"),
+                        estimated_unit_cost=Decimal(str(item.get("cost", 0))),
+                        status="pending",
+                    )
+                )
             await db.flush()
             result_data = {"list_id": str(plist.id), "item_count": len(items)}
 
@@ -143,19 +203,43 @@ async def execute_action(
                     old = sku.default_sale_price or Decimal("0")
                     new = Decimal(str(s["new_price"]))
                     sku.default_sale_price = new
-                    db.add(PriceHistory(merchant_id=merchant.id, sku_id=sku.id,
-                        old_price=old, new_price=new, reason="clearance", source="ai", changed_by="ai_action"))
-                    updated.append({"sku_id": str(sku.id), "name": sku.name,
-                                    "old_price": float(old), "new_price": float(new)})
+                    db.add(
+                        PriceHistory(
+                            merchant_id=merchant.id,
+                            sku_id=sku.id,
+                            old_price=old,
+                            new_price=new,
+                            reason="clearance",
+                            source="ai",
+                            changed_by="ai_action",
+                        )
+                    )
+                    updated.append(
+                        {
+                            "sku_id": str(sku.id),
+                            "name": sku.name,
+                            "old_price": float(old),
+                            "new_price": float(new),
+                        }
+                    )
             result_data = {"updated": len(updated), "skus": updated}
 
         elif action.action_type == "lock_batch":
             batch_id = uuid.UUID(payload["batch_id"])
             from app.services.batch import lock_batch as do_lock
-            batch = await do_lock(db, batch_id, merchant.id,
-                reason=payload.get("reason", "AI检测到食品安全风险"), locked_by="ai_action")
-            result_data = {"batch_id": str(batch.id), "status": "locked",
-                           "remaining_qty": float(batch.remaining_qty)}
+
+            batch = await do_lock(
+                db,
+                batch_id,
+                merchant.id,
+                reason=payload.get("reason", "AI检测到食品安全风险"),
+                locked_by="ai_action",
+            )
+            result_data = {
+                "batch_id": str(batch.id),
+                "status": "locked",
+                "remaining_qty": float(batch.remaining_qty),
+            }
 
         else:
             raise ValueError(f"不支持的动作类型: {action.action_type}")
@@ -165,13 +249,24 @@ async def execute_action(
         action.executed_by = body.get("executed_by", "merchant")
         action.executed_at = utc_now()
 
-        db.add(AuditLog(merchant_id=merchant.id, action=f"ai_{action.action_type}",
-            target_table="ai_actions", target_id=str(action.id),
-            after_data=result_data, reason=action.title, operator="ai"))
+        db.add(
+            AuditLog(
+                merchant_id=merchant.id,
+                action=f"ai_{action.action_type}",
+                target_table="ai_actions",
+                target_id=str(action.id),
+                after_data=result_data,
+                reason=action.title,
+                operator="ai",
+            )
+        )
         await db.commit()
 
-        return {"code": 0, "message": f"已执行: {action.title}",
-                "data": {"id": str(action.id), "status": "executed", "result": result_data}}
+        return {
+            "code": 0,
+            "message": f"已执行: {action.title}",
+            "data": {"id": str(action.id), "status": "executed", "result": result_data},
+        }
 
     except ValueError as e:
         action.status = "failed"
@@ -200,10 +295,19 @@ async def generate_actions(
     actions_data = body.get("actions", [])
     created = []
     for a in actions_data:
-        action = AIAction(merchant_id=merchant.id, action_type=a["action_type"],
-            title=a["title"], payload=a.get("payload"))
+        action = AIAction(
+            merchant_id=merchant.id,
+            action_type=a["action_type"],
+            title=a["title"],
+            payload=a.get("payload"),
+        )
         db.add(action)
         created.append(action)
     await db.commit()
-    return {"code": 0, "message": f"已生成 {len(created)} 个动作",
-            "data": [{"id": str(a.id), "action_type": a.action_type, "title": a.title} for a in created]}
+    return {
+        "code": 0,
+        "message": f"已生成 {len(created)} 个动作",
+        "data": [
+            {"id": str(a.id), "action_type": a.action_type, "title": a.title} for a in created
+        ],
+    }

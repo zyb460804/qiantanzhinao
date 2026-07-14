@@ -1,0 +1,24 @@
+{
+  "_comment": "千摊智脑边缘端配置 — 复制为 edge_config.json 后填入真实值",
+  "merchant_id": "PASTE_YOUR_MERCHANT_UUID_HERE",
+  "api": {
+    "base_url": "http://127.0.0.1:8000/api/v1",
+    "api_key": "qt_live_PASTE_YOUR_API_KEY_HERE",
+    "device_id": "raspberry-pi-5-001"
+  },
+  "camera": {
+    "camera_id": 0,
+    "width": 640,
+    "height": 480
+  },
+  "hx711": {
+    "dout_pin": 5,
+    "pd_sck_pin": 6,
+    "known_weight_g": 200.0
+  },
+  "sync": {
+    "interval_s": 30,
+    "max_retries": 3,
+    "api_version": "v2"
+  }
+}

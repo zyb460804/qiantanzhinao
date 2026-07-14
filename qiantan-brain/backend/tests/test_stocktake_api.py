@@ -43,6 +43,22 @@ async def _create_inventory_record(
     await session.commit()
 
 
+async def _submit_all_snapshot_items(client, start_data, overrides=None):
+    """Submit every persisted snapshot line, defaulting actual to its book quantity."""
+    overrides = overrides or {}
+    session_id = start_data["session_id"]
+    responses = []
+    for item in start_data["items"]:
+        actual_qty = overrides.get(item["product_id"], item["book_qty"])
+        response = await client.post(
+            f"/api/v1/inventory/stocktake/{session_id}/submit",
+            json={"product_id": item["product_id"], "actual_qty": actual_qty},
+        )
+        assert response.status_code == 200
+        responses.append(response)
+    return responses
+
+
 # ------------------------------------------------------------------
 # POST /api/v1/inventory/stocktake/start
 # ------------------------------------------------------------------
@@ -78,6 +94,42 @@ async def test_start_stocktake_duplicate(client, db_session):
         json={"merchant_id": TEST_MERCHANT_ID},
     )
     assert resp2.status_code == 400
+
+
+# ------------------------------------------------------------------
+# POST /api/v1/inventory/stocktake/{session_id}/cancel
+# ------------------------------------------------------------------
+
+
+async def test_cancel_stocktake_allows_restart(client, db_session):
+    """Cancelling releases the in-progress lock and is idempotent."""
+    start_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
+    session_id = start_resp.json()["data"]["session_id"]
+
+    cancel_resp = await client.post(f"/api/v1/inventory/stocktake/{session_id}/cancel")
+    assert cancel_resp.status_code == 200
+    assert cancel_resp.json()["data"]["status"] == "cancelled"
+
+    cancel_again = await client.post(f"/api/v1/inventory/stocktake/{session_id}/cancel")
+    assert cancel_again.status_code == 200
+    assert cancel_again.json()["data"]["status"] == "cancelled"
+
+    restart_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
+    assert restart_resp.status_code == 200
+    assert restart_resp.json()["data"]["session_id"] != session_id
+
+
+async def test_completed_stocktake_cannot_be_cancelled(client, db_session):
+    """A completed session cannot be changed to cancelled."""
+    start_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
+    await _submit_all_snapshot_items(client, start_data)
+    complete_resp = await client.post(f"/api/v1/inventory/stocktake/{session_id}/complete", json={})
+    assert complete_resp.status_code == 200
+
+    cancel_resp = await client.post(f"/api/v1/inventory/stocktake/{session_id}/cancel")
+    assert cancel_resp.status_code == 400
 
 
 # ------------------------------------------------------------------
@@ -117,13 +169,11 @@ async def test_complete_stocktake(client, db_session):
         "/api/v1/inventory/stocktake/start",
         json={"merchant_id": TEST_MERCHANT_ID},
     )
-    session_id = start_resp.json()["data"]["session_id"]
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
 
-    # Submit item with variance (盘盈)
-    await client.post(
-        f"/api/v1/inventory/stocktake/{session_id}/submit",
-        json={"product_id": 1, "actual_qty": 5},
-    )
+    # Submit every snapshot line; product 1 has a variance (盘盈).
+    await _submit_all_snapshot_items(client, start_data, {1: 5})
 
     resp = await client.post(f"/api/v1/inventory/stocktake/{session_id}/complete", json={})
     assert resp.status_code == 200
@@ -169,12 +219,10 @@ async def test_complete_stocktake_idempotent(client, db_session):
         "/api/v1/inventory/stocktake/start",
         json={"merchant_id": TEST_MERCHANT_ID},
     )
-    session_id = start_resp.json()["data"]["session_id"]
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
 
-    await client.post(
-        f"/api/v1/inventory/stocktake/{session_id}/submit",
-        json={"product_id": 1, "actual_qty": 5},
-    )
+    await _submit_all_snapshot_items(client, start_data, {1: 5})
 
     # First complete
     resp1 = await client.post(f"/api/v1/inventory/stocktake/{session_id}/complete", json={})
@@ -213,12 +261,10 @@ async def test_stocktake_history(client, db_session):
         "/api/v1/inventory/stocktake/start",
         json={"merchant_id": TEST_MERCHANT_ID},
     )
-    session_id = start_resp.json()["data"]["session_id"]
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
 
-    await client.post(
-        f"/api/v1/inventory/stocktake/{session_id}/submit",
-        json={"product_id": 1, "actual_qty": 0},
-    )
+    await _submit_all_snapshot_items(client, start_data)
     await client.post(f"/api/v1/inventory/stocktake/{session_id}/complete", json={})
 
     resp = await client.get(
@@ -253,17 +299,18 @@ async def test_stocktake_with_actual_inventory(client, db_session):
         "/api/v1/inventory/stocktake/start",
         json={"merchant_id": TEST_MERCHANT_ID},
     )
-    session_id = start_resp.json()["data"]["session_id"]
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
 
     # Verify book qty = 7
-    items = start_resp.json()["data"]["items"]
+    items = start_data["items"]
     item1 = next(i for i in items if i["product_id"] == 1)
     assert item1["book_qty"] == 7
 
-    # Actual count = 5 → 盘亏 (variance = -2)
-    submit_resp = await client.post(
-        f"/api/v1/inventory/stocktake/{session_id}/submit",
-        json={"product_id": 1, "actual_qty": 5, "variance_reason": "自然损耗"},
+    # Actual count = 5 → 盘亏 (variance = -2); other products match book qty.
+    responses = await _submit_all_snapshot_items(client, start_data, {1: 5})
+    submit_resp = next(
+        response for response in responses if response.json()["data"]["product_id"] == 1
     )
     assert submit_resp.json()["data"]["variance"] == -2
 
@@ -274,3 +321,109 @@ async def test_stocktake_with_actual_inventory(client, db_session):
     assert len(adjustments) == 1
     assert adjustments[0]["variance"] == -2
     assert complete_resp.json()["data"]["total_variance"] == -2
+
+
+async def test_current_stocktake_restores_snapshot_and_submitted_progress(client, db_session):
+    start_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
+    await client.post(
+        f"/api/v1/inventory/stocktake/{session_id}/submit",
+        json={"product_id": 1, "actual_qty": 3, "variance_reason": "weighing_error"},
+    )
+
+    response = await client.get("/api/v1/inventory/stocktake/current")
+    assert response.status_code == 200
+    current = response.json()["data"]
+    assert current["session_id"] == session_id
+    assert len(current["items"]) == len(start_data["items"])
+    product = next(item for item in current["items"] if item["product_id"] == 1)
+    assert product["submitted"] is True
+    assert product["actual_qty"] == 3
+    assert product["book_qty"] == 0
+
+
+async def test_stocktake_uses_start_time_book_snapshot(client, db_session):
+    mid = uuid.UUID(TEST_MERCHANT_ID)
+    async with db_session() as session:
+        await _create_inventory_record(session, mid, 1, "purchase", quantity=10)
+
+    start_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
+
+    # A sale after stocktake start changes the live ledger but must not change book_qty.
+    async with db_session() as session:
+        await _create_inventory_record(session, mid, 1, "sale", quantity=-4)
+
+    response = await client.post(
+        f"/api/v1/inventory/stocktake/{session_id}/submit",
+        json={"product_id": 1, "actual_qty": 10},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["book_qty"] == 10
+    assert response.json()["data"]["variance"] == 0
+
+
+async def test_complete_rejects_partially_counted_snapshot(client, db_session):
+    start_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
+    first = start_data["items"][0]
+    await client.post(
+        f"/api/v1/inventory/stocktake/{session_id}/submit",
+        json={"product_id": first["product_id"], "actual_qty": first["book_qty"]},
+    )
+
+    response = await client.post(
+        f"/api/v1/inventory/stocktake/{session_id}/complete", json={}
+    )
+    assert response.status_code == 400
+    assert "未录入" in response.json()["detail"]
+
+
+async def test_submit_item_rejects_negative_actual_qty(client, db_session):
+    start_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
+    session_id = start_resp.json()["data"]["session_id"]
+
+    response = await client.post(
+        f"/api/v1/inventory/stocktake/{session_id}/submit",
+        json={"product_id": 1, "actual_qty": -1, "variance_reason": "invalid"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_complete_repairs_legacy_missing_variance(client, db_session):
+    from app.models.stocktake import StocktakeItem
+
+    start_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
+    start_data = start_resp.json()["data"]
+    session_id = start_data["session_id"]
+    await _submit_all_snapshot_items(client, start_data, {1: 2})
+
+    async with db_session() as session:
+        item = (await session.execute(
+            select(StocktakeItem).where(
+                StocktakeItem.session_id == uuid.UUID(session_id),
+                StocktakeItem.product_id == 1,
+            )
+        )).scalar_one()
+        assert item.actual_qty is not None
+        item.variance = None
+        await session.commit()
+
+    complete = await client.post(
+        f"/api/v1/inventory/stocktake/{session_id}/complete", json={}
+    )
+    assert complete.status_code == 200, complete.text
+    assert complete.json()["data"]["total_variance"] == 2
+
+    async with db_session() as session:
+        repaired = (await session.execute(
+            select(StocktakeItem).where(
+                StocktakeItem.session_id == uuid.UUID(session_id),
+                StocktakeItem.product_id == 1,
+            )
+        )).scalar_one()
+        assert float(repaired.variance) == 2

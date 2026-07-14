@@ -26,34 +26,46 @@ router = APIRouter(prefix="/api/v1/twin", tags=["twin"])
 async def _estimate_cogs_twin(
     db: AsyncSession, merchant_id: uuid.UUID, records: Sequence, cutoff_days: int = 30
 ) -> float:
-    """Estimate cost of goods sold using average purchase cost per product."""
-    sale_products = {r.product_id for r in records if r.event_type == "sale"}
-    if not sale_products:
-        return 0.0
+    """Estimate cost of goods sold, preferring actual FIFO costs from sale records.
 
-    cutoff = local_days_ago(cutoff_days)
-    cost_query = (
-        select(
-            InventoryRecord.product_id,
-            func.avg(InventoryRecord.unit_cost).label("avg_cost"),
-        )
-        .where(
-            InventoryRecord.merchant_id == merchant_id,
-            InventoryRecord.is_voided == False,  # noqa: E712
-            InventoryRecord.event_type == "purchase",
-            InventoryRecord.unit_cost.isnot(None),
-            InventoryRecord.event_time >= cutoff,
-        )
-        .group_by(InventoryRecord.product_id)
-    )
-    cost_result = await db.execute(cost_query)
-    avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
-
+    Sale records populated with unit_cost via FIFO batch consumption are used
+    directly. Records without unit_cost fall back to the 30-day purchase average
+    for the product.
+    """
     cogs = 0.0
+    unknown_products: dict[int, float] = {}
+
     for r in records:
-        if r.event_type == "sale":
-            avg_cost = avg_costs.get(r.product_id, 0)
-            cogs += abs(float(r.quantity)) * avg_cost
+        if r.event_type != "sale":
+            continue
+        if r.unit_cost is not None:
+            cogs += abs(float(r.quantity)) * float(r.unit_cost)
+        else:
+            pid = r.product_id
+            unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
+
+    if unknown_products:
+        cutoff = local_days_ago(cutoff_days)
+        cost_query = (
+            select(
+                InventoryRecord.product_id,
+                func.avg(InventoryRecord.unit_cost).label("avg_cost"),
+            )
+            .where(
+                InventoryRecord.merchant_id == merchant_id,
+                InventoryRecord.is_voided == False,  # noqa: E712
+                InventoryRecord.event_type == "purchase",
+                InventoryRecord.unit_cost.isnot(None),
+                InventoryRecord.product_id.in_(set(unknown_products)),
+                InventoryRecord.event_time >= cutoff,
+            )
+            .group_by(InventoryRecord.product_id)
+        )
+        cost_result = await db.execute(cost_query)
+        avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
+        for pid, qty in unknown_products.items():
+            avg_cost = avg_costs.get(pid, 0)
+            cogs += qty * avg_cost
 
     return round(cogs, 2)
 

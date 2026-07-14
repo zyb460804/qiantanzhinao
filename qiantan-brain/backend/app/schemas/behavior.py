@@ -2,23 +2,36 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ApiResponse
 
 
 class FeedbackResult(BaseModel):
-    acknowledged: bool = True
+    purchase_style: str
+    profile_label: str
+    recommended_multiplier: float
+    total_decisions_recorded: int
 
 
 class BehaviorProfile(BaseModel):
-    merchant_id: str
+    purchase_style: str
+    profile_label: str
+    quantity_multiplier: float
+    total_decisions: int
     adoption_rate: float | None = None
     correction_rate: float | None = None
-    event_distribution: dict | None = None
+    risk_profile: str
 
 
-# ── 响应信封 ─────────────────────────────────────────────
+class AvailableProfile(BaseModel):
+    key: str
+    label: str
+    desc: str
+
 
 FeedbackResponse = ApiResponse[FeedbackResult]
-ProfileResponse = ApiResponse[BehaviorProfile]
+
+
+class ProfileResponse(ApiResponse[BehaviorProfile]):
+    available_profiles: list[AvailableProfile] = Field(default_factory=list)

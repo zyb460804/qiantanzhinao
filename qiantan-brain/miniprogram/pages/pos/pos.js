@@ -7,6 +7,8 @@ function paymentLabel(method) {
 }
 
 Page({
+  // 阻止弹窗/卡片内部 tap 冒泡到外层关闭区域。
+  stopMaskTap: function () {},
   data: {
     skin: 'noon', loading: true, submitting: false,
     products: [], cart: [], grossAmount: 0, discountAmount: 0, payableAmount: 0,
@@ -23,7 +25,8 @@ Page({
     // 挂单
     heldOrders: [], showHeld: false,
     // 退款弹窗
-    showRefund: false, refundOrder: null, refundReason: '', refundReturnStock: true, refundSubmitting: false
+    showRefund: false, refundOrder: null, refundReason: '', refundReturnStock: true, refundSubmitting: false,
+    refundPartial: false, refundItems: [], refundItemsLoading: false
   },
 
   onShow: function () {
@@ -43,9 +46,14 @@ Page({
       app.request({ url: '/pos/orders?limit=10' })
     ]).then(function (res) {
       var products = (res[0] || []).filter(function (item) { return Number(item.current_qty) > 0; }).map(function (item) {
-        var price = item.default_sale_price;
+        var price = item.sale_price;
+        if (price === null || price === undefined) price = item.default_sale_price;
         if (price === null || price === undefined) price = money(Number(item.avg_cost || 0) * 1.3);
-        return Object.assign({}, item, { sale_price: money(price), price_is_estimated: !item.default_sale_price });
+        return Object.assign({}, item, {
+          sale_price: money(price),
+          price_is_promotion: item.promotion_price !== null && item.promotion_price !== undefined,
+          price_is_estimated: (item.sale_price === null || item.sale_price === undefined) && !item.default_sale_price,
+        });
       });
       self.setData({ products: products, records: self.mergePendingRecords(res[1] || []), loading: false });
     }).catch(function () { self.setData({ loading: false }); });
@@ -77,7 +85,7 @@ Page({
     if (Number(product.sale_price) <= 0) {
       wx.showModal({ title: '设置售价', editable: true, placeholderText: '请输入每' + product.unit + '售价', success: function (r) {
         var price = Number(r.content);
-        if (r.confirm && price >= 0) self.addToCart(product, price);
+        if (r.confirm && price > 0) self.addToCart(product, price); else if (r.confirm) wx.showToast({ title: '售价必须大于0', icon: 'none' });
       }});
       return;
     }
@@ -88,8 +96,13 @@ Page({
     var cart = this.data.cart.slice();
     var found = -1;
     for (var i = 0; i < cart.length; i++) if (cart[i].product_id === product.product_id) found = i;
-    if (found >= 0) cart[found].quantity = money(cart[found].quantity + 1);
-    else cart.push({ product_id: product.product_id, sku_id: product.sku_id, product_name: product.sku_name || product.product_name, quantity: 1, max_qty: product.current_qty, unit: product.unit, unit_price: money(price) });
+    if (found >= 0) {
+      if (cart[found].quantity + 1 > Number(cart[found].max_qty)) { wx.showToast({ title: '库存不足', icon: 'none' }); return; }
+      cart[found].quantity = money(cart[found].quantity + 1);
+    } else {
+      if (Number(product.current_qty) < 1) { wx.showToast({ title: '库存不足', icon: 'none' }); return; }
+      cart.push({ product_id: product.product_id, sku_id: product.sku_id, product_name: product.sku_name || product.product_name, quantity: 1, max_qty: product.current_qty, unit: product.unit, unit_price: money(price) });
+    }
     this.updateCart(cart);
   },
 
@@ -98,7 +111,9 @@ Page({
     var delta = Number(e.currentTarget.dataset.delta);
     var cart = this.data.cart.slice();
     if (!cart[index]) return;
-    cart[index].quantity = money(cart[index].quantity + delta);
+    var nextQty = money(cart[index].quantity + delta);
+    if (nextQty > Number(cart[index].max_qty)) { wx.showToast({ title: '不能超过当前库存', icon: 'none' }); return; }
+    cart[index].quantity = nextQty;
     if (cart[index].quantity <= 0) cart.splice(index, 1);
     this.updateCart(cart);
   },
@@ -110,6 +125,7 @@ Page({
     if (!item) return;
     wx.showModal({ title: item.product_name + '称重', editable: true, placeholderText: '输入数量（' + item.unit + '）', content: String(item.quantity), success: function (r) {
       var qty = Number(r.content);
+      if (r.confirm && qty > Number(item.max_qty)) { wx.showToast({ title: '不能超过当前库存 ' + item.max_qty + item.unit, icon: 'none' }); return; }
       if (r.confirm && qty > 0) { var cart = self.data.cart.slice(); cart[index].quantity = money(qty); self.updateCart(cart); }
     }});
   },
@@ -297,6 +313,7 @@ Page({
   // ==================== 挂单 ====================
 
   holdOrder: function () {
+    if (this.data.submitting) return;
     if (!this.data.cart.length) { wx.showToast({ title: '购物车为空', icon: 'none' }); return; }
     var self = this;
     this.setData({ submitting: true });
@@ -355,10 +372,14 @@ Page({
   _resumeWithCombined: function (orderId, order) {
     var self = this;
     wx.showModal({ title: '组合支付 ¥' + order.total_amount, editable: true, placeholderText: '微信金额', content: String(order.total_amount), success: function (r1) {
-      var wechatAmt = money(r1.content);
       if (!r1.confirm) return;
-      var remaining = money(order.total_amount - wechatAmt);
-      if (remaining <= 0) {
+      var wechatAmt = money(r1.content);
+      var total = money(order.total_amount);
+      if (!isFinite(Number(r1.content)) || wechatAmt <= 0 || wechatAmt > total) {
+        wx.showToast({ title: '微信金额必须大于0且不超过应收', icon: 'none' }); return;
+      }
+      var remaining = money(total - wechatAmt);
+      if (remaining === 0) {
         self.setData({ submitting: true });
         app.request({ url: '/pos/orders/' + orderId + '/resume', method: 'POST', data: { payments: [{ method: 'wechat', amount: wechatAmt }] } }).then(function () {
           self.setData({ submitting: false }); wx.showToast({ title: '已取回收款', icon: 'none' }); self.loadHeldOrders(); self.loadData();
@@ -367,10 +388,20 @@ Page({
       }
       wx.showActionSheet({ itemList: ['现金 ¥' + remaining, '赊账 ¥' + remaining], success: function (r2) {
         var method2 = r2.tapIndex === 0 ? 'cash' : 'credit';
-        self.setData({ submitting: true });
-        app.request({ url: '/pos/orders/' + orderId + '/resume', method: 'POST', data: { payments: [{ method: 'wechat', amount: wechatAmt }, { method: method2, amount: remaining }] } }).then(function () {
-          self.setData({ submitting: false }); wx.showToast({ title: '已取回收款', icon: 'none' }); self.loadHeldOrders(); self.loadData();
-        }).catch(function (err) { self.setData({ submitting: false }); wx.showToast({ title: (err.body && err.body.detail) || '失败', icon: 'none' }); });
+        var submitCombined = function (customerName) {
+          self.setData({ submitting: true });
+          app.request({ url: '/pos/orders/' + orderId + '/resume', method: 'POST', data: { customer_name: customerName || order.customer_name || null, payments: [{ method: 'wechat', amount: wechatAmt }, { method: method2, amount: remaining }] } }).then(function () {
+            self.setData({ submitting: false }); wx.showToast({ title: '已取回收款', icon: 'none' }); self.loadHeldOrders(); self.loadData();
+          }).catch(function (err) { self.setData({ submitting: false }); wx.showToast({ title: (err.body && err.body.detail) || '失败', icon: 'none' }); });
+        };
+        if (method2 === 'credit' && !(order.customer_name || '').trim()) {
+          wx.showModal({ title: '赊账客户', editable: true, placeholderText: '请输入客户姓名', success: function (r3) {
+            var customerName = (r3.content || '').trim();
+            if (!r3.confirm) return;
+            if (!customerName) { wx.showToast({ title: '赊账必须填写客户姓名', icon: 'none' }); return; }
+            submitCombined(customerName);
+          }});
+        } else submitCombined(order.customer_name);
       }});
     }});
   },
@@ -384,26 +415,73 @@ Page({
     if (order.status === 'held' || order.status === 'pending' || order.status === 'cancelled') {
       wx.showToast({ title: '当前状态不可退款', icon: 'none' }); return;
     }
-    this.setData({ showRefund: true, refundOrder: order, refundReason: '', refundReturnStock: true });
+    this.setData({ showRefund: true, refundOrder: order, refundReason: '', refundReturnStock: true, refundPartial: false, refundItems: [] });
+    // Fetch order details for partial refund support
+    var self = this;
+    app.request({ url: '/pos/orders/' + orderId }).then(function (data) {
+      if (!data || !data.items) return;
+      var items = data.items.map(function (it) {
+        return {
+          item_id: it.item_id || it.id,
+          product_name: it.product_name || ('商品' + it.product_id),
+          quantity: Number(it.quantity) || 0,
+          refund_qty: 0,
+          unit_price: Number(it.unit_price) || 0,
+          unit: it.unit || '斤',
+        };
+      });
+      self.setData({ refundItems: items });
+    }).catch(function () {});
   },
 
   closeRefund: function () {
-    this.setData({ showRefund: false, refundOrder: null, refundReason: '', refundReturnStock: true });
+    this.setData({ showRefund: false, refundOrder: null, refundReason: '', refundReturnStock: true, refundPartial: false, refundItems: [] });
   },
 
   inputRefundReason: function (e) { this.setData({ refundReason: e.detail.value }); },
   toggleReturnStock: function () { this.setData({ refundReturnStock: !this.data.refundReturnStock }); },
+  toggleRefundPartial: function () {
+    this.setData({
+      refundPartial: !this.data.refundPartial,
+      refundItems: this.data.refundItems.map(function (it) { return Object.assign({}, it, { refund_qty: 0 }); }),
+    });
+  },
+  editRefundQty: function (e) {
+    var idx = e.currentTarget.dataset.idx;
+    var num = parseFloat(e.detail.value) || 0;
+    if (num < 0) num = 0;
+    var items = this.data.refundItems.slice();
+    if (items[idx]) {
+      items[idx] = Object.assign({}, items[idx], { refund_qty: Math.min(num, items[idx].quantity) });
+    }
+    this.setData({ refundItems: items });
+  },
 
   confirmRefund: function () {
+    if (this.data.refundSubmitting) return;
     var self = this;
     var order = this.data.refundOrder;
     var reason = this.data.refundReason.trim();
     if (!reason) { wx.showToast({ title: '请填写退款原因', icon: 'none' }); return; }
     this.setData({ refundSubmitting: true });
-    app.request({ url: '/pos/orders/' + order.order_id + '/refund', method: 'POST', data: {
-      reason: reason, return_to_stock: this.data.refundReturnStock
-    }}).then(function (data) {
-      self.setData({ refundSubmitting: false, showRefund: false, refundOrder: null });
+
+    var payload = { reason: reason, return_to_stock: this.data.refundReturnStock };
+
+    // Partial refund: send selected items
+    if (this.data.refundPartial) {
+      var items = (this.data.refundItems || []).filter(function (it) { return it.refund_qty > 0; });
+      if (items.length === 0) {
+        self.setData({ refundSubmitting: false });
+        wx.showToast({ title: '请填写退款数量', icon: 'none' });
+        return;
+      }
+      payload.items = items.map(function (it) {
+        return { item_id: it.item_id, quantity: it.refund_qty, return_to_stock: self.data.refundReturnStock };
+      });
+    }
+
+    app.request({ url: '/pos/orders/' + order.order_id + '/refund', method: 'POST', data: payload }).then(function (data) {
+      self.setData({ refundSubmitting: false, showRefund: false, refundOrder: null, refundPartial: false, refundItems: [] });
       wx.showToast({ title: '已退款 ¥' + data.refunded_amount, icon: 'none' });
       self.loadData();
     }).catch(function (err) {
@@ -416,16 +494,19 @@ Page({
 
   closeDay: function () {
     var self = this;
-    var today = new Date().toISOString().slice(0, 10);
+    if (this.data.submitting) return;
+    var now = new Date();
+    var today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
     wx.showModal({ title: '确认日结', content: '将按系统销售、各渠道实收、采购付款、赊账余额生成对账结果。日结后不可直接修改历史记录。', success: function (r) {
       if (!r.confirm) return;
+      self.setData({ submitting: true });
       app.request({ url: '/pos/daily-settlement/' + today + '/close', method: 'POST' }).then(function (data) {
         // WXML 不支持调用 Math.abs,在 JS 中预计算布尔值再绑定
         var isBalanced = Math.abs(data.diff_amount || 0) < 0.01;
         data.isBalanced = isBalanced;
-        self.setData({ settlement: data });
+        self.setData({ settlement: data, submitting: false });
         wx.showToast({ title: isBalanced ? '日结完成，账目平衡' : '日结完成，存在差异', icon: 'none' });
-      }).catch(function () { wx.showToast({ title: '日结失败，请重试', icon: 'none' }); });
+      }).catch(function () { self.setData({ submitting: false }); wx.showToast({ title: '日结失败，请重试', icon: 'none' }); });
     }});
   }
 });

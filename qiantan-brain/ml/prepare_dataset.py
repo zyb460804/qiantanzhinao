@@ -30,24 +30,47 @@ YOLO 标注格式 (每行一个目标):
 """
 
 import argparse
-import os
 import random
 import shutil
 from pathlib import Path
 
+
 # ── 15 类商品 (与 train_yolo.py 保持一致) ──────────────────────────
 CLASS_NAMES = [
-    "白菜", "土豆", "黄瓜", "番茄", "苹果", "西瓜", "香蕉",
-    "鸡蛋", "豆腐", "猪肉", "牛肉", "鸡肉", "鱼", "葱", "姜",
+    "白菜",
+    "土豆",
+    "黄瓜",
+    "番茄",
+    "苹果",
+    "西瓜",
+    "香蕉",
+    "鸡蛋",
+    "豆腐",
+    "猪肉",
+    "牛肉",
+    "鸡肉",
+    "鱼",
+    "葱",
+    "姜",
 ]
 
 # 类别名 → 拼音文件夹名
 PINYIN_MAP = {
-    "白菜": "baicai", "土豆": "tudou", "黄瓜": "huanggua",
-    "番茄": "fanqie", "苹果": "pingguo", "西瓜": "xigua",
-    "香蕉": "xiangjiao", "鸡蛋": "jidan", "豆腐": "doufu",
-    "猪肉": "zhurou", "牛肉": "niurou", "鸡肉": "jirou",
-    "鱼": "yu", "葱": "cong", "姜": "jiang",
+    "白菜": "baicai",
+    "土豆": "tudou",
+    "黄瓜": "huanggua",
+    "番茄": "fanqie",
+    "苹果": "pingguo",
+    "西瓜": "xigua",
+    "香蕉": "xiangjiao",
+    "鸡蛋": "jidan",
+    "豆腐": "doufu",
+    "猪肉": "zhurou",
+    "牛肉": "niurou",
+    "鸡肉": "jirou",
+    "鱼": "yu",
+    "葱": "cong",
+    "姜": "jiang",
 }
 
 
@@ -88,12 +111,11 @@ def split_dataset(
     """
     random.seed(seed)
     base = Path(raw_dir)
-    output = Path(output_dir)
     dirs = create_dirtree(output_dir)
 
     stats = {}
 
-    for class_id, name in enumerate(CLASS_NAMES):
+    for name in CLASS_NAMES:
         # 尝试中文名和拼音文件夹
         cls_dir = base / name
         if not cls_dir.exists():
@@ -132,8 +154,8 @@ def split_dataset(
 
         splits = {
             "train": images[:n_train],
-            "val": images[n_train:n_train + n_val],
-            "test": images[n_train + n_val:],
+            "val": images[n_train : n_train + n_val],
+            "test": images[n_train + n_val :],
         }
 
         # 复制到目标目录
@@ -154,7 +176,10 @@ def split_dataset(
             "val": len(splits["val"]),
             "test": len(splits["test"]),
         }
-        print(f"  ✅ [{name}] {n} 张 → train:{len(splits['train'])} val:{len(splits['val'])} test:{len(splits['test'])}")
+        print(
+            f"  ✅ [{name}] {n} 张 → train:{len(splits['train'])} "
+            f"val:{len(splits['val'])} test:{len(splits['test'])}"
+        )
 
     # 打印汇总
     total = sum(s["total"] for s in stats.values())

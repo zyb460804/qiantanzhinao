@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -17,7 +18,12 @@ from app.models.pos import Payment, SaleOrder
 from app.services.batch import create_batch
 
 
-async def _seed_stock(db_session, merchant_id: str = TEST_MERCHANT_ID, quantity: int = 10):
+async def _seed_stock(
+    db_session,
+    merchant_id: str = TEST_MERCHANT_ID,
+    quantity: int = 10,
+    unit_cost: Decimal | None = None,
+):
     async with db_session() as session:
         await create_batch(
             session,
@@ -26,6 +32,7 @@ async def _seed_stock(db_session, merchant_id: str = TEST_MERCHANT_ID, quantity:
             "白菜",
             f"白菜-pos-{merchant_id[-4:]}",
             Decimal(str(quantity)),
+            unit_cost=unit_cost,
         )
         await session.commit()
 
@@ -126,6 +133,21 @@ async def test_insufficient_stock_rejects_entire_order(client, db_session):
 @pytest.mark.asyncio
 async def test_daily_settlement_breaks_down_payment_channels_and_recloses(client, db_session):
     await _seed_stock(db_session, quantity=20)
+    async with db_session() as session:
+        session.add(
+            InventoryRecord(
+                merchant_id=uuid.UUID(TEST_MERCHANT_ID),
+                product_id=1,
+                quantity=Decimal("20"),
+                unit="斤",
+                unit_cost=Decimal("2"),
+                total_amount=Decimal("40"),
+                event_type="purchase",
+                event_time=utc_now(),
+                source="test",
+            )
+        )
+        await session.commit()
     cash = await client.post("/api/v1/pos/orders", json=_order_payload("pos-settle-cash-001"))
     wechat = await client.post(
         "/api/v1/pos/orders", json=_order_payload("pos-settle-wechat-001", payment_method="wechat")
@@ -140,4 +162,58 @@ async def test_daily_settlement_breaks_down_payment_channels_and_recloses(client
     assert data["total_sales"] == 14.0
     assert data["cash_amount"] == 7.0
     assert data["wechat_amount"] == 7.0
+    assert data["estimated_cogs"] == 8.0
+    assert data["estimated_gross_profit"] == 6.0
+    assert data["diff_amount"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_daily_settlement_without_business_data_returns_decimal_zeroes(client):
+    settle_date = (utc_now().date() + timedelta(days=30)).isoformat()
+    response = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["order_count"] == 0
+    assert data["total_sales"] == 0.0
+    assert data["total_payments"] == 0.0
+    assert data["cash_amount"] == 0.0
+    assert data["refund_amount"] == 0.0
+    assert data["estimated_cogs"] == 0.0
+    assert data["estimated_gross_profit"] == 0.0
+    assert data["diff_amount"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_fifo_cogs_is_persisted_and_restocked_refund_reverses_cost(client, db_session):
+    await _seed_stock(db_session, quantity=10, unit_cost=Decimal("2.50"))
+    created = await client.post(
+        "/api/v1/pos/orders",
+        json=_order_payload("pos-fifo-cost-001"),
+    )
+    assert created.status_code == 200
+    order_id = created.json()["data"]["order_id"]
+
+    async with db_session() as session:
+        order = await session.get(SaleOrder, uuid.UUID(order_id))
+        assert order is not None
+        sale_record = (
+            await session.execute(
+                select(InventoryRecord).where(InventoryRecord.event_type == "sale")
+            )
+        ).scalar_one()
+        assert sale_record.unit_cost == Decimal("2.50")
+
+    refunded = await client.post(
+        f"/api/v1/pos/orders/{order_id}/refund",
+        json={"reason": "整单退回", "return_to_stock": True},
+    )
+    assert refunded.status_code == 200
+    settle_date = utc_now().date().isoformat()
+    settled = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
+    assert settled.status_code == 200
+    data = settled.json()["data"]
+    assert data["estimated_cogs"] == 0.0
+    assert data["estimated_gross_profit"] == 0.0
+    assert data["total_payments"] == 0.0
+    assert data["net_cash_flow"] == 0.0
     assert data["diff_amount"] == 0.0

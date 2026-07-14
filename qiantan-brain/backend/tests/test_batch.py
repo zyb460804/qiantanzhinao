@@ -10,15 +10,19 @@ Uses the shared ``db_session`` fixture from conftest, which seeds:
 
 import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import select
 
 from app.models.batch import BatchLifecycle
+from app.models.inventory import InventoryRecord
 from app.services.batch import (
     consume_batches_fifo,
+    consume_batches_fifo_costed,
     count_expiring_batches,
     create_batch,
     get_active_batches,
+    rollback_batch_on_void,
 )
 
 
@@ -280,3 +284,124 @@ async def test_get_active_batches_ordered_by_expiry(db_session):
 
         assert len(batches) == 2
         assert batches[0].expiry_date <= batches[1].expiry_date
+
+
+async def test_rollback_partially_consumed_purchase_keeps_decimal_quantities(db_session):
+    async with db_session() as session:
+        await create_batch(
+            session,
+            MERCHANT_ID,
+            1,
+            "白菜",
+            "白菜-rollback-purchase",
+            Decimal("10"),
+            datetime.now(),
+        )
+        await session.commit()
+        assert await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("4")) == Decimal(
+            "4.00"
+        )
+
+        record = InventoryRecord(
+            merchant_id=MERCHANT_ID,
+            product_id=1,
+            quantity=Decimal("10"),
+            unit="斤",
+            event_type="purchase",
+            event_time=datetime.now(),
+            batch_label="白菜-rollback-purchase",
+        )
+        summary = await rollback_batch_on_void(session, MERCHANT_ID, 1, record)
+        await session.flush()
+
+        batch = (
+            await session.execute(
+                select(BatchLifecycle).where(
+                    BatchLifecycle.merchant_id == MERCHANT_ID,
+                    BatchLifecycle.batch_label == "白菜-rollback-purchase",
+                )
+            )
+        ).scalar_one()
+        assert batch.purchase_qty == Decimal("4.00")
+        assert batch.remaining_qty == Decimal("0.00")
+        assert summary == {
+            "event_type": "purchase",
+            "batches_affected": 1,
+            "qty_adjusted": Decimal("-6.00"),
+            "action": "reduced",
+        }
+
+
+async def test_rollback_sale_restores_consumed_batch(db_session):
+    async with db_session() as session:
+        await create_batch(
+            session,
+            MERCHANT_ID,
+            1,
+            "白菜",
+            "白菜-rollback-sale",
+            Decimal("10"),
+            datetime.now(),
+        )
+        await session.commit()
+        await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("4"))
+
+        record = InventoryRecord(
+            merchant_id=MERCHANT_ID,
+            product_id=1,
+            quantity=Decimal("-4"),
+            unit="斤",
+            event_type="sale",
+            event_time=datetime.now(),
+        )
+        summary = await rollback_batch_on_void(session, MERCHANT_ID, 1, record)
+        await session.flush()
+
+        batch = (
+            await session.execute(
+                select(BatchLifecycle).where(
+                    BatchLifecycle.merchant_id == MERCHANT_ID,
+                    BatchLifecycle.batch_label == "白菜-rollback-sale",
+                )
+            )
+        ).scalar_one()
+        assert batch.remaining_qty == Decimal("10.00")
+        assert summary["qty_adjusted"] == Decimal("4.00")
+        assert summary["action"] == "restored"
+
+
+async def test_fifo_consumption_returns_weighted_actual_batch_cost(db_session):
+    async with db_session() as session:
+        await create_batch(
+            session,
+            MERCHANT_ID,
+            1,
+            "白菜",
+            "白菜-cost-old",
+            Decimal("3"),
+            datetime.now() - timedelta(hours=2),
+            unit_cost=Decimal("2"),
+        )
+        await create_batch(
+            session,
+            MERCHANT_ID,
+            1,
+            "白菜",
+            "白菜-cost-new",
+            Decimal("4"),
+            datetime.now() - timedelta(hours=1),
+            unit_cost=Decimal("4"),
+        )
+        await session.commit()
+
+        consumption = await consume_batches_fifo_costed(
+            session,
+            MERCHANT_ID,
+            1,
+            Decimal("5"),
+        )
+        assert consumption == {
+            "quantity": Decimal("5.00"),
+            "total_cost": Decimal("14.00"),
+            "missing_cost_quantity": Decimal("0.00"),
+        }

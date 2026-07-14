@@ -7,7 +7,9 @@ Modes:
 - Demo: returns simulated results when model file is missing
 """
 
+import hashlib
 import io
+import json
 import random
 from pathlib import Path
 
@@ -20,7 +22,9 @@ class YOLOInference:
     - Demo: returns simulated results when model file is missing
     """
 
-    MODEL_PATH = Path(__file__).parent / "model" / "yolov8n_products.onnx"
+    MODEL_DIR = Path(__file__).parent / "model"
+    MODEL_PATH = MODEL_DIR / "yolov8n_products.onnx"
+    MANIFEST_PATH = MODEL_DIR / "model-manifest.json"
     CLASSES = [
         "白菜",   # 0
         "菠菜",   # 1
@@ -44,7 +48,9 @@ class YOLOInference:
 
     def __init__(self):
         self._session = None
-        self._model_available = self.MODEL_PATH.exists()
+        self.manifest = self._load_manifest()
+        self.model_version = str(self.manifest.get("model_version", "demo"))
+        self._model_available = self.MODEL_PATH.exists() and self._verify_model_digest()
         if self._model_available:
             try:
                 import onnxruntime as ort
@@ -63,9 +69,51 @@ class YOLOInference:
                 self._model_available = False
                 self._session = None
         else:
-            print(f"[YOLOInference] 模型文件未找到: {self.MODEL_PATH}")
+            print(f"[YOLOInference] 模型不可用: {self.MODEL_PATH}")
             print("  当前为演示模式，将返回模拟识别结果")
-            print("  训练并部署模型后可启用真实推理")
+            print("  部署模型时必须同时提供 model-manifest.json 并匹配 SHA256")
+
+    def _load_manifest(self) -> dict:
+        """Load and validate model metadata used for reproducible deployment."""
+        if not self.MANIFEST_PATH.exists():
+            print(f"[YOLOInference] 模型清单未找到: {self.MANIFEST_PATH}")
+            return {}
+        try:
+            manifest = json.loads(self.MANIFEST_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[YOLOInference] 模型清单读取失败: {exc}")
+            return {}
+
+        required = {"model_version", "model_file", "sha256", "classes", "input_size"}
+        if not required.issubset(manifest):
+            missing = ", ".join(sorted(required - set(manifest)))
+            print(f"[YOLOInference] 模型清单缺少字段: {missing}")
+            return {}
+        if manifest["model_file"] != self.MODEL_PATH.name:
+            print("[YOLOInference] 模型清单中的 model_file 与部署文件不匹配")
+            return {}
+        if manifest["classes"] != self.CLASSES or manifest["input_size"] != self.INPUT_SIZE:
+            print("[YOLOInference] 模型清单的类别或输入尺寸与运行时代码不匹配")
+            return {}
+        digest = str(manifest["sha256"]).lower()
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            print("[YOLOInference] 模型清单 sha256 格式无效")
+            return {}
+        return manifest
+
+    def _verify_model_digest(self) -> bool:
+        """Fail closed when a deployed model is missing or fails its manifest digest."""
+        if not self.manifest:
+            return False
+        try:
+            digest = hashlib.sha256(self.MODEL_PATH.read_bytes()).hexdigest()
+        except OSError as exc:
+            print(f"[YOLOInference] 模型文件读取失败: {exc}")
+            return False
+        if digest != str(self.manifest["sha256"]).lower():
+            print("[YOLOInference] 模型 SHA256 校验失败，拒绝加载")
+            return False
+        return True
 
     def predict(self, image_bytes: bytes) -> list[dict]:
         """Run inference on an image.
@@ -86,7 +134,6 @@ class YOLOInference:
 
     def _real_predict(self, image_bytes: bytes) -> list[dict]:
         """使用 ONNX Runtime 执行真实推理。"""
-        import numpy as np
 
         # 1. 解码图片
         img, orig_h, orig_w = self._decode_image(image_bytes)

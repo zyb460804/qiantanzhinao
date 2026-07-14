@@ -15,6 +15,7 @@ from __future__ import annotations
 import json as _json
 import os
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
@@ -35,15 +36,24 @@ router = APIRouter(prefix="/api/v1/media", tags=["media"])
 # Allowed MIME types per media type
 MIME_WHITELIST: dict[str, set[str]] = {
     "image": {
-        "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/heic",
+        "image/heif",
     },
     "audio": {
-        "audio/mpeg", "audio/mp4", "audio/wav", "audio/aac", "audio/ogg",
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/wav",
+        "audio/aac",
+        "audio/ogg",
         "audio/amr",  # WeChat voice recording
     },
     "document": {
         "application/pdf",
-        "image/jpeg", "image/png",  # photos of documents
+        "image/jpeg",
+        "image/png",  # photos of documents
     },
 }
 
@@ -67,15 +77,16 @@ async def upload_media(
     """
     import mimetypes
 
-
     # 1. Check idempotency
     if idempotency_key:
-        existing = (await db.execute(
-            select(MediaFile).where(
-                MediaFile.merchant_id == merchant.id,
-                MediaFile.idempotency_key == idempotency_key,
+        existing = (
+            await db.execute(
+                select(MediaFile).where(
+                    MediaFile.merchant_id == merchant.id,
+                    MediaFile.idempotency_key == idempotency_key,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if existing:
             return {
                 "code": 409,
@@ -88,7 +99,11 @@ async def upload_media(
             }
 
     # 2. Validate MIME
-    mime = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
+    mime = (
+        file.content_type
+        or mimetypes.guess_type(file.filename or "")[0]
+        or "application/octet-stream"
+    )
     allowed_mimes = MIME_WHITELIST.get(media_type, set())
     if allowed_mimes and mime not in allowed_mimes:
         raise HTTPException(
@@ -113,7 +128,7 @@ async def upload_media(
         f.write(contents)
 
     # 6. Parse business payload
-    payload = {}
+    payload: dict[str, Any] = {}
     try:
         payload = _json.loads(business_payload) if business_payload else {}
     except _json.JSONDecodeError:
@@ -170,16 +185,32 @@ async def list_media_files(
     if business_type:
         filters.append(MediaFile.business_type == business_type)
     offset = (page - 1) * limit
-    rows = (await db.execute(
-        select(MediaFile).where(*filters)
-        .order_by(MediaFile.uploaded_at.desc()).offset(offset).limit(min(limit, 100))
-    )).scalars().all()
-    return {"code": 0, "data": [
-        {
-            "file_id": str(r.id), "original_name": r.original_name,
-            "media_type": r.media_type, "business_type": r.business_type,
-            "file_size": r.file_size, "mime_type": r.mime_type,
-            "uploaded_at": r.uploaded_at.isoformat() if r.uploaded_at else None,
-        }
-        for r in rows
-    ], "meta": {"page": page, "limit": limit}}
+    rows = (
+        (
+            await db.execute(
+                select(MediaFile)
+                .where(*filters)
+                .order_by(MediaFile.uploaded_at.desc())
+                .offset(offset)
+                .limit(min(limit, 100))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "code": 0,
+        "data": [
+            {
+                "file_id": str(r.id),
+                "original_name": r.original_name,
+                "media_type": r.media_type,
+                "business_type": r.business_type,
+                "file_size": r.file_size,
+                "mime_type": r.mime_type,
+                "uploaded_at": r.uploaded_at.isoformat() if r.uploaded_at else None,
+            }
+            for r in rows
+        ],
+        "meta": {"page": page, "limit": limit},
+    }

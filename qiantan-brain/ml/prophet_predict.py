@@ -8,13 +8,13 @@ Usage:   python prophet_predict.py --product baicai --days 7 --compare
 
 import argparse
 import json
-import os
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
 
 try:
     from prophet import Prophet
@@ -27,8 +27,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 # Chinese holidays config
 CN_HOLIDAYS = {
     "Spring Festival": [
-        date(2027, 1, 26), date(2027, 1, 27), date(2027, 1, 28),
-        date(2027, 1, 29), date(2027, 1, 30), date(2027, 1, 31),
+        date(2027, 1, 26),
+        date(2027, 1, 27),
+        date(2027, 1, 28),
+        date(2027, 1, 29),
+        date(2027, 1, 30),
+        date(2027, 1, 31),
         date(2027, 2, 1),
     ],
     "Labor Day": [date(2027, 5, 1), date(2027, 5, 2), date(2027, 5, 3)],
@@ -75,7 +79,9 @@ def train_prophet(df: pd.DataFrame, use_regressors: bool = True) -> Prophet:
     return model
 
 
-def predict(model: Prophet, periods: int = 7, future_regressors: dict | None = None) -> pd.DataFrame:
+def predict(
+    model: Prophet, periods: int = 7, future_regressors: dict | None = None
+) -> pd.DataFrame:
     """Generate N-day forecast with optional future regressor values."""
     future = model.make_future_dataframe(periods=periods)
 
@@ -86,7 +92,7 @@ def predict(model: Prophet, periods: int = 7, future_regressors: dict | None = N
             if future_regressors and col in future_regressors:
                 vals = future_regressors[col]
                 col_data = []
-                for i, row in future.iterrows():
+                for _, row in future.iterrows():
                     d = row["ds"].date() if hasattr(row["ds"], "date") else row["ds"]
                     idx = (d - date.today()).days
                     if 0 < idx <= len(vals):
@@ -101,8 +107,13 @@ def predict(model: Prophet, periods: int = 7, future_regressors: dict | None = N
     return forecast
 
 
-def ensemble_predict(prophet_qty: float, rule_qty: float, data_days: int,
-                     prophet_lower: float = 0, prophet_upper: float = 0) -> dict:
+def ensemble_predict(
+    prophet_qty: float,
+    rule_qty: float,
+    data_days: int,
+    prophet_lower: float = 0,
+    prophet_upper: float = 0,
+) -> dict:
     """Blend Prophet and rule-engine predictions by data maturity."""
     w_p = min(0.7, data_days / 120)
     w_r = 1 - w_p
@@ -132,18 +143,25 @@ def _generate_mock_data(product_name: str, days: int = 90) -> list[dict]:
         temp = 20 + np.random.normal(5, 5)
 
         mult = 1.0
-        if is_weekend: mult += 0.2
-        if temp > 30: mult += 0.15
-        if np.random.random() < 0.2: mult -= 0.1
+        if is_weekend:
+            mult += 0.2
+        if temp > 30:
+            mult += 0.15
+        if np.random.random() < 0.2:
+            mult -= 0.1
 
         qty = max(0, base * mult + np.random.normal(0, base * 0.15))
-        records.append({
-            "date": day.strftime("%Y-%m-%d"),
-            "quantity": round(qty, 1),
-            "temp_high": round(temp, 1),
-            "rainfall_prob": round(np.random.uniform(0, 80), 1) if np.random.random() < 0.25 else 0,
-            "is_weekend": is_weekend,
-        })
+        records.append(
+            {
+                "date": day.strftime("%Y-%m-%d"),
+                "quantity": round(qty, 1),
+                "temp_high": round(temp, 1),
+                "rainfall_prob": round(np.random.uniform(0, 80), 1)
+                if np.random.random() < 0.25
+                else 0,
+                "is_weekend": is_weekend,
+            }
+        )
     return records
 
 
@@ -156,7 +174,7 @@ def main():
     parser.add_argument("--compare", action="store_true")
     args = parser.parse_args()
 
-    print(f"QianTan Brain - Prophet Sales Forecast")
+    print("QianTan Brain - Prophet Sales Forecast")
     print(f"  Product: {args.product}")
     print(f"  Horizon: {args.days} days")
 
@@ -181,20 +199,22 @@ def main():
 
     results = []
     for _, row in future.iterrows():
-        results.append({
-            "date": row["ds"].strftime("%Y-%m-%d"),
-            "predicted_qty": round(row["yhat"], 1),
-            "lower_bound": round(row["yhat_lower"], 1),
-            "upper_bound": round(row["yhat_upper"], 1),
-        })
+        results.append(
+            {
+                "date": row["ds"].strftime("%Y-%m-%d"),
+                "predicted_qty": round(row["yhat"], 1),
+                "lower_bound": round(row["yhat_lower"], 1),
+                "upper_bound": round(row["yhat_upper"], 1),
+            }
+        )
 
-    print(f"\n  Forecast:")
+    print("\n  Forecast:")
     for r in results:
         print(f"    {r['date']}: {r['predicted_qty']} jin ({r['lower_bound']}~{r['upper_bound']})")
 
     # 4. Compare with rule engine
     if args.compare:
-        print(f"\n  [COMPARE] vs Rule Engine:")
+        print("\n  [COMPARE] vs Rule Engine:")
         try:
             from app.services.env_engine import EnvFactors, estimate_demand
 
@@ -205,8 +225,10 @@ def main():
                 max_historical_daily=df["y"].max(),
                 env_factors=EnvFactors(
                     date=date.today(),
-                    temp_high=28, rainfall_prob=20,
-                    is_holiday=False, is_weekend=False,
+                    temp_high=28,
+                    rainfall_prob=20,
+                    is_holiday=False,
+                    is_weekend=False,
                     day_of_week=date.today().weekday(),
                 ),
             )

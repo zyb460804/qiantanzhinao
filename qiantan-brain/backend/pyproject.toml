@@ -58,6 +58,7 @@ lines-after-imports = 2
 python_version = "3.12"
 warn_unused_configs = true
 ignore_missing_imports = true
+explicit_package_bases = true
 # 起步阶段不开启 strict，避免噪音。后续团队稳定后可逐步加：
 # disallow_untyped_defs = true
 # warn_return_any = true

@@ -64,4 +64,51 @@
 .purchase-cta { margin: 28rpx 0 8rpx; }
 .purchase-btn { width: 100%; }
 
+/* AI 可执行动作卡片 */
+.ai-action-stack { display: flex; flex-direction: column; gap: 16rpx; margin-top: 16rpx; margin-bottom: 20rpx; }
+.ai-action-card { padding: 24rpx; background: var(--paper); border: 2rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.ai-action-card.warn { border-left: 6rpx solid var(--corn); }
+.ai-action-card.info { border-left: 6rpx solid var(--green-700); }
+.ai-action-card.green { border-left: 6rpx solid var(--green-800); }
+.ai-action-top { display: flex; align-items: center; gap: 14rpx; }
+.ai-action-badge { flex: 0 0 auto; padding: 6rpx 16rpx; color: #fff; background: var(--green-800); border-radius: 999rpx; font-size: 20rpx; font-weight: 700; }
+.ai-action-card.warn .ai-action-badge { background: var(--corn); }
+.ai-action-title { flex: 1; min-width: 0; color: var(--ink); font-size: 27rpx; font-weight: 730; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-action-desc { display: block; margin-top: 12rpx; color: var(--muted); font-size: 23rpx; line-height: 1.5; }
+.ai-action-btns { display: flex; align-items: center; gap: 20rpx; margin-top: 18rpx; }
+.ai-btn-execute { flex: 1; height: 68rpx; line-height: 68rpx; padding: 0; font-size: 24rpx; font-weight: 700; border-radius: 16rpx; }
+.ai-btn-reject { flex: 0 0 auto; padding: 16rpx 24rpx; color: var(--muted); font-size: 23rpx; }
+
 .reduce-motion .caret { animation: none !important; }
+
+/* AI 可执行动作卡片 */
+.ai-action-stack { display: flex; flex-direction: column; gap: 16rpx; margin-top: 16rpx; }
+.ai-action-card { padding: 24rpx; background: var(--paper); border: 2rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.ai-action-card.warn { border-left: 6rpx solid var(--corn); }
+.ai-action-card.info { border-left: 6rpx solid var(--green-600); }
+.ai-action-card.green { border-left: 6rpx solid var(--green-800); }
+.ai-action-top { display: flex; align-items: center; gap: 14rpx; }
+.ai-action-badge { flex: 0 0 auto; padding: 5rpx 16rpx; color: #fff; background: var(--green-800); border-radius: 999rpx; font-size: 20rpx; font-weight: 750; }
+.ai-action-card.warn .ai-action-badge { background: var(--corn); }
+.ai-action-card.info .ai-action-badge { background: var(--green-600); }
+.ai-action-title { font-size: 27rpx; font-weight: 730; color: var(--ink); }
+.ai-action-desc { display: block; margin-top: 10rpx; color: var(--muted); font-size: 23rpx; line-height: 1.45; }
+.ai-action-btns { display: flex; align-items: center; gap: 20rpx; margin-top: 18rpx; }
+.ai-btn-execute { flex: 1; height: 72rpx; line-height: 72rpx; padding: 0; font-size: 25rpx; font-weight: 720; }
+.ai-btn-reject { flex: 0 0 auto; padding: 12rpx 24rpx; color: var(--muted); font-size: 23rpx; }
+
+/* 效果复盘 */
+.ai-history-stack { display: flex; flex-direction: column; gap: 12rpx; margin-top: 16rpx; margin-bottom: 20rpx; }
+.ai-history-item { padding: 18rpx 22rpx; background: var(--paper-2); border-radius: 14rpx; border-left: 4rpx solid var(--line); }
+.ai-history-item.executed { border-left-color: var(--green-700); }
+.ai-history-item.rejected { border-left-color: var(--muted); }
+.ai-history-item.failed { border-left-color: var(--corn); }
+.ai-history-top { display: flex; align-items: center; gap: 12rpx; }
+.ai-history-badge { flex: 0 0 auto; padding: 4rpx 12rpx; color: var(--green-800); background: var(--green-50); border-radius: 8rpx; font-size: 19rpx; font-weight: 700; }
+.ai-history-title { flex: 1; min-width: 0; color: var(--ink); font-size: 24rpx; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-history-status { flex: 0 0 auto; font-size: 20rpx; font-weight: 700; }
+.ai-history-status.executed { color: var(--green-700); }
+.ai-history-status.rejected { color: var(--muted); }
+.ai-history-status.failed { color: var(--corn); }
+.ai-history-result { display: block; margin-top: 6rpx; color: var(--muted); font-size: 21rpx; }
+.ai-history-time { display: block; margin-top: 2rpx; color: var(--muted); font-size: 19rpx; opacity: 0.7; }

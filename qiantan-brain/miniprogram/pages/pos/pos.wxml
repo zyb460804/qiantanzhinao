@@ -7,6 +7,14 @@
 
   <view class="status-strip" wx:if="{{pendingCount}}"><text>有 {{pendingCount}} 笔离线订单待同步</text><text class="link" bindtap="retryFailed">重试</text></view>
 
+  <view class="pos-flow">
+    <view class="flow-cell active"><text class="flow-no">1</text><text class="flow-label">选商品</text><text class="flow-value">{{products.length}} 可售</text></view>
+    <view class="flow-line"></view>
+    <view class="flow-cell {{cart.length ? 'active' : ''}}"><text class="flow-no">2</text><text class="flow-label">核数量</text><text class="flow-value">{{cart.length}} 项</text></view>
+    <view class="flow-line"></view>
+    <view class="flow-cell {{cart.length ? 'active' : ''}}"><text class="flow-no">3</text><text class="flow-label">收款</text><text class="flow-value">¥{{payableAmount}}</text></view>
+  </view>
+
   <!-- ====== 可售商品 ====== -->
   <view class="section-head"><text class="section-title">可售商品</text><text class="section-caption">库存与售价来自真实账本</text></view>
   <scroll-view scroll-x class="product-scroll" wx:if="{{products.length}}">
@@ -56,8 +64,8 @@
 
   <!-- 操作按钮行 -->
   <view class="action-row">
-    <button class="hold-btn" disabled="{{!cart.length || submitting}}" bindtap="holdOrder">挂单</button>
-    <button class="checkout" disabled="{{!cart.length || submitting}}" bindtap="checkout">{{paymentMethod === 'credit' && !multiPay ? '确认赊账' : '确认收款'}} ¥{{payableAmount}}</button>
+    <button class="hold-btn" disabled="{{!cart.length || submitting}}" loading="{{submitting}}" bindtap="holdOrder">挂单</button>
+    <button class="checkout" disabled="{{!cart.length || submitting}}" loading="{{submitting}}" bindtap="checkout">{{paymentMethod === 'credit' && !multiPay ? '确认赊账' : '确认收款'}} ¥{{payableAmount}}</button>
   </view>
 
   <!-- ====== 挂单列表 ====== -->
@@ -87,7 +95,7 @@
     <text class="diff {{settlement.isBalanced ? 'ok' : 'warn'}}">差异 ¥{{settlement.diff_amount}}</text>
     <text class="settlement-extra" wx:if="{{settlement.estimated_gross_profit}}">预计毛利 ¥{{settlement.estimated_gross_profit}} · 现金净流入 ¥{{settlement.net_cash_flow}}</text>
   </view>
-  <button class="close-day" bindtap="closeDay">确认今日日结</button>
+  <button class="close-day" bindtap="closeDay" loading="{{submitting}}">确认今日日结</button>
 
   <!-- ====== 最近订单 ====== -->
   <view class="section-head"><text class="section-title">最近订单</text><text class="section-caption">点击可退款</text></view>
@@ -100,12 +108,23 @@
 
   <!-- ====== 退款弹窗 ====== -->
   <view class="refund-mask" wx:if="{{showRefund}}" catchtap="closeRefund">
-    <view class="refund-modal" catchtap="">
+    <view class="refund-modal" catchtap="stopMaskTap">
       <text class="refund-title">退款 · {{refundOrder.order_no}}</text>
       <text class="refund-amount">金额 ¥{{refundOrder.total_amount}}</text>
       <view class="refund-field">
         <text class="refund-label">退款原因</text>
         <input class="refund-input" placeholder="例如：顾客退货、商品质量问题" value="{{refundReason}}" bindinput="inputRefundReason" />
+      </view>
+      <view class="refund-toggle" bindtap="toggleRefundPartial">
+        <text>部分退款（按商品退）</text>
+        <view class="toggle {{refundPartial ? 'on' : 'off'}}"><view class="toggle-knob"></view></view>
+      </view>
+      <view wx:if="{{refundPartial && refundItems.length > 0}}" class="refund-item-list">
+        <view wx:for="{{refundItems}}" wx:key="item_id" class="refund-item-row">
+          <text class="refund-item-name">{{item.product_name}}</text>
+          <text class="refund-item-qty">购买 {{item.quantity}}{{item.unit}}</text>
+          <input class="refund-item-input" type="digit" value="{{item.refund_qty}}" data-idx="{{index}}" bindinput="editRefundQty" placeholder="0" />
+        </view>
       </view>
       <view class="refund-toggle" bindtap="toggleReturnStock">
         <text>退回可售库存</text>
@@ -113,7 +132,7 @@
       </view>
       <view class="refund-actions">
         <button class="refund-cancel" bindtap="closeRefund">取消</button>
-        <button class="refund-confirm" disabled="{{!refundReason || refundSubmitting}}" bindtap="confirmRefund">{{refundSubmitting ? '退款中…' : '确认退款'}}</button>
+        <button class="refund-confirm" disabled="{{!refundReason || refundSubmitting}}" loading="{{refundSubmitting}}" bindtap="confirmRefund">{{refundSubmitting ? '退款中…' : (refundPartial ? '确认部分退款' : '确认退款')}}</button>
       </view>
     </view>
   </view>

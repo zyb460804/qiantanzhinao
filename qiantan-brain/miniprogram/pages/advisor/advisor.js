@@ -17,6 +17,11 @@ Page({
     envError: false,        // 环境条 API 失败时的降级标记
     feedbackMap: {},        // { recommendation_id: 'helpful' | 'not_helpful' }
 
+    // AI 可执行动作
+    aiActions: [],
+    aiActionsLoading: false,
+    aiHistory: [],
+
     // 沙盘模拟
     showSim: false,
     simProducts: [],
@@ -58,13 +63,15 @@ Page({
     Promise.all([
       app.request({ url: '/advice/daily' }).catch(function () { return null; }),
       app.request({ url: '/twin/dashboard' }).catch(function () { return null; }),
-      app.request({ url: '/env/today?city=%E4%B8%8A%E6%B5%B7' }).catch(function () { return null; }),
+      app.request({ url: '/env/today', data: { city: app.getCity() } }).catch(function () { return null; }),
       app.request({ url: '/voice/today-count' }).catch(function () { return null; }),
+      app.request({ url: '/ai-actions/pending' }).catch(function () { return null; }),
     ]).then(function (results) {
       var advice = results[0];
       var dashboard = results[1];
       var weather = results[2];
       var voiceCount = (results[3] && results[3].today_count) || 0;
+      var pendingActions = results[4] || [];
 
       var recs = advice ? (advice.recommendations || []) : [];
       var ids = advice ? (advice.recommendation_ids || []) : [];
@@ -79,6 +86,11 @@ Page({
       // 数据驱动的主动推送
       var pushCards = self._buildPushCards(dashboard, weather, voiceCount);
 
+      // 美化 AI 动作卡片
+      var aiCards = (pendingActions || []).map(function (a) {
+        return self._beautifyAiAction(a);
+      });
+
       self.setData({
         recommendations: recs,
         recommendationIds: ids,
@@ -86,12 +98,18 @@ Page({
         envError: envError,
         activePush: pushCards,
         pushLoading: false,
+        aiActions: aiCards,
+        aiActionsLoading: false,
       });
 
       // 小智开口
       var name = (app.globalData.merchantName || '老板').replace(/摊$/, '');
-      var taskCount = pushCards.length > 0 ? pushCards.length : (recs.length || 0);
+      var taskCount = pushCards.length + aiCards.length;
+      if (taskCount === 0) taskCount = recs.length || 0;
       self.saysReply(name + '，我帮你盘了一下，今天这 ' + taskCount + ' 件事最要紧');
+
+      // 加载效果复盘（不阻塞主流程）
+      self.loadAiHistory();
     }).catch(function () {
       self.setData({ pushLoading: false });
       app.logError('advisor/loadAdvice', '加载建议失败', { silent: true });
@@ -163,6 +181,129 @@ Page({
     }
 
     return cards.slice(0, 3);
+  },
+
+  // ── 效果复盘：加载已执行的 AI 动作历史 ────────
+  loadAiHistory: function () {
+    var self = this;
+    app.request({ url: '/ai-actions/history', data: { limit: 5 } }).then(function (data) {
+      var items = (data || []).filter(function (a) { return a.status !== 'pending'; });
+      var history = items.slice(0, 5).map(function (a) {
+        var typeMap = {
+          price: '改价', purchase: '采购', clearance: '清货', lock_batch: '锁定',
+        };
+        var label = typeMap[a.action_type] || a.action_type;
+        var statusText = a.status === 'executed' ? '已执行' : a.status === 'rejected' ? '已忽略' : a.status === 'failed' ? '失败' : a.status;
+        var resultText = '';
+        if (a.result) {
+          if (a.result.list_id) resultText = '生成采购单 #' + a.result.item_count + '项';
+          else if (a.result.updated) resultText = '更新' + a.result.updated + '个SKU';
+          else if (a.result.batch_id) resultText = '批次已锁定';
+          else if (a.result.error) resultText = '错误: ' + a.result.error.slice(0, 30);
+        }
+        return {
+          id: a.id,
+          typeLabel: label,
+          title: a.title || '',
+          statusText: statusText,
+          statusClass: a.status,
+          resultText: resultText,
+          executedAt: a.executed_at ? a.executed_at.slice(5, 16).replace('T', ' ') : '',
+        };
+      });
+      self.setData({ aiHistory: history });
+    }).catch(function () { /* 静默处理 */ });
+  },
+
+  // ── AI 动作卡片美化 ──────────────────────
+  _beautifyAiAction: function (a) {
+    var typeMap = {
+      price: { label: '改价', icon: 'tag', tone: 'info' },
+      purchase: { label: '采购', icon: 'cart', tone: 'green' },
+      clearance: { label: '清货', icon: 'bulb', tone: 'warn' },
+      lock_batch: { label: '锁定', icon: 'lock', tone: 'warn' },
+    };
+    var meta = typeMap[a.action_type] || { label: a.action_type, icon: 'info', tone: 'info' };
+    var payload = a.payload || {};
+
+    // 根据动作类型生成摘要描述
+    var desc = '';
+    if (a.action_type === 'price' && payload.sku_name) {
+      desc = payload.sku_name + '：¥' + (payload.old_price || '?') + ' → ¥' + payload.new_price;
+    } else if (a.action_type === 'purchase') {
+      var cnt = payload.items ? payload.items.length : 0;
+      desc = '采购' + cnt + '项商品，预估¥' + (payload.total_cost || '?');
+    } else if (a.action_type === 'clearance') {
+      var n = payload.skus ? payload.skus.length : 0;
+      desc = '临期清货，共' + n + '个SKU降价处理';
+    } else if (a.action_type === 'lock_batch') {
+      desc = '锁定批次 ' + (payload.batch_no || '') + '：' + (payload.reason || '食品安全风险');
+    } else {
+      desc = JSON.stringify(payload).slice(0, 60);
+    }
+
+    return {
+      id: a.id,
+      actionType: a.action_type,
+      typeLabel: meta.label,
+      icon: meta.icon,
+      tone: meta.tone,
+      title: a.title || 'AI建议动作',
+      desc: desc,
+      createdAt: a.created_at || '',
+    };
+  },
+
+  // ── 执行 AI 动作 ──────────────────────────
+  executeAiAction: function (e) {
+    var self = this;
+    var actionId = e.currentTarget.dataset.id;
+    if (!actionId) return;
+
+    wx.showModal({
+      title: '确认执行',
+      content: '执行后将立即生效，确定吗？',
+      confirmText: '执行',
+      cancelText: '取消',
+      success: function (r) {
+        if (!r.confirm) return;
+        wx.showLoading({ title: '执行中…' });
+        app.request({
+          url: '/ai-actions/' + actionId + '/execute',
+          method: 'POST',
+          data: { status: 'executed' },
+        }).then(function (res) {
+          wx.hideLoading();
+          // 从列表中移除已执行的动作
+          var remaining = self.data.aiActions.filter(function (a) { return a.id !== actionId; });
+          self.setData({ aiActions: remaining });
+          wx.showToast({ title: res.message || '已执行', icon: 'success' });
+        }).catch(function (err) {
+          wx.hideLoading();
+          wx.showToast({ title: '执行失败', icon: 'none' });
+          app.logError('advisor/executeAiAction', '执行AI动作失败', { silent: true });
+        });
+      },
+    });
+  },
+
+  // ── 拒绝 AI 动作 ──────────────────────────
+  rejectAiAction: function (e) {
+    var self = this;
+    var actionId = e.currentTarget.dataset.id;
+    if (!actionId) return;
+
+    app.request({
+      url: '/ai-actions/' + actionId + '/execute',
+      method: 'POST',
+      data: { status: 'rejected' },
+    }).then(function () {
+      var remaining = self.data.aiActions.filter(function (a) { return a.id !== actionId; });
+      self.setData({ aiActions: remaining });
+      wx.showToast({ title: '已忽略', icon: 'none' });
+    }).catch(function () {
+      wx.showToast({ title: '操作失败', icon: 'none' });
+    });
   },
 
   // ── 流式口吻 ───────────────────────────────

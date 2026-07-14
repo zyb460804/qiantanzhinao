@@ -1,14 +1,28 @@
-"""Vision recognition API router — YOLO integration with demo mode."""
+"""Vision recognition API router — YOLO integration with demo mode.
+
+Supports four recognition modes:
+1. Edge mode   – pre-computed detections from edge device.
+2. Demo mode   – simulated results for UI testing / competition demos.
+3. Model mode  – ONNX inference via :class:`OnnxVisionModelService`.
+4. Placeholder – model unavailable AND not in strict-production mode.
+
+Strict-production enforcement (P0-3): when ``vision_strict_mode=True``
+AND ``app_env == "production"``, a missing model returns **HTTP 503**
+instead of silently returning empty placeholder results.
+"""
 
 import json
+import logging
 import random
 import time
 from pathlib import Path
+from typing import TypedDict
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.security import get_current_merchant
 from app.database import get_db
 from app.models.merchant import Merchant
@@ -20,6 +34,8 @@ from app.schemas.vision import (
     VisionRecognizeResponse,
 )
 
+logger = logging.getLogger("vision_router")
+
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
 
@@ -27,6 +43,53 @@ _RULES_DIR = Path(__file__).parent.parent / "rules"
 
 # Max image size: 10MB
 _MAX_IMAGE_SIZE = 10 * 1024 * 1024
+
+# ------------------------------------------------------------------
+# Lazy-initialised vision model service (singleton)
+# ------------------------------------------------------------------
+
+_vision_service: "OnnxVisionModelService | None" = None
+_vision_service_initialized: bool = False
+
+
+def _get_vision_service() -> "OnnxVisionModelService | None":
+    """Return the module-level vision model singleton, initialised on first call.
+
+    Returns ``None`` when ``VISION_MODEL_PATH`` is empty (model not configured)
+    so the router can distinguish "not configured" from "configured but failed".
+    """
+    global _vision_service, _vision_service_initialized  # noqa: PLW0603
+
+    if _vision_service_initialized:
+        return _vision_service
+
+    _vision_service_initialized = True
+
+    from app.services.vision_model_onnx import OnnxVisionModelService
+
+    model_path = settings.vision_model_path
+    if not model_path:
+        logger.info("VISION_MODEL_PATH not set — vision model disabled")
+        _vision_service = None
+        return None
+
+    _vision_service = OnnxVisionModelService(
+        model_path=model_path,
+        device=settings.vision_model_device,
+        confidence_threshold=settings.vision_confidence_threshold,
+    )
+    logger.info(
+        "Vision model initialised: available=%s version=%s",
+        _vision_service.is_available,
+        _vision_service.model_version,
+    )
+    return _vision_service
+
+
+class DemoDetection(TypedDict):
+    product_id: int
+    name: str
+    confidence: float
 
 
 def _load_categories() -> list[dict]:
@@ -121,7 +184,7 @@ async def recognize_product(
 
     # --- Mode 2: Demo mode — simulate recognition ---
     if demo_mode:
-        query = select(ProductCategory).where(ProductCategory.is_active == True)  # noqa: E712
+        query = select(ProductCategory).where(ProductCategory.is_active.is_(True))
         result = await db.execute(query)
         products = result.scalars().all()
 
@@ -135,7 +198,7 @@ async def recognize_product(
             sample_size = min(random.randint(1, 3), len(products))
             sampled = random.sample(list(products), sample_size)
 
-            demo_detections = []
+            demo_detections: list[DemoDetection] = []
             for p in sampled:
                 confidence = round(random.uniform(0.72, 0.96), 2)
                 demo_detections.append(
@@ -161,7 +224,44 @@ async def recognize_product(
                 },
             }
 
-    # --- Mode 3: Placeholder ---
+    # --- Mode 3: Real model inference (P0-3) -------------------------
+    vision_svc = _get_vision_service()
+
+    # 3a — Model is available → use it
+    if vision_svc is not None and vision_svc.is_available:
+        dets = await vision_svc.recognize(content)
+        processing_ms = int((time.time() - start) * 1000)
+        return {
+            "code": 0,
+            "message": "识别成功（模型推理）",
+            "data": {
+                "detections": dets,
+                "suggested_product": dets[0] if dets else None,
+                "processing_time_ms": processing_ms,
+                "source": "onnx",
+                "model_version": vision_svc.model_version,
+            },
+        }
+
+    # 3b — Strict-production enforcement (P0-3 core deliverable)
+    if settings.vision_strict_mode and settings.app_env == "production":
+        logger.critical(
+            "Vision model unavailable in strict-production mode — returning 503"
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "视觉识别模型未就绪，生产环境禁止返回空占位结果。"
+                "请检查 VISION_MODEL_PATH 配置并确保模型文件存在。"
+            ),
+        )
+
+    # 3c — Non-strict / non-production: log warning, return placeholder
+    logger.warning(
+        "Vision model unavailable (strict_mode=%s app_env=%s) — returning placeholder",
+        settings.vision_strict_mode,
+        settings.app_env,
+    )
     processing_ms = int((time.time() - start) * 1000)
     return {
         "code": 0,

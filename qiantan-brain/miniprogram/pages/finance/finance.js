@@ -1,4 +1,4 @@
-/** 财务 v3.1 — 费用管理 + 月度报表(柱状图) + 发票 + 筛选 */
+/** 财务 v3.2 — 费用、月报、发票与支付渠道对账 */
 var app = getApp();
 var Chart = require('../../utils/chart');
 
@@ -11,16 +11,20 @@ function localMonth(d) { return localDate(d).slice(0, 7); }
 
 Page({
   data: {
-    skin: '', loading: false, tab: 'expenses',
+    skin: '', loading: false, submitting: false, invoiceLoading: false, tab: 'expenses',
+    expensesLoaded: false, invoicesLoaded: false, reportLoaded: false,
     // 费用
     expenses: [], showExpForm: false,
     expForm: { category: 'rent', amount: '', description: '', expense_date: '', payment_method: 'cash' },
     expFilterPeriod: 'current', expFilterCategory: 'all',
     // 月报
-    month: '', monthlyReport: null, reportLoading: false,
+    month: localMonth(), monthlyReport: null, reportLoading: false,
     // 发票
     invoices: [], showInvForm: false, expenseSubmitting: false, invoiceSubmitting: false,
     invForm: { invoice_number: '', supplier_name: '', amount: '', invoice_date: '' },
+    // 支付对账
+    reconDate: localDate(), reconChannel: 'wechat', reconLoading: false, reconUploading: false,
+    reconTasks: [], reconResult: null, reconDifferences: [], selectedReconTaskId: '',
   },
 
   onShow: function () {
@@ -38,27 +42,39 @@ Page({
     if (this.data.tab === 'expenses') this.loadExpenses();
     else if (this.data.tab === 'report') this.loadReport();
     else if (this.data.tab === 'invoices') this.loadInvoices();
+    else if (this.data.tab === 'recon') this.loadReconciliation();
   },
 
   // ── 费用 ──
   loadExpenses: function () {
     var self = this, today = new Date();
-    var start = new Date();
+    var year = today.getFullYear();
+    var month = today.getMonth();
+    var start;
+    var end;
     var period = this.data.expFilterPeriod;
-    if (period === 'current') start.setDate(1);
-    else if (period === '3months') start.setMonth(start.getMonth() - 3);
-    else start.setMonth(start.getMonth() - 1);
+    if (period === 'last') {
+      start = new Date(year, month - 1, 1);
+      end = new Date(year, month, 0);
+    } else if (period === '3months') {
+      start = new Date(year, month - 2, 1);
+      end = today;
+    } else {
+      start = new Date(year, month, 1);
+      end = today;
+    }
 
+    this.setData({ loading: true, expensesLoaded: false });
     app.request({
       url: '/expenses',
-      data: { start: localDate(start), end: localDate(today) },
+      data: { start: localDate(start), end: localDate(end) },
     }).then(function (data) {
       var list = data || [];
       var cat = self.data.expFilterCategory;
       if (cat !== 'all') list = list.filter(function (e) { return e.category === cat; });
-      self.setData({ expenses: list });
+      self.setData({ expenses: list, loading: false, expensesLoaded: true });
     }).catch(function () {
-      self.setData({ expenses: [] });
+      self.setData({ expenses: [], loading: false, expensesLoaded: false });
       wx.showToast({ title: '费用加载失败', icon: 'none' });
     });
   },
@@ -69,14 +85,16 @@ Page({
   openExpForm: function () {
     this.setData({ showExpForm: true, expForm: { category: 'rent', amount: '', description: '', expense_date: localDate(), payment_method: 'cash' } });
   },
-  closeExpForm: function () { this.setData({ showExpForm: false }); },
+  closeExpForm: function () { if (!this.data.expenseSubmitting) this.setData({ showExpForm: false }); },
+  // 阻止弹窗内部点击冒泡到遮罩层，保证金额等输入框保持焦点。
+  stopMaskTap: function () {},
   onExpField: function (e) {
     var f = e.currentTarget.dataset.field;
     // type-chip 点击时 e.detail.value 为 undefined,从 dataset.val 读取
     var v = (e.detail.value !== undefined && e.detail.value !== null) ? e.detail.value : e.currentTarget.dataset.val;
-    var ef = this.data.expForm;
-    ef[f] = v;
-    this.setData({ expForm: ef });
+    var update = {};
+    update['expForm.' + f] = v;
+    this.setData(update);
   },
 
   saveExpense: function () {
@@ -98,14 +116,17 @@ Page({
 
   deleteExpense: function (e) {
     var id = e.currentTarget.dataset.id, self = this;
+    if (this.data.submitting) return;
     wx.showModal({
       title: '删除费用', content: '确认删除？',
       success: function (r) {
         if (!r.confirm) return;
+        self.setData({ submitting: true });
         app.request({ url: '/expenses/' + id, method: 'DELETE' }).then(function () {
+          self.setData({ submitting: false });
           wx.showToast({ title: '已删除', icon: 'success' });
           self.loadExpenses();
-        }).catch(function () { wx.showToast({ title: '删除失败', icon: 'none' }); });
+        }).catch(function () { self.setData({ submitting: false }); wx.showToast({ title: '删除失败', icon: 'none' }); });
       },
     });
   },
@@ -113,17 +134,17 @@ Page({
   // ── 月度报表 ──
   loadReport: function () {
     var self = this;
-    this.setData({ reportLoading: true });
+    this.setData({ reportLoading: true, reportLoaded: false });
     app.request({ url: '/expenses/monthly-report', data: { month: this.data.month } }).then(function (data) {
       // 确保 expense_breakdown 是数组(WXML 直接访问 .length 需要)
       var report = data || {};
       if (!Array.isArray(report.expense_breakdown)) report.expense_breakdown = [];
-      self.setData({ monthlyReport: report, reportLoading: false }, function () {
+      self.setData({ monthlyReport: report, reportLoading: false, reportLoaded: true }, function () {
         // setData 回调中绘制图表,确保 Canvas DOM 已就绪
         self.drawReportChart(report);
       });
     }).catch(function () {
-      self.setData({ monthlyReport: null, reportLoading: false });
+      self.setData({ monthlyReport: null, reportLoading: false, reportLoaded: false });
       wx.showToast({ title: '报表加载失败', icon: 'none' });
     });
   },
@@ -158,10 +179,11 @@ Page({
   // ── 发票 ──
   loadInvoices: function () {
     var self = this;
+    this.setData({ invoiceLoading: true, invoicesLoaded: false });
     app.request({ url: '/expenses/invoices' }).then(function (data) {
-      self.setData({ invoices: data || [] });
+      self.setData({ invoices: data || [], invoiceLoading: false, invoicesLoaded: true });
     }).catch(function () {
-      self.setData({ invoices: [] });
+      self.setData({ invoices: [], invoiceLoading: false, invoicesLoaded: false });
       wx.showToast({ title: '发票加载失败', icon: 'none' });
     });
   },
@@ -169,13 +191,13 @@ Page({
   openInvForm: function () {
     this.setData({ showInvForm: true, invForm: { invoice_number: '', supplier_name: '', amount: '', invoice_date: localDate() } });
   },
-  closeInvForm: function () { this.setData({ showInvForm: false }); },
+  closeInvForm: function () { if (!this.data.invoiceSubmitting) this.setData({ showInvForm: false }); },
   onInvField: function (e) {
     var f = e.currentTarget.dataset.field;
     var v = e.detail.value;
-    var inv = this.data.invForm;
-    inv[f] = v;
-    this.setData({ invForm: inv });
+    var update = {};
+    update['invForm.' + f] = v;
+    this.setData(update);
   },
 
   saveInvoice: function () {
@@ -192,6 +214,135 @@ Page({
     }).catch(function (err) {
       self.setData({ invoiceSubmitting: false });
       wx.showToast({ title: (err.body && err.body.detail) || '归档失败,请重试', icon: 'none' });
+    });
+  },
+
+  // ── 支付渠道对账 ──
+  loadReconciliation: function () {
+    var self = this;
+    this.setData({ reconLoading: true });
+    app.request({ url: '/reconciliation/tasks', data: { limit: 30 } }).then(function (data) {
+      var tasks = (data || []).map(function (item) {
+        var statusText = item.status === 'balanced' ? '已平账'
+          : item.status === 'resolved' ? '已处理'
+            : item.status === 'exception' ? '有差异' : '待账单';
+        return Object.assign({}, item, { statusText: statusText });
+      });
+      self.setData({ reconTasks: tasks, reconLoading: false });
+    }).catch(function () {
+      self.setData({ reconTasks: [], reconLoading: false });
+      wx.showToast({ title: '对账任务加载失败', icon: 'none' });
+    });
+  },
+
+  changeReconDate: function (e) { this.setData({ reconDate: e.detail.value }); },
+  changeReconChannel: function (e) { this.setData({ reconChannel: e.currentTarget.dataset.channel }); },
+
+  chooseReconBill: function () {
+    var self = this;
+    if (this.data.reconUploading) return;
+    wx.chooseMessageFile({
+      count: 1,
+      type: 'file',
+      extension: ['csv', 'txt'],
+      success: function (res) {
+        var file = res.tempFiles && res.tempFiles[0];
+        if (!file) return;
+        if (file.size > 10 * 1024 * 1024) {
+          wx.showToast({ title: '账单文件不能超过10MB', icon: 'none' });
+          return;
+        }
+        self.uploadReconBill(file);
+      },
+    });
+  },
+
+  uploadReconBill: function (file) {
+    var self = this;
+    var url = '/reconciliation/import/' + this.data.reconDate
+      + '?channel=' + this.data.reconChannel;
+    this.setData({ reconUploading: true });
+    app.uploadFile({
+      url: url,
+      filePath: file.path,
+      name: 'file',
+      timeout: 60000,
+    }).then(function (data) {
+      self.setData({
+        reconUploading: false,
+        reconResult: data,
+        selectedReconTaskId: data.task_id,
+      });
+      wx.showToast({ title: data.duplicate ? '账单已导入' : '对账完成', icon: 'success' });
+      self.loadReconciliation();
+      self.loadReconDifferences(data.task_id);
+    }).catch(function (err) {
+      self.setData({ reconUploading: false });
+      wx.showToast({
+        title: (err.body && err.body.detail) || '账单导入失败',
+        icon: 'none',
+      });
+    });
+  },
+
+  openReconTask: function (e) {
+    var taskId = e.currentTarget.dataset.id;
+    this.setData({ selectedReconTaskId: taskId, reconDifferences: [] });
+    this.loadReconDifferences(taskId);
+  },
+
+  loadReconDifferences: function (taskId) {
+    var self = this;
+    app.request({ url: '/reconciliation/tasks/' + taskId + '/differences' }).then(function (data) {
+      self.setData({ reconDifferences: data || [] });
+    }).catch(function () {
+      self.setData({ reconDifferences: [] });
+      wx.showToast({ title: '差异明细加载失败', icon: 'none' });
+    });
+  },
+
+  rerunReconciliation: function (e) {
+    var reconDate = e.currentTarget.dataset.date;
+    var channel = e.currentTarget.dataset.channel;
+    var self = this;
+    app.request({
+      url: '/reconciliation/run/' + reconDate + '?channel=' + channel,
+      method: 'POST',
+    }).then(function (data) {
+      self.setData({ reconResult: data, selectedReconTaskId: data.task_id });
+      self.loadReconciliation();
+      self.loadReconDifferences(data.task_id);
+    }).catch(function () {
+      wx.showToast({ title: '重新对账失败', icon: 'none' });
+    });
+  },
+
+  resolveReconDifference: function (e) {
+    var id = e.currentTarget.dataset.id;
+    var self = this;
+    wx.showModal({
+      title: '处理对账差异',
+      editable: true,
+      placeholderText: '填写核验结果或调整说明',
+      success: function (res) {
+        var reason = (res.content || '').trim();
+        if (!res.confirm) return;
+        if (reason.length < 2) {
+          wx.showToast({ title: '请填写处理说明', icon: 'none' });
+          return;
+        }
+        app.request({
+          url: '/reconciliation/differences/' + id + '/resolve',
+          method: 'POST',
+          data: { status: 'resolved', resolution: reason },
+        }).then(function () {
+          wx.showToast({ title: '已处理', icon: 'success' });
+          self.loadReconDifferences(self.data.selectedReconTaskId);
+          self.loadReconciliation();
+        }).catch(function () {
+          wx.showToast({ title: '处理失败', icon: 'none' });
+        });
+      },
     });
   },
 });

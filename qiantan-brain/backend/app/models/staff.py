@@ -56,7 +56,9 @@ class StaffMember(Base):
     role: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="cashier")
     is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
     pin_code: Mapped[str | None] = mapped_column(sa.String(10))  # 简易PIN, 非生产密码方案
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=True
+    )
 
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "phone", name="uq_staff_phone_per_merchant"),
@@ -80,4 +82,6 @@ class SensitiveOperation(Base):
     after_snapshot: Mapped[str | None] = mapped_column(sa.Text)   # JSON
     authorized_by: Mapped[str | None] = mapped_column(sa.String(50))
     reason: Mapped[str | None] = mapped_column(sa.String(500))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=True
+    )

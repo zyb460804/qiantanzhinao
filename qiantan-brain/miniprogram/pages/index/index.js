@@ -280,7 +280,8 @@ Page({
 
   loadWeather: function () {
     var self = this;
-    app.request({ url: '/env/today?city=%E4%B8%8A%E6%B5%B7' }).then(function (d) { self.setData({ weather: d }); }).catch(function () {});
+    var city = app.getCity();
+    app.request({ url: '/env/today', data: { city: city } }).then(function (d) { self.setData({ weather: d }); }).catch(function () {});
   },
 
   navigateToVoice: function () { wx.switchTab({ url: '/pages/voice/voice' }); },

@@ -11,6 +11,7 @@ Captures single frames for YOLO inference on button trigger.
 import io
 import logging
 
+
 logger = logging.getLogger(__name__)
 
 

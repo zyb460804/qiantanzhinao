@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.common import ApiResponse
 
@@ -17,9 +17,10 @@ from app.schemas.common import ApiResponse
 
 class AcceptanceItemRequest(BaseModel):
     """单条验收明细。"""
+
     item_id: uuid.UUID
-    arrival_qty: float = Field(ge=0)         # 实际到货
-    accepted_qty: float = Field(ge=0)         # 合格可入库
+    arrival_qty: float = Field(ge=0)  # 实际到货
+    accepted_qty: float = Field(ge=0)  # 合格可入库
     shortage_qty: float = Field(default=0, ge=0)
     damaged_qty: float = Field(default=0, ge=0)
     rejected_qty: float = Field(default=0, ge=0)
@@ -35,16 +36,49 @@ class AcceptanceItemRequest(BaseModel):
     certificates: str | None = Field(default=None, max_length=2000)
     acceptance_notes: str | None = Field(default=None, max_length=500)
 
+    @model_validator(mode="after")
+    def validate_acceptance_quantities(self):
+        if self.accepted_qty > self.arrival_qty:
+            raise ValueError("合格数量不能大于到货数量")
+        for value, label in (
+            (self.damaged_qty, "破损数量"),
+            (self.rejected_qty, "拒收数量"),
+            (self.returned_qty, "退回数量"),
+        ):
+            if value > self.arrival_qty:
+                raise ValueError(f"{label}不能大于到货数量")
+        if (
+            self.gross_weight is not None
+            and self.tare_weight is not None
+            and self.tare_weight > self.gross_weight
+        ):
+            raise ValueError("皮重不能大于毛重")
+        if (
+            self.gross_weight is not None
+            and self.net_weight is not None
+            and self.net_weight > self.gross_weight
+        ):
+            raise ValueError("净重不能大于毛重")
+        return self
+
 
 class RecordAcceptanceRequest(BaseModel):
     """记录到货验收。"""
+
     items: list[AcceptanceItemRequest] = Field(min_length=1, max_length=100)
     notes: str | None = Field(default=None, max_length=500)
 
 
 class ConfirmAcceptanceRequest(BaseModel):
     """确认验收 → 批次入库 + 库存流水 + 供应商应付。"""
+
     notes: str | None = Field(default=None, max_length=500)
+
+
+class PurchaseItemUpdateRequest(BaseModel):
+    actual_qty: float | None = Field(default=None, ge=0, le=1000000)
+    actual_unit_cost: float | None = Field(default=None, ge=0, le=10000000)
+    supplier_id: uuid.UUID | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +88,7 @@ class ConfirmAcceptanceRequest(BaseModel):
 
 class SupplierPaymentRequest(BaseModel):
     supplier_id: uuid.UUID
+    payable_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
     amount: float = Field(gt=0, le=10000000)
     method: Literal["cash", "wechat", "alipay", "bank_transfer"] = "cash"
     note: str | None = Field(default=None, max_length=500)
@@ -67,6 +102,7 @@ class SupplierPaymentRequest(BaseModel):
 
 class PurchaseReturnRequest(BaseModel):
     """退货给供应商。"""
+
     item_id: uuid.UUID
     return_qty: float = Field(gt=0)
     reason: str = Field(min_length=1, max_length=500)
@@ -80,7 +116,7 @@ class PurchaseReturnRequest(BaseModel):
 
 class SupplierStatementItem(BaseModel):
     id: str
-    direction: str         # purchase / payment / return
+    direction: str  # purchase / payment / return
     amount: float
     note: str | None = None
     created_at: str | None = None

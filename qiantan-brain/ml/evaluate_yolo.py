@@ -13,6 +13,7 @@ import sys
 import time
 from pathlib import Path
 
+
 # 项目根目录 (ml/ 的上一级)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_YAML = PROJECT_ROOT / "datasets" / "products" / "data.yaml"
@@ -21,9 +22,21 @@ DEFAULT_MODEL = RUNS_DIR / "detect" / "train" / "weights" / "best.pt"
 REPORT_PATH = PROJECT_ROOT / "ml" / "evaluation_report.md"
 
 CLASS_NAMES = [
-    "白菜", "菠菜", "生菜", "土豆", "萝卜",
-    "胡萝卜", "红薯", "洋葱", "豆腐", "豆皮",
-    "黄瓜", "番茄", "西瓜", "茄子", "辣椒",
+    "白菜",
+    "菠菜",
+    "生菜",
+    "土豆",
+    "萝卜",
+    "胡萝卜",
+    "红薯",
+    "洋葱",
+    "豆腐",
+    "豆皮",
+    "黄瓜",
+    "番茄",
+    "西瓜",
+    "茄子",
+    "辣椒",
 ]
 
 
@@ -31,6 +44,7 @@ def check_ultralytics():
     """检查 ultralytics 是否安装。"""
     try:
         import ultralytics  # noqa: F401
+
         return True
     except ImportError:
         print("=" * 60)
@@ -70,9 +84,13 @@ def evaluate(model_path: str, data_yaml: str, imgsz: int = 640, batch: int = 16)
     metrics = model.val(data=data_yaml, imgsz=imgsz, batch=batch)
 
     # 3. 单张推理速度测试
-    print(f"[3/4] 测试单张推理速度...")
+    print("[3/4] 测试单张推理速度...")
     val_images_dir = PROJECT_ROOT / "datasets" / "products" / "images" / "val"
-    test_images = list(val_images_dir.glob("*.jpg")) + list(val_images_dir.glob("*.png")) + list(val_images_dir.glob("*.jpeg"))
+    test_images = (
+        list(val_images_dir.glob("*.jpg"))
+        + list(val_images_dir.glob("*.png"))
+        + list(val_images_dir.glob("*.jpeg"))
+    )
 
     inference_times = []
     if test_images:
@@ -122,9 +140,13 @@ def evaluate(model_path: str, data_yaml: str, imgsz: int = 640, batch: int = 16)
     print(f"完整报告: {REPORT_PATH}")
 
 
-def _build_report(model_path: str, metrics, avg_inference_ms: float, fps: float, num_test: int) -> str:
+def _build_report(
+    model_path: str, metrics, avg_inference_ms: float, fps: float, num_test: int
+) -> str:
     """构建 Markdown 评估报告。"""
-    names = metrics.names if hasattr(metrics, "names") else {i: c for i, c in enumerate(CLASS_NAMES)}
+    names = (
+        metrics.names if hasattr(metrics, "names") else {i: c for i, c in enumerate(CLASS_NAMES)}
+    )
 
     lines = []
     lines.append("# YOLOv8 商品识别模型评估报告\n")
@@ -145,8 +167,8 @@ def _build_report(model_path: str, metrics, avg_inference_ms: float, fps: float,
     # 推理速度
     lines.append("## 推理速度\n")
     if avg_inference_ms > 0:
-        lines.append(f"| 指标 | 值 |")
-        lines.append(f"|------|------|")
+        lines.append("| 指标 | 值 |")
+        lines.append("|------|------|")
         lines.append(f"| 测试图片数 | {num_test} |")
         lines.append(f"| 平均推理耗时 | {avg_inference_ms:.1f} ms |")
         lines.append(f"| FPS | {fps:.1f} |")
@@ -190,7 +212,9 @@ def _build_report(model_path: str, metrics, avg_inference_ms: float, fps: float,
     lines.append(f"yolo export model={model_path} format=onnx imgsz=640 opset=12 simplify=True")
     lines.append("")
     lines.append("# 复制到边缘端")
-    lines.append("cp ml/runs/detect/train/weights/best.onnx edge/vision/model/yolov8n_products.onnx")
+    lines.append(
+        "cp ml/runs/detect/train/weights/best.onnx edge/vision/model/yolov8n_products.onnx"
+    )
     lines.append("```\n")
 
     return "\n".join(lines)
@@ -207,10 +231,12 @@ def main():
   python evaluate_yolo.py --model yolov8n.pt --data datasets/products/data.yaml
         """,
     )
-    parser.add_argument("--model", default=str(DEFAULT_MODEL),
-                        help=f"模型文件路径 (默认: {DEFAULT_MODEL})")
-    parser.add_argument("--data", default=str(DATA_YAML),
-                        help=f"数据集配置文件 (默认: {DATA_YAML})")
+    parser.add_argument(
+        "--model", default=str(DEFAULT_MODEL), help=f"模型文件路径 (默认: {DEFAULT_MODEL})"
+    )
+    parser.add_argument(
+        "--data", default=str(DATA_YAML), help=f"数据集配置文件 (默认: {DATA_YAML})"
+    )
     parser.add_argument("--imgsz", type=int, default=640, help="输入图像尺寸 (默认 640)")
     parser.add_argument("--batch", type=int, default=16, help="Batch size (默认 16)")
     args = parser.parse_args()

@@ -73,3 +73,22 @@
 
 .link { color:var(--green-800); font-weight:700; }
 .empty-state { padding:38rpx; text-align:center; color:var(--muted); font-size:24rpx; }
+
+/* 2026 统一设计升级：经营事务中心 */
+.ops-page { padding: 0 28rpx 90rpx; }
+.ops-hero { margin: 0 -28rpx; padding: 34rpx 32rpx 28rpx; border-radius: 0 0 30rpx 30rpx; }
+.ops-hero .hero-desc { display: block; margin-top: 10rpx; color: rgba(255,255,255,.68); font-size: 21rpx; }
+.ops-pulse { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 24rpx; padding: 16rpx 6rpx; background: rgba(255,255,255,.1); border: 1rpx solid rgba(255,255,255,.14); border-radius: 20rpx; }
+.ops-pulse view { text-align: center; border-right: 1rpx solid rgba(255,255,255,.12); }
+.ops-pulse view:last-child { border-right: 0; }
+.ops-pulse-num { display: block; color: #fff; font-family: var(--font-num); font-size: 31rpx; font-weight: 850; }
+.ops-pulse-num.warn { color: var(--corn); }
+.ops-pulse-label { display: block; margin-top: 5rpx; color: rgba(255,255,255,.63); font-size: 18rpx; }
+.ops-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin: 20rpx 0 24rpx; padding: 5rpx; background: var(--paper-2); border-radius: 18rpx; overflow: visible; }
+.ops-tabs .tab-chip { padding: 14rpx 4rpx; text-align: center; background: transparent; border: 0; border-radius: 14rpx; font-size: 21rpx; }
+.ops-tabs .tab-chip.active { color: var(--green-800); background: var(--paper); box-shadow: var(--shadow-sm); }
+.ops-page .cat-list, .clear-card, .export-card { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }
+.ops-page .empty-state { margin-top: 12rpx; padding: 56rpx 28rpx; background: var(--paper); border: 2rpx dashed var(--line); border-radius: 22rpx; }
+.hours-row { padding: 5rpx; background: var(--paper-2); border-radius: 16rpx; }
+.hours-chip { flex: 1; padding: 12rpx 8rpx; text-align: center; background: transparent; border: 0; }
+.hours-chip.active { color: var(--green-800); background: var(--paper); box-shadow: var(--shadow-sm); }

@@ -1,18 +1,35 @@
 <!-- 设备管理 -->
 <view class="page-shell dev-page {{skin}}">
-  <view class="page-hero"><text class="eyebrow">HARDWARE · 硬件管理</text><text class="hero-title">设备管理</text></view>
-  <view class="tab-row">
+  <view class="page-hero dev-hero">
+    <view><text class="eyebrow">HARDWARE · 硬件管理</text><text class="hero-title">设备管理</text><text class="hero-desc">统一查看智能秤、摄像头、价签和顾客价目屏状态。</text></view>
+    <view class="hero-device-count"><text class="hero-device-num">{{devices.length}}</text><text>台设备</text></view>
+  </view>
+  <view class="dev-overview">
+    <view class="overview-cell"><text class="overview-num">{{devices.length}}</text><text class="overview-label">已注册</text></view>
+    <view class="overview-line"></view>
+    <view class="overview-cell"><text class="overview-num good">{{priceDisplays.length}}</text><text class="overview-label">价目数据</text></view>
+    <view class="overview-line"></view>
+    <view class="overview-cell"><text class="overview-num {{loadError ? 'warn' : 'good'}}">{{loadError ? '!' : '✓'}}</text><text class="overview-label">连接状态</text></view>
+  </view>
+  <view class="tab-row dev-tabs">
     <view wx:for="{{[{k:'devices',l:'设备'},{k:'display',l:'价目屏'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
   </view>
 
-  <!-- 设备列表 -->
+  <view wx:if="{{loadError}}" class="load-warning" bindtap="retryLoad">部分数据加载失败，点击重试</view>
+
   <block wx:if="{{tab==='devices'}}">
     <view class="section-head"><text class="section-title">已注册设备</text><view><text class="link" bindtap="scanDevice">扫码绑定</text><text class="link" style="margin-left:12rpx" bindtap="openDevForm">+ 注册</text></view></view>
-    <view wx:if="{{!devices.length}}" class="empty-state"><text>暂无设备，点击"+ 注册"添加智能秤或摄像头</text></view>
+    <view wx:if="{{loading}}" class="empty-state"><text>设备加载中…</text></view>
+    <view wx:elif="{{!devices.length}}" class="empty-state"><text>暂无设备，点击“+ 注册”添加智能秤或摄像头</text></view>
     <view wx:else class="cat-list">
-      <view wx:for="{{devices}}" wx:key="device_id" class="cat-item">
-        <view class="cat-main"><text class="cat-name">{{item.device_name}}</text><text class="cat-meta">{{item.device_type}} · {{item.serial_number||'无序列号'}}</text><text class="cat-meta {{item.last_heartbeat ? '' : 'warn'}}">{{item.last_heartbeat ? '心跳: ' + item.last_heartbeat : '设备已离线，请检查电源和网络连接'}}</text></view>
-        <view class="cat-actions">
+      <view wx:for="{{devices}}" wx:key="device_id" class="cat-item {{item.is_active?'':'inactive'}}">
+        <view class="cat-main">
+          <view class="name-row"><text class="cat-name">{{item.device_name}}</text><text class="status-badge {{item.is_active?'active':'off'}}">{{item.is_active?'使用中':'已停用'}}</text></view>
+          <text class="cat-meta">{{item.device_type}} · {{item.serial_number||'无序列号'}}</text>
+          <text wx:if="{{item.is_active}}" class="cat-meta {{item.last_heartbeat ? '' : 'warn'}}">{{item.last_heartbeat ? '心跳: ' + item.last_heartbeat : '设备已离线，请检查电源和网络连接'}}</text>
+          <text wx:else class="cat-meta">该设备已停止使用</text>
+        </view>
+        <view wx:if="{{item.is_active}}" class="cat-actions">
           <text class="act-btn" data-id="{{item.device_id}}" bindtap="sendHeartbeat">心跳</text>
           <text class="act-btn del" data-id="{{item.device_id}}" bindtap="deactivateDevice">停用</text>
         </view>
@@ -20,10 +37,10 @@
     </view>
   </block>
 
-  <!-- 价目屏 -->
   <block wx:if="{{tab==='display'}}">
-    <view class="section-head"><text class="section-title">顾客价目屏</text><text class="link" bindtap="syncPrices">同步全部</text></view>
-    <view wx:if="{{!priceDisplays.length}}" class="empty-state"><text>暂无价目数据，点击"同步全部"从SKU售价生成</text></view>
+    <view class="section-head"><text class="section-title">顾客价目屏</text><button class="link-btn" loading="{{syncSubmitting}}" disabled="{{syncSubmitting||loading}}" bindtap="syncPrices">同步全部</button></view>
+    <view wx:if="{{loading}}" class="empty-state"><text>价目数据加载中…</text></view>
+    <view wx:elif="{{!priceDisplays.length}}" class="empty-state"><text>暂无价目数据，点击“同步全部”从SKU售价生成</text></view>
     <view wx:else class="cat-list">
       <view wx:for="{{priceDisplays}}" wx:key="display_id" class="cat-item">
         <view class="cat-main"><text class="cat-name">{{item.sku_name}}</text><text class="cat-meta">¥{{item.current_price}} · {{item.sync_status==='synced'?'已同步':item.sync_status}}</text></view>
@@ -31,14 +48,13 @@
     </view>
   </block>
 
-  <!-- Device form modal -->
   <view wx:if="{{showDevForm}}" class="picker-mask" bindtap="closeDevForm">
-    <view class="picker-sheet" catchtap="">
+    <view class="picker-sheet" catchtap="stopMaskTap">
       <text class="picker-title">注册设备</text>
       <view class="type-row"><view wx:for="{{[{k:'scale',l:'智能秤'},{k:'camera',l:'摄像头'},{k:'esl',l:'价签'},{k:'printer',l:'打印机'}]}}" wx:key="k" class="type-chip {{devForm.device_type===item.k?'active':''}}" data-field="device_type" data-val="{{item.k}}" bindtap="onDevField">{{item.l}}</view></view>
       <input class="form-input" placeholder="设备名称" value="{{devForm.device_name}}" data-field="device_name" bindinput="onDevField"/>
       <input class="form-input" placeholder="序列号（选填）" value="{{devForm.serial_number}}" data-field="serial_number" bindinput="onDevField"/>
-      <view class="picker-actions"><button class="btn-secondary" bindtap="closeDevForm">取消</button><button class="btn-primary" bindtap="saveDevice">注册</button></view>
+      <view class="picker-actions"><button class="btn-secondary" disabled="{{deviceSubmitting}}" bindtap="closeDevForm">取消</button><button class="btn-primary" loading="{{deviceSubmitting}}" disabled="{{deviceSubmitting}}" bindtap="saveDevice">注册</button></view>
     </view>
   </view>
 </view>

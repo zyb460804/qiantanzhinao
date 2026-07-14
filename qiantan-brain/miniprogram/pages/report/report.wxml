@@ -15,6 +15,14 @@
     </view>
   </view>
 
+  <view class="report-signal-strip" wx:if="{{!loading && hasData}}">
+    <view><text class="signal-num">{{salesRanking.length}}</text><text class="signal-label">热销商品</text></view>
+    <view class="signal-divider"></view>
+    <view><text class="signal-num warn">{{wasteList.length}}</text><text class="signal-label">关注项目</text></view>
+    <view class="signal-divider"></view>
+    <view><text class="signal-num good">{{actionItems.length}}</text><text class="signal-label">行动建议</text></view>
+  </view>
+
   <!-- 加载骨架屏 -->
   <block wx:if="{{loading}}">
     <view class="kpi-grid">
@@ -35,8 +43,8 @@
   <!-- 空数据状态 -->
   <view wx:elif="{{!hasData}}" class="empty-state card">
     <mascot size="md" mood="idle"></mascot>
-    <text>暂无经营数据</text>
-    <text class="empty-tip">开始记账后即可查看报告</text>
+    <text>{{errorText || '暂无经营数据'}}</text>
+    <text class="empty-tip">{{errorText ? '检查网络或下拉刷新重试' : '开始记账后即可查看报告'}}</text>
   </view>
 
   <!-- 数据内容 -->

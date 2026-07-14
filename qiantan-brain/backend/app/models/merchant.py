@@ -17,10 +17,16 @@ class Merchant(Base):
     business_type: Mapped[str | None] = mapped_column(sa.String(50))
     location: Mapped[str | None] = mapped_column(sa.String(200))
     preferences: Mapped[dict] = mapped_column(sa.JSON, default=dict)
+    # --- SaaS 多租户：所属租户/组织 ---
+    # 可空：兼容存量数据（无 tenant 的 merchant 归默认租户）。
+    # 新注册商户必须绑定 tenant_id，鉴权链强制注入此字段做行级隔离。
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid, index=True
+    )
     # --- P0-1 鉴权字段 ---
     # 微信 openid：登录后绑定，唯一；一个微信用户对应一个商户（员工/市场管理员另建）
     wechat_openid: Mapped[str | None] = mapped_column(sa.String(64), unique=True)
-    # 角色：owner（摊主）/ employee（员工）/ market_admin（市场管理员）
+    # 角色：owner（摊主）/ employee（员工）/ market_admin（市场管理员）/ tenant_admin（租户管理员）
     role: Mapped[str] = mapped_column(sa.String(20), default="owner")
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(

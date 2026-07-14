@@ -11,6 +11,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import NotRequired, TypedDict
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +23,20 @@ from app.services.lifecycle import get_product_lifecycle
 
 
 logger = logging.getLogger(__name__)
+
+
+class BatchRollbackSummary(TypedDict):
+    event_type: str
+    batches_affected: int
+    qty_adjusted: Decimal
+    action: NotRequired[str]
+
+
+class BatchConsumption(TypedDict):
+    quantity: Decimal
+    total_cost: Decimal
+    missing_cost_quantity: Decimal
+
 
 # Default shelf life when a product has no matching rule.
 DEFAULT_SHELF_LIFE_HOURS = 72
@@ -74,8 +89,11 @@ async def create_batch(
 
 
 async def lock_batch(
-    db: AsyncSession, batch_id: uuid.UUID, merchant_id: uuid.UUID,
-    reason: str, locked_by: str = "merchant",
+    db: AsyncSession,
+    batch_id: uuid.UUID,
+    merchant_id: uuid.UUID,
+    reason: str,
+    locked_by: str = "merchant",
 ) -> BatchLifecycle:
     """Lock a batch (food safety failure). POS will skip this batch."""
     batch = await db.get(BatchLifecycle, batch_id)
@@ -92,7 +110,9 @@ async def lock_batch(
 
 
 async def unlock_batch(
-    db: AsyncSession, batch_id: uuid.UUID, merchant_id: uuid.UUID,
+    db: AsyncSession,
+    batch_id: uuid.UUID,
+    merchant_id: uuid.UUID,
 ) -> BatchLifecycle:
     """Unlock a batch (re-check passed)."""
     batch = await db.get(BatchLifecycle, batch_id)
@@ -106,7 +126,9 @@ async def unlock_batch(
 
 
 async def recall_batch(
-    db: AsyncSession, batch_id: uuid.UUID, merchant_id: uuid.UUID,
+    db: AsyncSession,
+    batch_id: uuid.UUID,
+    merchant_id: uuid.UUID,
     reason: str,
 ) -> BatchLifecycle:
     """Recall a locked batch — the goods are being pulled from sale."""
@@ -121,7 +143,9 @@ async def recall_batch(
 
 
 async def destroy_batch(
-    db: AsyncSession, batch_id: uuid.UUID, merchant_id: uuid.UUID,
+    db: AsyncSession,
+    batch_id: uuid.UUID,
+    merchant_id: uuid.UUID,
     reason: str,
 ) -> BatchLifecycle:
     """Destroy a recalled batch — final disposal."""
@@ -136,21 +160,30 @@ async def destroy_batch(
     batch.destroyed_reason = reason
     # Record as waste in inventory
     if batch.remaining_qty > 0:
-        db.add(InventoryRecord(
-            merchant_id=merchant_id, product_id=batch.product_id,
-            sku_id=batch.sku_id, quantity=-batch.remaining_qty,
-            unit="斤", unit_cost=batch.unit_cost,
-            total_amount=(batch.remaining_qty * (batch.unit_cost or Decimal("0"))),
-            event_type="waste", event_time=utc_now(), source="food_safety",
-            batch_label=batch.batch_label,
-            notes=f"销毁: {reason}",
-            idempotency_key=f"destroy:{batch_id}",
-        ))
+        db.add(
+            InventoryRecord(
+                merchant_id=merchant_id,
+                product_id=batch.product_id,
+                sku_id=batch.sku_id,
+                quantity=-batch.remaining_qty,
+                unit="斤",
+                unit_cost=batch.unit_cost,
+                total_amount=(batch.remaining_qty * (batch.unit_cost or Decimal("0"))),
+                event_type="waste",
+                event_time=utc_now(),
+                source="food_safety",
+                batch_label=batch.batch_label,
+                notes=f"销毁: {reason}",
+                idempotency_key=f"destroy:{batch_id}",
+            )
+        )
     return batch
 
 
 async def get_batch_trace_data(
-    db: AsyncSession, batch_id: uuid.UUID, merchant_id: uuid.UUID,
+    db: AsyncSession,
+    batch_id: uuid.UUID,
+    merchant_id: uuid.UUID,
 ) -> dict | None:
     """Generate full traceability data for a batch (QR code content)."""
     batch = await db.get(BatchLifecycle, batch_id)
@@ -162,19 +195,26 @@ async def get_batch_trace_data(
     if batch.sale_orders:
         try:
             import json
+
             sale_order_ids = json.loads(batch.sale_orders)
         except Exception:
             pass
 
     # Get waste records
-    waste_records = (await db.execute(
-        select(InventoryRecord).where(
-            InventoryRecord.merchant_id == merchant_id,
-            InventoryRecord.product_id == batch.product_id,
-            InventoryRecord.batch_label == batch.batch_label,
-            InventoryRecord.event_type.in_(("waste", "refund")),
+    waste_records = (
+        (
+            await db.execute(
+                select(InventoryRecord).where(
+                    InventoryRecord.merchant_id == merchant_id,
+                    InventoryRecord.product_id == batch.product_id,
+                    InventoryRecord.batch_label == batch.batch_label,
+                    InventoryRecord.event_type.in_(("waste", "refund")),
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return {
         "batch_id": str(batch.id),
@@ -194,8 +234,12 @@ async def get_batch_trace_data(
         "locked_reason": batch.locked_reason,
         "sale_orders": sale_order_ids,
         "waste_records": [
-            {"event_type": r.event_type, "qty": float(r.quantity), "notes": r.notes,
-             "time": r.event_time.isoformat() if r.event_time else None}
+            {
+                "event_type": r.event_type,
+                "qty": float(r.quantity),
+                "notes": r.notes,
+                "time": r.event_time.isoformat() if r.event_time else None,
+            }
             for r in waste_records
         ],
     }
@@ -208,15 +252,38 @@ async def consume_batches_fifo(
     quantity: Decimal,
     sku_id: uuid.UUID | None = None,
 ) -> Decimal:
+    consumption = await consume_batches_fifo_costed(
+        db,
+        merchant_id,
+        product_id,
+        quantity,
+        sku_id=sku_id,
+    )
+    return consumption["quantity"]
+
+
+async def consume_batches_fifo_costed(
+    db: AsyncSession,
+    merchant_id: uuid.UUID,
+    product_id: int,
+    quantity: Decimal,
+    sku_id: uuid.UUID | None = None,
+) -> BatchConsumption:
     """Consume quantity from existing batches using FIFO (oldest first).
 
     If sku_id is provided, only batches carrying that SKU are consumed;
     otherwise falls back to product_id for backward compatibility with
-    legacy data that has no SKU link.
+    legacy data that has no SKU link. Returns actual FIFO cost where all
+    consumed batches have a unit cost, and separately reports unknown-cost
+    quantity for historical batches.
     """
     to_consume = abs(quantity)
     if to_consume <= 0:
-        return Decimal("0")
+        return {
+            "quantity": Decimal("0"),
+            "total_cost": Decimal("0"),
+            "missing_cost_quantity": Decimal("0"),
+        }
 
     filters = [
         BatchLifecycle.merchant_id == merchant_id,
@@ -233,6 +300,8 @@ async def consume_batches_fifo(
     batches = result.scalars().all()
 
     consumed = Decimal("0")
+    total_cost = Decimal("0")
+    missing_cost_quantity = Decimal("0")
     for batch in batches:
         if to_consume <= 0:
             break
@@ -241,6 +310,10 @@ async def consume_batches_fifo(
         batch.remaining_qty = available - take
         to_consume -= take
         consumed += take
+        if batch.unit_cost is None:
+            missing_cost_quantity += take
+        else:
+            total_cost += take * batch.unit_cost
 
     if to_consume > 0:
         logger.info(
@@ -252,7 +325,11 @@ async def consume_batches_fifo(
             consumed,
         )
 
-    return consumed.quantize(Decimal("0.01"))
+    return {
+        "quantity": consumed.quantize(Decimal("0.01")),
+        "total_cost": total_cost.quantize(Decimal("0.01")),
+        "missing_cost_quantity": missing_cost_quantity.quantize(Decimal("0.01")),
+    }
 
 
 async def rollback_batch_on_void(
@@ -260,7 +337,7 @@ async def rollback_batch_on_void(
     merchant_id: uuid.UUID,
     product_id: int,
     record: "InventoryRecord",
-) -> dict:
+) -> BatchRollbackSummary:
     """Reverse the batch effect of a voided inventory record.
 
     For purchase voids: reduce or delete the batch created by this record.
@@ -268,7 +345,11 @@ async def rollback_batch_on_void(
 
     Returns a summary dict for audit logging.
     """
-    summary = {"event_type": record.event_type, "batches_affected": 0, "qty_adjusted": Decimal("0")}
+    summary: BatchRollbackSummary = {
+        "event_type": record.event_type,
+        "batches_affected": 0,
+        "qty_adjusted": Decimal("0"),
+    }
 
     if record.event_type == "purchase":
         # Find the batch created by this purchase (match by batch_label + product + date proximity)
@@ -294,7 +375,7 @@ async def rollback_batch_on_void(
             else:
                 # Part of this batch was already consumed — reduce to consumed amount
                 batch.purchase_qty = consumed
-                batch.remaining_qty = 0
+                batch.remaining_qty = Decimal("0")
                 summary["batches_affected"] = 1
                 summary["qty_adjusted"] = consumed - purchased_qty
                 summary["action"] = "reduced"
@@ -385,7 +466,11 @@ async def return_to_batches(
         logger.info(
             "Batch return exceeded consumption for merchant=%s product=%s sku=%s: "
             "returned=%s remainder=%s (creates overage)",
-            merchant_id, product_id, sku_id, returned, to_return,
+            merchant_id,
+            product_id,
+            sku_id,
+            returned,
+            to_return,
         )
 
     return returned.quantize(Decimal("0.01"))

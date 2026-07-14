@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "model_version": "products-yolov8n-2026.07.13",
+  "model_file": "yolov8n_products.onnx",
+  "sha256": "REPLACE_WITH_64_CHARACTER_LOWERCASE_SHA256",
+  "input_size": 640,
+  "classes": [
+    "白菜",
+    "菠菜",
+    "生菜",
+    "土豆",
+    "萝卜",
+    "胡萝卜",
+    "红薯",
+    "洋葱",
+    "豆腐",
+    "豆皮",
+    "黄瓜",
+    "番茄",
+    "西瓜",
+    "茄子",
+    "辣椒"
+  ],
+  "training_dataset": "REPLACE_WITH_DATASET_VERSION",
+  "exported_at": "2026-07-13T00:00:00Z"
+}

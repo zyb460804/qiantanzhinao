@@ -1,0 +1,29 @@
+groups:
+  - name: qiantan
+    rules:
+      - alert: DeadLetterQueueGrowing
+        expr: qiantan_dead_letter_total{status="pending"} > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead letter queue growing"
+          description: "Dead letter queue has {{ $value }} pending items"
+
+      - alert: DeviceOffline
+        expr: qiantan_device_health{status="offline"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Devices offline"
+          description: "{{ $value }} devices are offline"
+
+      - alert: ReconciliationFailed
+        expr: qiantan_reconciliation_status{status="exception"} > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Reconciliation has exceptions"
+          description: "{{ $value }} reconciliation tasks have exceptions"

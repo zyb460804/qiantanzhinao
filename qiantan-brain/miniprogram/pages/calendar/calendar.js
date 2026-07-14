@@ -14,6 +14,7 @@ Page({
     solarTerm: '--',
     termRange: '',
     inSeason: '',
+    inSeasonProducts: [],
     weekdayText: '',
     week: [],
     termAdvice: [],
@@ -58,6 +59,7 @@ Page({
           solarTerm: term.solar_term || '--',
           termRange: term.term_range || '',
           inSeason: term.in_season_products || '',
+          inSeasonProducts: Array.isArray(term.in_season_product_list) ? term.in_season_product_list : [],
           termAdvice: (term.advice || []).map(function (a) {
             return {
               label: a.label || '',
@@ -75,7 +77,9 @@ Page({
         plans = forecast.slice(0, 4).map(function (fc) {
           var d = new Date(fc.date);
           var weekLabel = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
-          var temp = Math.round(fc.temp_high || 25);
+          var tempHigh = fc.temp_high;
+          var temp = Math.round(tempHigh !== undefined && tempHigh !== null && tempHigh !== '' ? Number(tempHigh) : 25);
+          if (!isFinite(temp)) temp = 25;
           var isHot = temp >= 32;
           var weatherType = fc.weather_type || '晴';
           var rain = fc.rainfall_prob || 0;
@@ -96,7 +100,7 @@ Page({
           return {
             day: d.getDate(),
             week: '周' + weekLabel,
-            weather: weatherType + ' ' + temp + '°',
+            weather: weatherType,
             temp: temp + '°',
             hot: isHot,
             tip: tip,
@@ -130,7 +134,7 @@ Page({
       var d = new Date(monday);
       d.setDate(monday.getDate() + i);
       var isWeekend = (i === 5 || i === 6);
-      var isToday = (d.getDate() === now.getDate() && d.getMonth() === now.getMonth());
+      var isToday = (d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear());
       cells.push({
         d: WEEK_LABELS[i],
         tag: isWeekend ? '休' : '',
@@ -151,17 +155,25 @@ Page({
 
   // 一键生成采购清单
   addToPurchase: function () {
-    var products = (this.data.inSeason || '').split('·').filter(Boolean);
+    var products = Array.isArray(this.data.inSeasonProducts) && this.data.inSeasonProducts.length
+      ? this.data.inSeasonProducts.slice()
+      : (this.data.inSeason || '').split('·').filter(Boolean);
     if (!products.length) { wx.showToast({ title: '暂无当令商品', icon: 'none' }); return; }
 
     var draft = wx.getStorageSync('purchaseDraft') || [];
     var added = 0;
-    products.forEach(function (name) {
-      name = name.trim();
-      var exists = draft.some(function (d) { return d.name === name; });
+    products.forEach(function (product) {
+      var productId = product && typeof product === 'object' ? (product.product_id || product.sku_id || '') : '';
+      var name = String(product && typeof product === 'object' ? (product.name || '') : product).trim();
+      if (!name) return;
+      var normalizedName = name.replace(/\s+/g, '').toLowerCase();
+      var exists = draft.some(function (d) {
+        if (productId && (d.product_id === productId || d.sku_id === productId)) return true;
+        return String(d.name || '').replace(/\s+/g, '').toLowerCase() === normalizedName;
+      });
       if (!exists) {
-        // 默认建议量 5 斤,用户可在采购页调整
-        draft.push({ name: name, qty: 5, unit: '斤', from: '时令建议' });
+        // 5斤仅作为可编辑草稿建议，不代表精准补货量。
+        draft.push({ name: name, product_id: productId || undefined, qty: 5, unit: '斤', from: '时令建议', is_suggestion: true });
         added++;
       }
     });

@@ -1,15 +1,18 @@
 """Inventory management API router."""
 
 import uuid
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant, get_merchant_id
+from app.core.tenant_context import QuotaCheck
 from app.core.timezone import utc_now
 from app.database import get_db
 from app.models.audit import AuditLog
+from app.models.batch import BatchLifecycle
 from app.models.catalog import ProductSKU
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
@@ -29,6 +32,7 @@ router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
 async def get_current_inventory(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
+    _quota=Depends(QuotaCheck("api_calls")),
 ):
     """当前库存（真实账本口径）。
 
@@ -95,6 +99,34 @@ async def get_current_inventory(
                 round(float(s.default_sale_price), 2) if s.default_sale_price is not None else None
             )
 
+    # Batch promotions are temporary and only apply while the batch is sellable,
+    # has stock, and falls inside its explicit validity window.
+    now = utc_now().replace(tzinfo=None)
+    promo_query = select(BatchLifecycle).where(
+        BatchLifecycle.merchant_id == merchant_id,
+        BatchLifecycle.remaining_qty > 0,
+        BatchLifecycle.status.in_(["sellable", "near_expiry"]),
+        BatchLifecycle.promotion_price.isnot(None),
+        or_(BatchLifecycle.promotion_start_at.is_(None), BatchLifecycle.promotion_start_at <= now),
+        or_(BatchLifecycle.promotion_end_at.is_(None), BatchLifecycle.promotion_end_at > now),
+    )
+    promo_result = await db.execute(promo_query)
+    promotions = promo_result.scalars().all()
+    promotion_prices_by_sku: dict[uuid.UUID, float] = {}
+    promotion_prices_by_product: dict[int, float] = {}
+    for batch in promotions:
+        if batch.promotion_price is None:
+            continue
+        price = round(float(batch.promotion_price), 2)
+        if batch.sku_id:
+            old = promotion_prices_by_sku.get(batch.sku_id)
+            promotion_prices_by_sku[batch.sku_id] = price if old is None else min(old, price)
+        else:
+            old = promotion_prices_by_product.get(batch.product_id)
+            promotion_prices_by_product[batch.product_id] = (
+                price if old is None else min(old, price)
+            )
+
     items = [
         {
             "product_id": row.product_id,
@@ -104,6 +136,17 @@ async def get_current_inventory(
             "current_qty": round(float(row.qty), 1),
             "avg_cost": round(float(row.avg_cost), 2) if row.avg_cost is not None else None,
             "default_sale_price": sku_prices.get(row.sku_id) if row.sku_id else None,
+            "promotion_price": (
+                promotion_prices_by_sku.get(row.sku_id)
+                if row.sku_id
+                else promotion_prices_by_product.get(row.product_id)
+            ),
+            "sale_price": (
+                promotion_prices_by_sku.get(row.sku_id)
+                if row.sku_id and row.sku_id in promotion_prices_by_sku
+                else promotion_prices_by_product.get(row.product_id)
+                or (sku_prices.get(row.sku_id) if row.sku_id else None)
+            ),
             "unit": row.unit or "斤",
         }
         for row in rows
@@ -275,41 +318,92 @@ async def void_inventory_record(
 # ============================================================
 
 
+def _stocktake_item_data(item: StocktakeItem, product_name: str) -> dict:
+    """Serialize one persisted stocktake snapshot line."""
+    actual_qty = float(item.actual_qty) if item.actual_qty is not None else None
+    variance = float(item.variance) if item.variance is not None else None
+    return {
+        "item_id": str(item.id),
+        "product_id": item.product_id,
+        "product_name": product_name,
+        "unit": item.unit,
+        "book_qty": float(item.book_qty),
+        "actual_qty": actual_qty,
+        "variance": variance,
+        "variance_reason": item.variance_reason,
+        "submitted": actual_qty is not None,
+    }
+
+
+async def _stocktake_session_data(db: AsyncSession, session: StocktakeSession) -> dict:
+    item_result = await db.execute(
+        select(StocktakeItem)
+        .where(StocktakeItem.session_id == session.id)
+        .order_by(StocktakeItem.product_id)
+    )
+    items = item_result.scalars().all()
+    product_ids = {item.product_id for item in items}
+    product_names: dict[int, str] = {}
+    if product_ids:
+        product_result = await db.execute(
+            select(ProductCategory).where(ProductCategory.id.in_(product_ids))
+        )
+        product_names = {p.id: p.name for p in product_result.scalars().all()}
+
+    return {
+        "session_id": str(session.id),
+        "status": session.status,
+        "started_at": session.started_at.isoformat() if session.started_at else None,
+        "notes": session.notes or "",
+        "items": [
+            _stocktake_item_data(item, product_names.get(item.product_id, f"商品{item.product_id}"))
+            for item in items
+        ],
+    }
+
+
+@router.get("/stocktake/current", response_model=AnyResponse)
+async def current_stocktake(
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the merchant's in-progress session and all persisted snapshot lines."""
+    result = await db.execute(
+        select(StocktakeSession)
+        .where(
+            StocktakeSession.merchant_id == merchant.id,
+            StocktakeSession.status == "in_progress",
+        )
+        .order_by(StocktakeSession.started_at.desc())
+        .limit(1)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        return {"code": 0, "data": None}
+    return {"code": 0, "data": await _stocktake_session_data(db, session)}
+
+
 @router.post("/stocktake/start", response_model=AnyResponse)
 async def start_stocktake(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Start a new stocktake session. Returns book inventory for all products.
-
-    Uses SQL aggregation (SUM/GROUP BY) instead of .limit(500) for accuracy.
-    Prevents multiple concurrent stocktake sessions per merchant.
-    merchant_id 来自 token，不再信任客户端 body。
-    """
+    """Start a session and persist the complete book-inventory snapshot."""
     merchant_id = merchant.id
-
-    # Check for existing in-progress session
-    existing_query = select(StocktakeSession).where(
-        StocktakeSession.merchant_id == merchant_id,
-        StocktakeSession.status == "in_progress",
+    existing_result = await db.execute(
+        select(StocktakeSession).where(
+            StocktakeSession.merchant_id == merchant_id,
+            StocktakeSession.status == "in_progress",
+        )
     )
-    existing_result = await db.execute(existing_query)
     existing = existing_result.scalar_one_or_none()
     if existing:
         raise HTTPException(
             status_code=400,
-            detail="已有进行中的盘点，请先完成或取消后再开始新盘点",
+            detail="已有进行中的盘点，请继续完成或取消后再开始新盘点",
         )
 
-    session = StocktakeSession(
-        merchant_id=merchant_id,
-        status="in_progress",
-    )
-    db.add(session)
-    await db.flush()
-
-    # Use SQL aggregation for accurate book inventory (no .limit())
-    agg_query = (
+    agg_result = await db.execute(
         select(
             InventoryRecord.product_id,
             func.sum(InventoryRecord.quantity).label("book_qty"),
@@ -320,49 +414,47 @@ async def start_stocktake(
         )
         .group_by(InventoryRecord.product_id)
     )
-    agg_result = await db.execute(agg_query)
+    book_qty_by_product = {row.product_id: round(float(row.book_qty), 2) for row in agg_result}
 
-    book_inventory = {}
-    for row in agg_result:
-        pid = row.product_id
-        book_qty = round(float(row.book_qty), 2)
-        book_inventory[pid] = {
-            "product_id": pid,
-            "product_name": f"商品{pid}",
-            "unit": "斤",
-            "book_qty": book_qty,
-        }
+    products_result = await db.execute(
+        select(ProductCategory).where(ProductCategory.is_active == True)  # noqa: E712
+    )
+    products = products_result.scalars().all()
+    products_by_id = {p.id: p for p in products}
 
-    # Resolve product names in a single query
-    product_ids = set(book_inventory.keys())
-    if product_ids:
-        name_query = select(ProductCategory).where(ProductCategory.id.in_(product_ids))
-        name_result = await db.execute(name_query)
-        for p in name_result.scalars().all():
-            book_inventory[p.id]["product_name"] = p.name
-            book_inventory[p.id]["unit"] = p.unit
+    # Keep ledger products in the snapshot even when their category was later deactivated.
+    missing_ids = set(book_qty_by_product) - set(products_by_id)
+    if missing_ids:
+        missing_result = await db.execute(
+            select(ProductCategory).where(ProductCategory.id.in_(missing_ids))
+        )
+        for product in missing_result.scalars().all():
+            products_by_id[product.id] = product
 
-    # Also include active products with zero inventory
-    all_products_query = select(ProductCategory).where(ProductCategory.is_active == True)  # noqa: E712
-    all_products_result = await db.execute(all_products_query)
-    for p in all_products_result.scalars().all():
-        if p.id not in book_inventory:
-            book_inventory[p.id] = {
-                "product_id": p.id,
-                "product_name": p.name,
-                "unit": p.unit,
-                "book_qty": 0.0,
-            }
+    session = StocktakeSession(merchant_id=merchant_id, status="in_progress")
+    db.add(session)
+    await db.flush()
+
+    for product_id in sorted(products_by_id):
+        product = products_by_id[product_id]
+        db.add(
+            StocktakeItem(
+                session_id=session.id,
+                merchant_id=merchant_id,
+                product_id=product_id,
+                book_qty=book_qty_by_product.get(product_id, 0.0),
+                actual_qty=None,
+                variance=None,
+                unit=product.unit or "斤",
+            )
+        )
 
     await db.commit()
-
+    await db.refresh(session)
     return {
         "code": 0,
-        "message": "盘点已开始",
-        "data": {
-            "session_id": str(session.id),
-            "items": list(book_inventory.values()),
-        },
+        "message": "盘点已开始，账面库存快照已锁定",
+        "data": await _stocktake_session_data(db, session),
     }
 
 
@@ -373,63 +465,32 @@ async def submit_stocktake_item(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Submit actual count for one product in a stocktake session."""
-    session_query = select(StocktakeSession).where(StocktakeSession.id == session_id)
-    session_result = await db.execute(session_query)
+    """Submit one actual count against the immutable start-time snapshot."""
+    session_result = await db.execute(
+        select(StocktakeSession).where(StocktakeSession.id == session_id)
+    )
     session = session_result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="盘点会话不存在")
-    if session.merchant_id != merchant.id:
+    if not session or session.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="盘点会话不存在")
     if session.status != "in_progress":
         raise HTTPException(status_code=400, detail="该盘点已结束")
 
-    product_id = req.product_id
-    actual_qty = req.actual_qty
-    variance_reason = req.variance_reason or ""
-
-    # Use SQL aggregation for accurate book qty (no record loading)
-    agg_query = select(func.sum(InventoryRecord.quantity)).where(
-        InventoryRecord.merchant_id == session.merchant_id,
-        InventoryRecord.product_id == product_id,
-        InventoryRecord.is_voided == False,  # noqa: E712
-    )
-    agg_result = await db.execute(agg_query)
-    book_qty = float(agg_result.scalar() or 0)
-
-    prod_query = select(ProductCategory).where(ProductCategory.id == product_id)
-    prod_result = await db.execute(prod_query)
-    product = prod_result.scalar_one_or_none()
-    unit = product.unit if product else "斤"
-
-    variance = round(actual_qty - book_qty, 2)
-
-    existing_query = select(StocktakeItem).where(
-        StocktakeItem.session_id == session_id,
-        StocktakeItem.product_id == product_id,
-    )
-    existing_result = await db.execute(existing_query)
-    existing = existing_result.scalar_one_or_none()
-
-    if existing:
-        existing.book_qty = book_qty
-        existing.actual_qty = actual_qty
-        existing.variance = variance
-        existing.variance_reason = variance_reason
-        item = existing
-    else:
-        item = StocktakeItem(
-            session_id=session_id,
-            merchant_id=session.merchant_id,
-            product_id=product_id,
-            book_qty=book_qty,
-            actual_qty=actual_qty,
-            variance=variance,
-            unit=unit,
-            variance_reason=variance_reason,
+    item_result = await db.execute(
+        select(StocktakeItem).where(
+            StocktakeItem.session_id == session_id,
+            StocktakeItem.product_id == req.product_id,
         )
-        db.add(item)
+    )
+    item = item_result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=400, detail="该商品不在本次盘点快照中")
 
+    actual_qty = req.actual_qty
+    book_qty = float(item.book_qty)
+    variance = round(actual_qty - book_qty, 2)
+    item.actual_qty = actual_qty
+    item.variance = variance
+    item.variance_reason = req.variance_reason or req.diff_reason or ""
     await db.commit()
 
     return {
@@ -437,12 +498,44 @@ async def submit_stocktake_item(
         "message": "盘点项已保存",
         "data": {
             "item_id": str(item.id),
-            "product_id": product_id,
+            "product_id": item.product_id,
             "book_qty": round(book_qty, 2),
             "actual_qty": actual_qty,
             "variance": variance,
-            "unit": unit,
+            "unit": item.unit,
         },
+    }
+
+
+@router.post("/stocktake/{session_id}/cancel", response_model=AnyResponse)
+async def cancel_stocktake(
+    session_id: uuid.UUID,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel an in-progress stocktake. Completed sessions remain immutable."""
+    session_result = await db.execute(
+        select(StocktakeSession).where(StocktakeSession.id == session_id)
+    )
+    session = session_result.scalar_one_or_none()
+    if not session or session.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="盘点会话不存在")
+    if session.status == "completed":
+        raise HTTPException(status_code=400, detail="已完成的盘点不能取消")
+    if session.status == "cancelled":
+        return {
+            "code": 0,
+            "message": "该盘点已取消",
+            "data": {"session_id": str(session.id), "status": "cancelled"},
+        }
+
+    session.status = "cancelled"
+    session.completed_at = utc_now()
+    await db.commit()
+    return {
+        "code": 0,
+        "message": "盘点已取消",
+        "data": {"session_id": str(session.id), "status": "cancelled"},
     }
 
 
@@ -453,45 +546,42 @@ async def complete_stocktake(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Complete a stocktake: generate adjustment records for variances.
-
-    Idempotent: if already completed, returns original results.
-    Requires at least one submitted item.
-    """
-    session_query = select(StocktakeSession).where(StocktakeSession.id == session_id)
-    session_result = await db.execute(session_query)
+    """Complete a stocktake after every persisted snapshot line is counted."""
+    session_result = await db.execute(
+        select(StocktakeSession).where(StocktakeSession.id == session_id)
+    )
     session = session_result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="盘点会话不存在")
-    if session.merchant_id != merchant.id:
+    if not session or session.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="盘点会话不存在")
     if session.status == "cancelled":
         raise HTTPException(status_code=400, detail="该盘点已取消")
     if session.status == "completed":
-        # Idempotent: return original results
         return {
             "code": 0,
             "message": "该盘点已完成",
             "data": {
                 "session_id": str(session.id),
-                "total_book_qty": float(session.total_book_qty) if session.total_book_qty else 0,
-                "total_actual_qty": (
-                    float(session.total_actual_qty) if session.total_actual_qty else 0
-                ),
-                "total_variance": float(session.total_variance) if session.total_variance else 0,
-                "total_loss_amount": (
-                    float(session.total_loss_amount) if session.total_loss_amount else 0
-                ),
+                "total_book_qty": float(session.total_book_qty or 0),
+                "total_actual_qty": float(session.total_actual_qty or 0),
+                "total_variance": float(session.total_variance or 0),
+                "total_loss_amount": float(session.total_loss_amount or 0),
                 "adjustments": [],
             },
         }
 
-    items_query = select(StocktakeItem).where(StocktakeItem.session_id == session_id)
-    items_result = await db.execute(items_query)
+    items_result = await db.execute(
+        select(StocktakeItem).where(StocktakeItem.session_id == session_id)
+    )
     items = items_result.scalars().all()
-
     if not items:
-        raise HTTPException(status_code=400, detail="请至少录入一项盘点数据后再完成盘点")
+        raise HTTPException(status_code=400, detail="本次盘点没有可盘商品")
+
+    pending_count = sum(item.actual_qty is None for item in items)
+    if pending_count:
+        raise HTTPException(
+            status_code=400,
+            detail=f"仍有 {pending_count} 项商品未录入实盘数量",
+        )
 
     total_book = 0.0
     total_actual = 0.0
@@ -500,55 +590,54 @@ async def complete_stocktake(
     adjustments = []
 
     for item in items:
-        total_book += float(item.book_qty)
-        total_actual += float(item.actual_qty)
-        total_variance += float(item.variance)
-
-        if abs(float(item.variance)) < 0.01:
+        if item.actual_qty is None:
+            raise HTTPException(status_code=409, detail="盘点数据不完整，请重新录入")
+        actual_qty = float(item.actual_qty)
+        book_qty = float(item.book_qty)
+        variance = (
+            float(item.variance) if item.variance is not None else round(actual_qty - book_qty, 2)
+        )
+        if item.variance is None:
+            item.variance = variance
+        total_book += book_qty
+        total_actual += actual_qty
+        total_variance += variance
+        if abs(variance) < 0.01 or item.adjustment_record_id:
             continue
 
-        # Idempotency: skip items that already have adjustment records
-        if item.adjustment_record_id:
-            continue
-
-        prod_query = select(ProductCategory).where(ProductCategory.id == item.product_id)
-        prod_result = await db.execute(prod_query)
+        prod_result = await db.execute(
+            select(ProductCategory).where(ProductCategory.id == item.product_id)
+        )
         product = prod_result.scalar_one_or_none()
         product_name = product.name if product else f"商品{item.product_id}"
-
-        adj_qty = float(item.variance)
         record = InventoryRecord(
             merchant_id=session.merchant_id,
             product_id=item.product_id,
-            quantity=adj_qty,
+            quantity=variance,
             unit=item.unit,
             event_type="adjustment",
             event_time=utc_now(),
             source="stocktake",
             notes=(
-                f"盘点调整: 账面{item.book_qty}, 实际{item.actual_qty},"
-                f" 原因{item.variance_reason or '未注明'}"
+                f"盘点调整: 账面{book_qty:.2f}, 实盘{actual_qty:.2f}, "
+                f"原因: {item.variance_reason or '未说明'}"
             ),
         )
         db.add(record)
         await db.flush()
         item.adjustment_record_id = record.id
 
-        if adj_qty < 0:
-            from app.services.batch import consume_batches_fifo
-
-            await consume_batches_fifo(db, session.merchant_id, item.product_id, abs(adj_qty))
-            if product and product.default_price:
-                total_loss_amount += abs(adj_qty) * float(product.default_price)
-        elif adj_qty > 0:
-            batch_label = f"盘点盘盈-{utc_now().strftime('%m%d%H%M')}"
+        if variance < 0:
+            total_loss_amount += abs(variance) * float(product.default_price or 0) if product else 0
+        else:
             await create_batch(
                 db,
                 merchant_id=session.merchant_id,
                 product_id=item.product_id,
                 product_name=product_name,
-                batch_label=batch_label,
-                quantity=adj_qty,
+                batch_label=f"盘点盘盈-{utc_now().strftime('%m%d%H%M')}",
+                quantity=Decimal(str(variance)),
+                unit_cost=None,
             )
 
         adjustments.append(
@@ -556,8 +645,8 @@ async def complete_stocktake(
                 "product_id": item.product_id,
                 "product_name": product_name,
                 "book_qty": float(item.book_qty),
-                "actual_qty": float(item.actual_qty),
-                "variance": float(item.variance),
+                "actual_qty": actual_qty,
+                "variance": variance,
                 "unit": item.unit,
                 "adjustment_record_id": str(record.id),
             }
@@ -570,26 +659,25 @@ async def complete_stocktake(
     session.total_loss_amount = round(total_loss_amount, 2)
     session.completed_at = utc_now()
     session.notes = req.notes or ""
-
-    audit = AuditLog(
-        merchant_id=session.merchant_id,
-        action="stocktake",
-        target_table="stocktake_sessions",
-        target_id=str(session.id),
-        before_data=None,
-        after_data={
-            "total_book": round(total_book, 2),
-            "total_actual": round(total_actual, 2),
-            "total_variance": round(total_variance, 2),
-            "total_loss_amount": round(total_loss_amount, 2),
-            "adjustments_count": len(adjustments),
-        },
-        reason=req.notes or "库存盘点完成",
-        operator="merchant",
+    db.add(
+        AuditLog(
+            merchant_id=session.merchant_id,
+            action="stocktake",
+            target_table="stocktake_sessions",
+            target_id=str(session.id),
+            before_data=None,
+            after_data={
+                "total_book": round(total_book, 2),
+                "total_actual": round(total_actual, 2),
+                "total_variance": round(total_variance, 2),
+                "total_loss_amount": round(total_loss_amount, 2),
+                "adjustments_count": len(adjustments),
+            },
+            reason=req.notes or "库存盘点完成",
+            operator="merchant",
+        )
     )
-    db.add(audit)
     await db.commit()
-
     return {
         "code": 0,
         "message": "盘点完成，库存已校准",
@@ -739,45 +827,63 @@ async def stock_ledger_summary(
 
     # Locked inventory (from batch_lifecycles)
     from app.models.batch import BatchLifecycle
+
     locked_qty = float(
-        (await db.execute(
-            select(func.sum(BatchLifecycle.remaining_qty)).where(
-                BatchLifecycle.merchant_id == merchant.id,
-                BatchLifecycle.status == "locked",
+        (
+            await db.execute(
+                select(func.sum(BatchLifecycle.remaining_qty)).where(
+                    BatchLifecycle.merchant_id == merchant.id,
+                    BatchLifecycle.status == "locked",
+                )
             )
-        )).scalar() or 0
+        ).scalar()
+        or 0
     )
 
     # Held (pre-allocated) inventory from held POS orders
     from app.models.pos import SaleOrder, SaleOrderItem
-    held_orders = (await db.execute(
-        select(SaleOrder.id).where(
-            SaleOrder.merchant_id == merchant.id,
-            SaleOrder.status == "held",
+
+    held_orders = (
+        (
+            await db.execute(
+                select(SaleOrder.id).where(
+                    SaleOrder.merchant_id == merchant.id,
+                    SaleOrder.status == "held",
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
     held_qty = 0.0
     if held_orders:
         held_qty = float(
-            (await db.execute(
-                select(func.sum(SaleOrderItem.quantity)).where(
-                    SaleOrderItem.order_id.in_(held_orders),
+            (
+                await db.execute(
+                    select(func.sum(SaleOrderItem.quantity)).where(
+                        SaleOrderItem.order_id.in_(held_orders),
+                    )
                 )
-            )).scalar() or 0
+            ).scalar()
+            or 0
         )
 
     # Waste this month
     from app.core.timezone import utc_now
+
     month_start = utc_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     waste_qty = float(
-        (await db.execute(
-            select(func.sum(func.abs(InventoryRecord.quantity))).where(
-                InventoryRecord.merchant_id == merchant.id,
-                InventoryRecord.is_voided == False,  # noqa: E712
-                InventoryRecord.event_type == "waste",
-                InventoryRecord.event_time >= month_start,
+        (
+            await db.execute(
+                select(func.sum(func.abs(InventoryRecord.quantity))).where(
+                    InventoryRecord.merchant_id == merchant.id,
+                    InventoryRecord.is_voided == False,  # noqa: E712
+                    InventoryRecord.event_type == "waste",
+                    InventoryRecord.event_time >= month_start,
+                )
             )
-        )).scalar() or 0
+        ).scalar()
+        or 0
     )
 
     # Sellable = book - locked - held
@@ -785,13 +891,14 @@ async def stock_ledger_summary(
 
     # Get product count
     from app.models.product import ProductCategory
+
     active_product_count = (
-        (await db.execute(
+        await db.execute(
             select(func.count(ProductCategory.id)).where(
                 ProductCategory.is_active == True,  # noqa: E712
             )
-        )).scalar() or 0
-    )
+        )
+    ).scalar() or 0
 
     return {
         "code": 0,
@@ -823,4 +930,3 @@ async def stock_ledger_summary(
             "active_products": active_product_count,
         },
     }
-

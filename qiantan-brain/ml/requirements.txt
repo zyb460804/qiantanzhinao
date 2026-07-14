@@ -1,0 +1,6 @@
+# Reproducible training and forecasting environment (Python 3.11).
+numpy==1.26.4
+pandas==2.2.3
+Pillow==10.4.0
+prophet==1.1.6
+ultralytics==8.3.40

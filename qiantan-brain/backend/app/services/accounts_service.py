@@ -87,13 +87,66 @@ async def record_supplier_payment(
     *,
     merchant_id: uuid.UUID,
     supplier_id: uuid.UUID,
+    payable_ids: list[uuid.UUID],
     amount: Decimal,
     note: str | None = None,
     idempotency_key: str | None = None,
 ) -> SupplierPayable:
-    """记录一笔向供应商的付款（减少应付余额）。"""
+    """按指定 purchase payable 逐笔核销一笔供应商付款。"""
+    amount = amount.quantize(Decimal("0.01"))
     if amount <= 0:
-        raise ValueError("付款金额必须大于 0")
+        raise ValueError("付款金额必须大于等于 0.01")
+    if not payable_ids:
+        raise ValueError("付款必须选择应付账款")
+    if len(payable_ids) != len(set(payable_ids)):
+        raise ValueError("应付账款不能重复选择")
+
+    if idempotency_key:
+        existing = (
+            await db.execute(
+                select(SupplierPayable).where(
+                    SupplierPayable.merchant_id == merchant_id,
+                    SupplierPayable.idempotency_key == idempotency_key,
+                    SupplierPayable.direction == "payment",
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            if existing.supplier_id != supplier_id or existing.amount != amount:
+                raise ValueError("幂等键已用于另一笔付款")
+            return existing
+
+    rows = (
+        (
+            await db.execute(
+                select(SupplierPayable)
+                .where(
+                    SupplierPayable.merchant_id == merchant_id,
+                    SupplierPayable.supplier_id == supplier_id,
+                    SupplierPayable.id.in_(payable_ids),
+                    SupplierPayable.direction == "purchase",
+                )
+                .order_by(SupplierPayable.created_at, SupplierPayable.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(rows) != len(set(payable_ids)):
+        raise ValueError("存在不属于该供应商或不存在的应付账款")
+
+    remaining_total = sum(
+        (row.amount - (row.settled_amount or Decimal("0")) for row in rows), Decimal("0")
+    )
+    if amount > remaining_total:
+        raise ValueError("付款金额不能超过所选应付余额")
+    # 退货抵扣等历史 payment 流水可能尚未分摊到 settled_amount；同时校验
+    # 供应商净余额，防止选中应付看似有余额但实际已被退货抵扣后再次超付。
+    supplier_balance = await get_supplier_balance(db, merchant_id, supplier_id)
+    if amount > supplier_balance:
+        raise ValueError("付款金额不能超过供应商当前应付净余额")
+
     payment = SupplierPayable(
         merchant_id=merchant_id,
         supplier_id=supplier_id,
@@ -101,9 +154,52 @@ async def record_supplier_payment(
         amount=amount,
         note=note or "付款",
         settled=True,
+        settled_amount=Decimal("0"),
         idempotency_key=idempotency_key,
     )
     db.add(payment)
+
+    remaining_payment = amount
+    affected_lists: set[uuid.UUID] = set()
+    for row in rows:
+        if remaining_payment <= 0:
+            break
+        row_remaining = row.amount - (row.settled_amount or Decimal("0"))
+        applied = min(row_remaining, remaining_payment)
+        row.settled_amount = (row.settled_amount or Decimal("0")) + applied
+        row.settled = row.settled_amount >= row.amount
+        remaining_payment -= applied
+        if row.purchase_list_id:
+            affected_lists.add(row.purchase_list_id)
+
+    # 采购单付款状态与实际核销金额同步，避免仅依赖供应商总余额推断。
+    for list_id in affected_lists:
+        plist = await db.get(PurchaseList, list_id)
+        if not plist:
+            continue
+        list_rows = (
+            (
+                await db.execute(
+                    select(SupplierPayable).where(
+                        SupplierPayable.merchant_id == merchant_id,
+                        SupplierPayable.purchase_list_id == list_id,
+                        SupplierPayable.direction == "purchase",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        remaining = sum(
+            (r.amount - (r.settled_amount or Decimal("0")) for r in list_rows), Decimal("0")
+        )
+        total_actual = plist.total_actual_cost or sum((r.amount for r in list_rows), Decimal("0"))
+        paid = max(Decimal("0"), min(total_actual, total_actual - remaining))
+        plist.paid_amount = paid
+        plist.payment_status = (
+            "paid" if remaining <= 0 and total_actual > 0 else ("partial" if paid > 0 else "unpaid")
+        )
+
     return payment
 
 
@@ -343,15 +439,23 @@ async def get_supplier_statement(
         elif row.direction == "return":
             total_returns += row.amount
 
-        items.append({
-            "id": str(row.id),
-            "direction": row.direction,
-            "amount": float(row.amount),
-            "note": row.note,
-            "due_date": row.due_date.isoformat() if row.due_date else None,
-            "settled": row.settled,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
-        })
+        settled_amount = row.settled_amount or Decimal("0")
+        remaining_amount = max(row.amount - settled_amount, Decimal("0"))
+        items.append(
+            {
+                "id": str(row.id),
+                "direction": row.direction,
+                "amount": float(row.amount),
+                "note": row.note,
+                "due_date": row.due_date.isoformat() if row.due_date else None,
+                "settled": row.settled,
+                "settled_amount": float(settled_amount),
+                "remaining_amount": float(remaining_amount)
+                if row.direction == "purchase"
+                else 0,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+        )
 
     current_balance = total_purchases - total_payments - total_returns
 

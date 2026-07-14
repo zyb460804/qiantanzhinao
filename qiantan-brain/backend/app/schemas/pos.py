@@ -28,7 +28,7 @@ class CreateSaleOrderItem(BaseModel):
     product_id: int
     sku_id: uuid.UUID | None = None
     quantity: float = Field(gt=0, le=100000)
-    unit_price: float | None = Field(default=None, ge=0)
+    unit_price: float | None = Field(default=None, gt=0)
     unit: str = Field(default="斤", min_length=1, max_length=20)
 
 
@@ -57,6 +57,9 @@ class CreateSaleOrderRequest(BaseModel):
 class PaySaleOrderRequest(BaseModel):
     amount: float = Field(gt=0)
     method: Literal["cash", "wechat", "alipay", "card"] = "cash"
+    payments: list[PaymentItem] | None = Field(
+        default=None, max_length=10
+    )  # 组合支付（优先于 method）
     transaction_id: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=500)
 
@@ -109,6 +112,14 @@ class HoldOrderRequest(BaseModel):
     discount_amount: float = Field(default=0, ge=0)
     customer_name: str | None = Field(default=None, max_length=100)
     client_id: str | None = Field(default=None, min_length=8, max_length=64)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ResumeHeldOrderRequest(BaseModel):
+    payment_method: PaymentMethod = "cash"
+    payments: list[PaymentItem] | None = Field(default=None, max_length=10)
+    customer_name: str | None = Field(default=None, max_length=100)
+    discount_amount: float | None = Field(default=None, ge=0)
     note: str | None = Field(default=None, max_length=500)
 
 

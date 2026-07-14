@@ -9,6 +9,7 @@ from datetime import date
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.timezone import local_days_ago, utc_now
 from app.models.ai_action import AIAction
@@ -246,6 +247,7 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
             InventoryRecord.merchant_id == merchant_id,
             InventoryRecord.product_id == pid,
         ]
+        sku_filter: ColumnElement[bool]
         if sku_id is not None:
             sku_filter = (InventoryRecord.sku_id == sku_id) | (InventoryRecord.sku_id.is_(None))
         else:
@@ -335,21 +337,27 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
         db.add(rec)
         saved_rec_ids.append(rec)
 
-        action_type = "purchase" if personalized_qty > 0 else "hold"
-        action = AIAction(
-            merchant_id=merchant_id,
-            recommendation_id=rec.id,
-            action_type=action_type,
-            title=advice["suggestion"],
-            payload={
-                "product_id": pid,
-                "sku_id": str(sku_id) if sku_id else None,
-                "product_name": product.name,
-                "recommended_qty": float(personalized_qty),
-                "confidence": advice.get("confidence", 0.78),
-            },
-        )
-        db.add(action)
+        # 仅当有采购建议时生成可执行 AIAction（hold 无需执行）
+        if personalized_qty > 0:
+            action = AIAction(
+                merchant_id=merchant_id,
+                recommendation_id=rec.id,
+                action_type="purchase",
+                title=f"采购{product.name}{personalized_qty}斤",
+                payload={
+                    "items": [
+                        {
+                            "product_id": pid,
+                            "sku_id": str(sku_id) if sku_id else None,
+                            "qty": float(personalized_qty),
+                            "unit": "斤",
+                            "cost": 0,
+                        }
+                    ],
+                    "total_cost": 0,
+                },
+            )
+            db.add(action)
 
         recommendations.append(advice)
 

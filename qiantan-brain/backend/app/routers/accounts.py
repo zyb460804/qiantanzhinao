@@ -131,19 +131,29 @@ async def pay_supplier(
     method = body.get("method", "cash")
     note = body.get("note")
     idempotency_key = body.get("idempotency_key")
+    try:
+        payable_ids = [uuid.UUID(value) for value in body.get("payable_ids", [])]
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="应付账款ID格式错误") from exc
+    if not payable_ids:
+        raise HTTPException(status_code=400, detail="付款必须选择应付账款")
 
     supplier = await db.get(Supplier, supplier_id)
     if not supplier or supplier.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="供应商不存在")
 
-    payment = await record_supplier_payment(
-        db,
-        merchant_id=merchant.id,
-        supplier_id=supplier_id,
-        amount=amount,
-        note=note or f"{method}付款",
-        idempotency_key=idempotency_key,
-    )
+    try:
+        payment = await record_supplier_payment(
+            db,
+            merchant_id=merchant.id,
+            supplier_id=supplier_id,
+            payable_ids=payable_ids,
+            amount=amount,
+            note=note or f"{method}付款",
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     db.add(AuditLog(
         merchant_id=merchant.id, action="supplier_payment",
