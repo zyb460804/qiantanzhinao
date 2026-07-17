@@ -8,10 +8,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -204,6 +206,44 @@ async def lookup_trace(
             "generated_at": qr_data.get("generated_at"),
         },
     }
+
+
+@router.get("/trace/{trace_code}/qr-image")
+async def trace_qr_image(
+    trace_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """返回追溯码的二维码 PNG 图片 — 无需认证，用于打印标签。
+
+    图片大小 400×400px，含高纠错级别，适合打印后张贴。
+    """
+    import qrcode
+
+    # 查找 batch
+    query = select(BatchLifecycle).where(BatchLifecycle.qr_data.contains(trace_code)).limit(1)
+    result = await db.execute(query)
+    batch = result.scalar_one_or_none()
+    if not batch:
+        raise HTTPException(status_code=404, detail="追溯码无效")
+
+    # 小程序 trace 页面路径（微信扫码直接跳到追溯页）
+    # 微信小程序 URL Scheme: 需要在微信公众平台配置
+    trace_url = f"https://mp.weixin.qq.com/trace/{trace_code}"
+
+    qr = qrcode.QRCode(
+        version=2,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,  # 高纠错，允许贴纸磨损
+        box_size=10,
+        border=2,
+    )
+    qr.add_data(trace_url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="#123D30", back_color="#FFFFFF")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
 
 
 @router.post("/batches/{batch_id}/inspect", response_model=AnyResponse)

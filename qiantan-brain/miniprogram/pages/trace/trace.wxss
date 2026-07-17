@@ -1,5 +1,7 @@
-/* 批次追溯页 */
-.trace-page { min-height:100%; padding:0; background:var(--bg); }
+/* 批次追溯页 — 消费者 + 摊主双模式 */
+.trace-page { min-height:100%; padding:0; background:var(--canvas); }
+.trace-hero-consumer { background: linear-gradient(135deg, var(--green-950), var(--green-700)); color: #fff; }
+.trace-hero-owner { background: linear-gradient(135deg, var(--green-950), var(--green-600)); color: #fff; }
 .trace-loading { display:flex; flex-direction:column; align-items:center; justify-content:center; padding-top:200rpx; }
 .trace-spinner { width:64rpx; height:64rpx; border:4rpx solid var(--line); border-top-color:var(--green-700); border-radius:50%; animation:spin .8s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
@@ -39,3 +41,98 @@
 .trace-code { font-size:26rpx; font-family:monospace; color:var(--green-800); font-weight:700; letter-spacing:2rpx; }
 .trace-hint { margin-top:6rpx; font-size:20rpx; color:var(--muted); }
 .trace-meta { margin-top:24rpx; font-size:20rpx; color:var(--muted); }
+
+/* ── 每日自查条 ── */
+.checklist-bar {
+  display: flex; align-items: center; margin: 20rpx 24rpx; padding: 20rpx 24rpx;
+  border-radius: 16rpx; background: var(--paper); box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.04);
+}
+.checklist-icon { font-size: 44rpx; flex-shrink: 0; margin-right: 16rpx; }
+.checklist-summary { flex: 1; min-width: 0; }
+.checklist-title { font-size: 28rpx; font-weight: 600; color: var(--ink); }
+.checklist-detail { font-size: 22rpx; color: var(--muted); margin-top: 4rpx; display: block; }
+.checklist-arrow { font-size: 32rpx; color: var(--muted); flex-shrink: 0; }
+
+/* ── 批次列表 ── */
+.batch-list { padding: 8rpx 24rpx 40rpx; }
+
+.batch-card {
+  margin-bottom: 16rpx; border-radius: 16rpx;
+  background: var(--paper); box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.04);
+  overflow: hidden; border-left: 6rpx solid transparent;
+}
+.batch-card.batch-sellable { border-left-color: var(--green-400); }
+.batch-card.batch-near_expiry { border-left-color: var(--corn); }
+.batch-card.batch-locked { border-left-color: var(--tomato); background: var(--tomato-soft); }
+.batch-card.batch-recalled, .batch-card.batch-destroyed { border-left-color: #999; opacity: 0.7; }
+.batch-card.expanded { box-shadow: 0 4rpx 20rpx rgba(0,0,0,0.08); }
+
+.batch-row {
+  display: flex; align-items: center; padding: 24rpx 28rpx; gap: 20rpx;
+}
+.batch-avatar { width: 48rpx; height: 48rpx; border-radius: 50%; flex-shrink: 0; }
+.batch-avatar.green { background: var(--green-500); }
+.batch-avatar.amber { background: var(--corn); }
+.batch-avatar.red { background: var(--tomato); }
+.batch-avatar.muted { background: var(--muted); }
+.batch-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.batch-name { font-size: 28rpx; font-weight: 600; color: var(--ink); }
+.batch-meta { font-size: 22rpx; color: var(--muted); }
+.batch-arrow { font-size: 28rpx; color: var(--muted); flex-shrink: 0; }
+
+.batch-detail {
+  padding: 0 28rpx 24rpx; border-top: 1rpx solid var(--line-soft);
+  display: flex; flex-direction: column; gap: 12rpx;
+}
+.detail-row { display: flex; gap: 16rpx; align-items: center; }
+.detail-label { font-size: 24rpx; color: var(--muted); }
+.detail-value { font-size: 26rpx; color: var(--ink); }
+.text-green { color: var(--green-700); font-weight: 700; }
+.text-red { color: var(--tomato); font-weight: 700; }
+.text-corn { color: var(--corn-ink); font-weight: 600; }
+
+.detail-actions { display: flex; gap: 12rpx; margin-top: 8rpx; flex-wrap: wrap; }
+
+.btn-primary-sm {
+  font-size: 24rpx; padding: 10rpx 24rpx; border-radius: 10rpx;
+  background: var(--green-700); color: #fff; border: none; line-height: 1.4;
+}
+.btn-secondary-sm {
+  font-size: 24rpx; padding: 10rpx 24rpx; border-radius: 10rpx;
+  background: var(--paper-3); color: var(--ink-2); border: none; line-height: 1.4;
+}
+
+.empty-card { padding: 80rpx 32rpx; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16rpx; }
+.empty-icon { font-size: 80rpx; }
+.empty-title { font-size: 34rpx; font-weight: 700; color: var(--ink); }
+.empty-text { font-size: 26rpx; }
+
+/* ── 二维码弹窗 ── */
+.mask {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.45); z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+}
+.qr-dialog {
+  width: 580rpx; max-height: 85vh; overflow-y: auto;
+  background: var(--paper); border-radius: 20rpx;
+  padding: 40rpx 36rpx; display: flex; flex-direction: column; align-items: center; gap: 20rpx;
+}
+.qr-title { font-size: 34rpx; font-weight: 800; color: var(--ink); }
+.qr-batch-label { font-size: 26rpx; color: var(--muted); margin-top: -12rpx; }
+.qr-image { width: 360rpx; height: 360rpx; border-radius: 12rpx; border: 2rpx solid var(--line); }
+.qr-code-text { font-size: 22rpx; font-family: monospace; color: var(--green-800); word-break: break-all; text-align: center; }
+.qr-actions { display: flex; flex-wrap: wrap; gap: 12rpx; justify-content: center; margin-top: 8rpx; }
+.qr-hint { font-size: 20rpx; color: var(--muted); text-align: center; }
+.btn-primary {
+  font-size: 26rpx; padding: 14rpx 32rpx; border-radius: 12rpx;
+  background: var(--green-700); color: #fff; border: none; line-height: 1.4;
+}
+.btn-secondary {
+  font-size: 26rpx; padding: 14rpx 32rpx; border-radius: 12rpx;
+  background: var(--paper-3); color: var(--ink-2); border: none; line-height: 1.4;
+}
+.btn-outline.sm {
+  font-size: 24rpx; padding: 10rpx 24rpx; border-radius: 12rpx;
+  background: transparent; color: var(--green-700); border: 2rpx solid var(--green-300); line-height: 1.4;
+}

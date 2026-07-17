@@ -1,6 +1,9 @@
 """
 Business advice generation engine.
 Produces the three-line explainable recommendation format.
+
+Now enhanced with safety stock + reorder point calculations from
+GitHub-learned formulas (ForecastIQ, FreshStock AI).
 """
 
 import logging
@@ -20,6 +23,11 @@ from app.models.recommendation import Recommendation
 from app.services.behavior import get_merchant_profile, personalize_recommendation
 from app.services.env_engine import EnvFactors, estimate_demand
 from app.services.forecast import predict_demand
+from app.services.inventory_optimizer import (
+    InventoryOptimizer,
+    Urgency,
+    _estimate_waste_percentage,
+)
 from app.services.sku_service import resolve_sku_id
 
 
@@ -34,9 +42,14 @@ def generate_daily_advice(
     max_historical_daily: float,
     env_factors: EnvFactors,
     forecast_result: dict | None = None,
+    optimizer: InventoryOptimizer | None = None,
+    product_category: str = "default",
 ) -> dict:
     """
     Generate a three-line explainable business recommendation.
+
+    Enhanced with safety stock + reorder point calculations from
+    GitHub-learned inventory optimization formulas.
 
     Returns dict with suggestion, basis list, and risk warning.
     """
@@ -152,13 +165,55 @@ def generate_daily_advice(
             }
         )
 
-    # Calculate recommended purchase quantity
-    recommended_qty = max(0, predicted_qty - current_inventory_qty)
-    recommended_qty = round(recommended_qty, 1)
+    # ── 库存优化：安全库存 + 再订货点 (GitHub-learned) ────────────────
+    # 估算需求标准差 (优先用 forecast 结果，否则用历史数据)
+    if forecast_result and "demand_std" in forecast_result:
+        demand_std = forecast_result["demand_std"]
+    else:
+        # 用 7 日和 30 日的差异来粗略估算标准差
+        demand_std = abs(moving_avg_7d - moving_avg_30d) * 1.5 + moving_avg_7d * 0.2
+
+    # 使用优化器计算安全库存和再订货点
+    opt = optimizer or InventoryOptimizer(service_level=0.95, lead_time_days=1)
+    safety_stock = opt.calc_safety_stock(demand_std)
+    reorder_point = opt.calc_reorder_point(predicted_qty, safety_stock)
+
+    # 结合安全库存的推荐补货量（覆盖 horizon=1 天 + 安全库存缓冲）
+    optimized_qty = opt.calc_order_quantity(
+        daily_forecast=predicted_qty,
+        horizon_days=1,
+        safety_stock=safety_stock,
+        current_inventory=current_inventory_qty,
+    )
+    # 与原始简单公式融合：取两者中较大值（保守策略）
+    simple_qty = max(0, predicted_qty - current_inventory_qty)
+    recommended_qty = round(max(optimized_qty, simple_qty), 1)
+
+    # 库存可支撑天数
+    days_of_inventory = current_inventory_qty / max(predicted_qty, 0.01)
+
+    # 预估损耗率
+    waste_pct = _estimate_waste_percentage(
+        current_inventory=current_inventory_qty,
+        daily_forecast=predicted_qty,
+        category=product_category,
+    )
+
+    # 紧急程度判定
+    if current_inventory_qty <= 0:
+        urgency = "critical"
+    elif days_of_inventory <= 2:
+        urgency = "urgent"
+    elif days_of_inventory <= 7:
+        urgency = "soon"
+    else:
+        urgency = "ok"
 
     # Generate suggestion text
     if recommended_qty > 0:
         suggestion = f"建议明日采购{product_name}{recommended_qty}斤"
+        if safety_stock > 0:
+            suggestion += f" (含{safety_stock:.1f}斤安全库存)"
     else:
         suggestion = f"{product_name}库存充足，明日无需进货"
 
@@ -171,6 +226,12 @@ def generate_daily_advice(
         warnings.append(f"高温天气({env_factors.temp_high}°C)，请注意{product_name}保鲜")
     if predicted_qty > max_historical_daily * 1.2:
         warnings.append("预测值偏高，请注意控制风险")
+    if waste_pct > 30:
+        warnings.append(f"当前库存潜在损耗率约{waste_pct:.0f}%，建议促销出清")
+    if urgency == "critical":
+        warnings.append("⚠️ 当前已缺货，请立即补货！")
+    elif urgency == "urgent":
+        warnings.append(f"🔴 库存仅够{days_of_inventory:.0f}天，请尽快补货")
 
     risk_warning = "；".join(warnings) if warnings else None
 
@@ -187,6 +248,15 @@ def generate_daily_advice(
         "recommended_qty": recommended_qty,
         "confidence": confidence,
         "predicted_qty": predicted_qty,
+        # ── 新增：库存优化字段 ──
+        "inventory_optimization": {
+            "safety_stock": round(safety_stock, 2),
+            "reorder_point": round(reorder_point, 2),
+            "demand_std": round(demand_std, 2),
+            "days_until_stockout": round(days_of_inventory, 1),
+            "waste_percentage": round(waste_pct, 1),
+            "urgency": urgency,
+        },
         "forecast": {
             "model": forecast_model,
             "lower_bound": forecast_bounds["lower"] if forecast_bounds else None,
@@ -234,7 +304,10 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
     # 3. 商户行为画像（个性化）
     profile = await get_merchant_profile(db, merchant_id)
 
-    # 4. 逐商品计算库存 / 销量 / 建议
+    # 4. 创建库存优化器 (一次创建，所有商品复用)
+    optimizer = InventoryOptimizer(service_level=0.95, lead_time_days=1)
+
+    # 5. 逐商品计算库存 / 销量 / 建议
     recommendations: list[dict] = []
     saved_rec_ids: list[Recommendation] = []
     for product in products:
@@ -313,6 +386,8 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
             max_historical_daily=max_daily,
             env_factors=env_factors,
             forecast_result=forecast_result,
+            optimizer=optimizer,
+            product_category=product.category_group or "default",
         )
         advice["product_id"] = pid
         advice["sku_id"] = str(sku_id) if sku_id else None

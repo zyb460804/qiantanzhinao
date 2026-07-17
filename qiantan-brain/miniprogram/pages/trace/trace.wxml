@@ -1,65 +1,151 @@
-<!-- 批次追溯页 — 消费者扫码查看 -->
+<!-- 食品安全追溯 — 消费者扫码查看 + 摊主批次管理 -->
+<wxs module="TR">
+  var LABELS = { sellable:'可售', near_expiry:'临期', locked:'已锁定', sold_out:'售罄', wasted:'已报损', returned:'已退货', recalled:'已召回', destroyed:'已销毁', removed:'已下架' };
+  var COLORS = { sellable:'green', near_expiry:'amber', locked:'red', sold_out:'muted', wasted:'muted', returned:'muted', recalled:'red', destroyed:'red', removed:'red' };
+  module.exports = {
+    label: function(s) { return LABELS[s] || s || '未知'; },
+    color: function(s) { return COLORS[s] || 'muted'; },
+    money: function(v) { return Number(v || 0).toFixed(2); }
+  };
+</wxs>
+
 <view class="page-shell trace-page {{skinClass}}">
-  <!-- Loading -->
-  <view wx:if="{{loading}}" class="trace-loading">
-    <view class="trace-spinner"></view>
-    <text class="loading-text">正在查询批次信息…</text>
-  </view>
 
-  <!-- Error -->
-  <view wx:elif="{{error}}" class="trace-error">
-    <view class="error-icon">⚠</view>
-    <text class="error-title">无法查询</text>
-    <text class="error-desc">{{error}}</text>
-    <button class="retry-btn" bindtap="retryQuery" data-code="{{traceCode}}">重新查询</button>
-  </view>
-
-  <!-- Trace Data -->
-  <view wx:else class="trace-result">
-    <!-- Status banner -->
-    <view class="trace-banner {{statusColor}}">
-      <text class="banner-icon">{{bannerIcon}}</text>
-      <text class="banner-label">{{statusLabel}}</text>
-      <text wx:if="{{trace.is_recalled}}" class="banner-warn">该批次已被召回，请勿购买</text>
+  <!-- ═══ 消费者模式：扫码查看 ═══ -->
+  <block wx:if="{{mode === 'consumer'}}">
+    <view class="page-hero trace-hero-consumer">
+      <text class="eyebrow">FOOD SAFETY · 安全追溯</text>
+      <text class="hero-title">商品溯源</text>
     </view>
 
-    <!-- Basic info -->
-    <view class="trace-card">
-      <view class="trace-card-title">商品信息</view>
-      <view class="trace-row"><text class="trace-key">商品名称</text><text class="trace-val">{{trace.product_name || '—'}}</text></view>
-      <view class="trace-row"><text class="trace-key">批次编号</text><text class="trace-val">{{trace.batch_label || '—'}}</text></view>
-      <view class="trace-row"><text class="trace-key">产地</text><text class="trace-val">{{trace.origin || '—'}}</text></view>
-      <view class="trace-row"><text class="trace-key">供应商</text><text class="trace-val">{{trace.supplier_name || '—'}}</text></view>
-      <view class="trace-row"><text class="trace-key">采购日期</text><text class="trace-val">{{trace.purchase_date || '—'}}</text></view>
-      <view wx:if="{{trace.expiry_date}}" class="trace-row"><text class="trace-key">保质期至</text><text class="trace-val">{{trace.expiry_date}}</text></view>
+    <view wx:if="{{loading}}" class="trace-loading">
+      <view class="trace-spinner"></view>
+      <text class="loading-text">正在查询批次信息…</text>
     </view>
 
-    <!-- Safety info -->
-    <view class="trace-card">
-      <view class="trace-card-title">安全信息</view>
-      <view class="trace-row">
-        <text class="trace-key">快检结果</text>
-        <text class="trace-val {{trace.inspection_result === 'pass' ? 'text-green' : trace.inspection_result === 'fail' ? 'text-red' : ''}}">
-          {{trace.inspection_result === 'pass' ? '✓ 合格' : trace.inspection_result === 'fail' ? '✗ 不合格' : '未检测'}}
-        </text>
+    <view wx:elif="{{error}}" class="trace-error">
+      <view class="error-icon">⚠</view>
+      <text class="error-title">无法查询</text>
+      <text class="error-desc">{{error}}</text>
+      <button class="retry-btn" bindtap="retryQuery" data-code="{{traceCode}}">重新查询</button>
+    </view>
+
+    <view wx:else class="trace-result">
+      <view class="trace-banner {{statusColor}}">
+        <text class="banner-icon">{{bannerIcon}}</text>
+        <text class="banner-label">{{statusLabel}}</text>
+        <text wx:if="{{trace.is_recalled}}" class="banner-warn">该批次已被召回，请勿购买</text>
       </view>
-      <view wx:if="{{hasCerts}}" class="trace-row">
-        <text class="trace-key">证照凭证</text>
-        <view class="trace-val certs">
-          <text wx:for="{{certList}}" wx:key="name" class="cert-tag">{{item.name || item}}</text>
+
+      <view class="trace-card">
+        <view class="trace-card-title">商品信息</view>
+        <view class="trace-row"><text class="trace-key">商品名称</text><text class="trace-val">{{trace.product_name || '—'}}</text></view>
+        <view class="trace-row"><text class="trace-key">批次编号</text><text class="trace-val">{{trace.batch_label || '—'}}</text></view>
+        <view class="trace-row"><text class="trace-key">产地</text><text class="trace-val">{{trace.origin || '—'}}</text></view>
+        <view class="trace-row"><text class="trace-key">供应商</text><text class="trace-val">{{trace.supplier_name || '—'}}</text></view>
+        <view class="trace-row"><text class="trace-key">采购日期</text><text class="trace-val">{{trace.purchase_date || '—'}}</text></view>
+        <view wx:if="{{trace.expiry_date}}" class="trace-row"><text class="trace-key">保质期至</text><text class="trace-val">{{trace.expiry_date}}</text></view>
+      </view>
+
+      <view class="trace-card">
+        <view class="trace-card-title">安全信息</view>
+        <view class="trace-row">
+          <text class="trace-key">快检结果</text>
+          <text class="trace-val {{trace.inspection_result === 'pass' ? 'text-green' : trace.inspection_result === 'fail' ? 'text-red' : ''}}">{{trace.inspection_result === 'pass' ? '✓ 合格' : trace.inspection_result === 'fail' ? '✗ 不合格' : '未检测'}}</text>
+        </view>
+        <view wx:if="{{hasCerts}}" class="trace-row">
+          <text class="trace-key">证照凭证</text>
+          <view class="trace-val certs"><text wx:for="{{certList}}" wx:key="name" class="cert-tag">{{item.name || item}}</text></view>
         </view>
       </view>
+
+      <view class="trace-footer">
+        <text class="trace-code-label">追溯码</text>
+        <text class="trace-code" bindtap="copyCode">{{traceCode}}</text>
+        <text class="trace-hint">点击复制追溯码</text>
+        <view class="trace-actions"><button class="btn-outline sm" bindtap="reportIssue">反馈问题</button></view>
+        <text class="trace-meta">由千摊智脑提供 · {{trace.generated_at || ''}}</text>
+      </view>
+    </view>
+  </block>
+
+  <!-- ═══ 摊主模式：批次管理 ═══ -->
+  <block wx:if="{{mode === 'owner'}}">
+    <view class="page-hero trace-hero-owner">
+      <text class="eyebrow">FOOD SAFETY · 批次追溯</text>
+      <text class="hero-title">安全追溯</text>
+      <text class="hero-desc">管理批次、生成追溯码、锁定/解锁不合格批次</text>
     </view>
 
-    <!-- Trace code -->
-    <view class="trace-footer">
-      <text class="trace-code-label">追溯码</text>
-      <text class="trace-code" bindtap="copyCode">{{traceCode}}</text>
-      <text class="trace-hint">点击复制追溯码</text>
-      <view class="trace-actions">
-        <button class="btn-outline sm" bindtap="reportIssue">反馈问题</button>
+    <!-- 每日自查 -->
+    <view class="checklist-bar" wx:if="{{checklist}}" bindtap="loadChecklist">
+      <text class="checklist-icon">{{checklist.failed_inspections.length > 0 || checklist.expired_batches > 0 || checklist.locked_batches > 0 ? '⚠️' : '✅'}}</text>
+      <view class="checklist-summary">
+        <text class="checklist-title" wx:if="{{checklist.expired_batches > 0 || checklist.locked_batches > 0 || checklist.uninspected_batches > 0 || checklist.failed_inspections.length > 0}}">有待处理项，点击刷新</text>
+        <text class="checklist-title" wx:else>今日自查无异常</text>
+        <text class="checklist-detail">
+          过期 {{checklist.expired_batches}} · 锁定 {{checklist.locked_batches}} · 未检 {{checklist.uninspected_batches}} · 不合格 {{checklist.failed_inspections.length}}
+        </text>
       </view>
-      <text class="trace-meta">由千摊智脑提供 · {{trace.generated_at || ''}}</text>
+      <text class="checklist-arrow">↻</text>
+    </view>
+
+    <!-- 批次列表 -->
+    <view class="empty-card" wx:if="{{batchesLoading}}">
+      <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    </view>
+    <view class="empty-card" wx:elif="{{batchesError}}">
+      <text class="empty-text muted">加载失败</text><button class="btn-secondary-sm" bindtap="loadBatches">重试</button>
+    </view>
+    <view class="empty-card" wx:elif="{{batches.length === 0}}">
+      <text class="empty-icon">📦</text>
+      <text class="empty-title">暂无批次</text>
+      <text class="empty-text muted">进货并入库后，批次将自动创建</text>
+    </view>
+
+    <block wx:else>
+      <view class="batch-list">
+        <view wx:for="{{batches}}" wx:key="batch_id" class="batch-card batch-{{item.status}} {{expandedBatchId === item.batch_id ? 'expanded' : ''}}">
+          <view class="batch-row" data-id="{{item.batch_id}}" bindtap="toggleExpand">
+            <view class="batch-avatar {{TR.color(item.status)}}"></view>
+            <view class="batch-info">
+              <text class="batch-name">{{item.batch_label || '批次'}}</text>
+              <text class="batch-meta">余 {{item.remaining_qty || 0}} · {{item.supplier_name || '—'}} · {{TR.label(item.status)}}</text>
+            </view>
+            <text class="batch-arrow">{{expandedBatchId === item.batch_id ? '▾' : '▸'}}</text>
+          </view>
+
+          <view class="batch-detail" wx:if="{{expandedBatchId === item.batch_id}}">
+            <view class="detail-row" wx:if="{{item.origin}}"><text class="detail-label">产地</text><text class="detail-value">{{item.origin}}</text></view>
+            <view class="detail-row" wx:if="{{item.expiry_date}}"><text class="detail-label">保质期至</text><text class="detail-value {{item.status === 'near_expiry' ? 'text-corn' : ''}}">{{item.expiry_date}}</text></view>
+            <view class="detail-row" wx:if="{{item.inspection_result}}"><text class="detail-label">快检</text><text class="detail-value {{item.inspection_result === 'pass' ? 'text-green' : 'text-red'}}">{{item.inspection_result === 'pass' ? '合格' : '不合格'}}</text></view>
+            <view class="detail-row" wx:if="{{item.unit_cost}}"><text class="detail-label">进货价</text><text class="detail-value">¥{{TR.money(item.unit_cost)}}</text></view>
+
+            <view class="detail-actions">
+              <button class="btn-primary-sm" data-id="{{item.batch_id}}" catchtap="generateQR" wx:if="{{item.status === 'sellable' || item.status === 'near_expiry'}}">生成追溯码</button>
+              <button class="btn-secondary-sm" data-id="{{item.batch_id}}" catchtap="lockBatch" wx:if="{{item.status === 'sellable' || item.status === 'near_expiry'}}">锁定</button>
+              <button class="btn-secondary-sm" data-id="{{item.batch_id}}" catchtap="unlockBatch" wx:if="{{item.status === 'locked'}}">解锁</button>
+            </view>
+          </view>
+        </view>
+      </view>
+    </block>
+  </block>
+
+  <!-- ═══ 二维码弹窗（摊主模式 + 消费者模式共用） ═══ -->
+  <view class="mask" wx:if="{{showQR}}" catchtap="closeQR">
+    <view class="qr-dialog" catchtap="stopMaskTap">
+      <text class="qr-title">追溯二维码</text>
+      <text class="qr-batch-label">{{qrBatchLabel}}</text>
+      <image class="qr-image" src="{{qrImageUrl}}" mode="aspectFit" show-menu-by-longpress="{{true}}" />
+      <text class="qr-code-text">{{qrCode}}</text>
+      <view class="qr-actions">
+        <button class="btn-primary" bindtap="saveQR">保存到相册</button>
+        <button class="btn-secondary" bindtap="copyQRCode">复制追溯码</button>
+        <button class="btn-secondary" bindtap="closeQR">关闭</button>
+      </view>
+      <text class="qr-hint">长按二维码可识别 · 保存后可打印张贴</text>
     </view>
   </view>
+
 </view>

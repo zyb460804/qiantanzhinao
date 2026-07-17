@@ -29,8 +29,11 @@
   <view wx:elif="{{!listData}}" class="empty-state surface empty-purchase">
     <mascot size="lg" mood="idle"></mascot>
     <text class="empty-title">今日还没有采购清单</text>
-    <text class="empty-desc">从AI建议生成采购清单，快速开始今日采购</text>
-    <button class="btn-primary empty-action" bindtap="generateFromAdvice" loading="{{submitting}}">从AI建议生成</button>
+    <text class="empty-desc">从AI建议生成，或手动录入采购清单</text>
+    <view class="two-btns">
+      <button class="btn-primary empty-action" bindtap="generateFromAdvice" loading="{{submitting}}">从AI建议生成</button>
+      <button class="btn-secondary empty-action" bindtap="showManualForm">手动录入</button>
+    </view>
   </view>
 
   <!-- List view -->
@@ -294,6 +297,40 @@
         <text>{{item.item_count}}项</text>
         <text>¥{{fmt.fixed(item.total_cost, 2)}}</text>
         <text wx:if="{{item.payment_status === 'paid'}}">已付清</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 手动录入弹窗 -->
+  <view class="mask" wx:if="{{showManual}}" catchtap="closeManualForm">
+    <view class="manual-dialog" catchtap="stopMaskTap">
+      <text class="manual-title">手动录入采购单</text>
+
+      <!-- 已添加列表 -->
+      <view class="manual-item-list" wx:if="{{manualItems.length > 0}}">
+        <view wx:for="{{manualItems}}" wx:key="*this" class="manual-item">
+          <text>{{item.name}} × {{item.qty}}{{item.unit}} {{item.cost > 0 ? '¥'+item.cost : ''}}</text>
+          <text class="manual-remove" data-index="{{index}}" catchtap="removeManualItem">✕</text>
+        </view>
+      </view>
+
+      <!-- 添加表单 -->
+      <view class="manual-form">
+        <input class="form-input" placeholder="商品名（如：白菜）" value="{{manualName}}" data-field="name" bindinput="onManualField" />
+        <view class="manual-row">
+          <input class="form-input flex-2" type="digit" placeholder="数量" value="{{manualQty}}" data-field="qty" bindinput="onManualField" />
+          <picker mode="selector" value="{{manualUnit === '斤' ? 0 : manualUnit === '公斤' ? 1 : manualUnit === '个' ? 2 : 3}}" range="{{['斤','公斤','个','袋']}}" data-field="unit" bindchange="onManualField">
+            <view class="form-picker-sm">{{manualUnit || '斤'}}</view>
+          </picker>
+        </view>
+        <input class="form-input" type="digit" placeholder="进价/单价（可选）" value="{{manualCost}}" data-field="cost" bindinput="onManualField" />
+      </view>
+
+      <button class="btn-secondary-sm" bindtap="addManualItem" disabled="{{!manualName}}">+ 添加这一项</button>
+
+      <view class="manual-actions">
+        <button class="btn-secondary" bindtap="closeManualForm" disabled="{{manualSubmitting}}">取消</button>
+        <button class="btn-primary" bindtap="submitManualList" disabled="{{manualItems.length === 0}}" loading="{{manualSubmitting}}">创建采购单</button>
       </view>
     </view>
   </view>

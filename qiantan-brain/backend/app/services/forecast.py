@@ -126,6 +126,9 @@ def _rule_based_predict(history: list[dict], env: dict) -> dict:
 
     predicted = base_qty * temp_coeff * rain_coeff * weekend_coeff * holiday_coeff
 
+    # 需求标准差估算 (数据少时用 base_qty * 0.5 作为粗略估计)
+    demand_std = base_qty * 0.5 if base_qty > 0 else 1.0
+
     return {
         "predicted_qty": round(max(0, predicted), 1),
         "baseline_qty": round(base_qty, 1),
@@ -141,6 +144,7 @@ def _rule_based_predict(history: list[dict], env: dict) -> dict:
         "confidence": 0.4,
         "lower_bound": round(max(0, predicted * 0.6), 1),
         "upper_bound": round(predicted * 1.5, 1),
+        "demand_std": round(demand_std, 2),
     }
 
 
@@ -200,6 +204,7 @@ def _moving_average_predict(history: list[dict], env: dict) -> dict:
         "confidence": 0.65,
         "lower_bound": round(max(0, predicted - std_dev), 1),
         "upper_bound": round(predicted + std_dev, 1),
+        "demand_std": round(std_dev, 2),
     }
 
 
@@ -255,11 +260,14 @@ def _prophet_predict(history: list[dict], env: dict) -> dict | None:
 
         # Calculate baseline (without regressors)
         baseline = float(df["y"].tail(7).mean())
+        # 需求标准差 (7日滚动)
+        demand_std = float(df["y"].tail(7).std()) if len(df["y"]) >= 7 else baseline * 0.3
 
         return {
             "predicted_qty": round(predicted, 1),
             "baseline_qty": round(baseline, 1),
             "model": "prophet",
+            "demand_std": round(demand_std, 2),
             "data_days": len(df),
             "factors": [
                 {"name": "趋势", "value": round(float(tomorrow["trend"]), 1)},

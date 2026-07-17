@@ -1,0 +1,75 @@
+<!-- 市场通知 — 公告/警告/紧急 — 查看通知详情 -->
+<wxs module="notice">
+  var TYPE_CONFIG = {
+    info: { label: '公告', emoji: '📢' },
+    warning: { label: '警告', emoji: '⚠️' },
+    urgent: { label: '紧急', emoji: '🚨' }
+  };
+  module.exports = {
+    config: function(type) {
+      return TYPE_CONFIG[type] || TYPE_CONFIG.info;
+    },
+    formatTime: function(iso) {
+      if (!iso) return '';
+      return iso.replace('T', ' ').substring(0, 16);
+    }
+  }
+</wxs>
+
+<view class="page-shell notices-page {{skinClass}}">
+
+  <!-- Hero -->
+  <view class="page-hero notices-hero">
+    <text class="eyebrow">NOTICES · 市场通知</text>
+    <text class="hero-title">市场通知</text>
+    <text class="hero-desc">查看市场发布的公告、警告与紧急通知</text>
+  </view>
+
+  <!-- 统计条 -->
+  <view class="notices-stats" wx:if="{{!loading && notices.length > 0}}">
+    <view class="notice-stat"><text class="stat-num">{{notices.length}}</text><text class="stat-label">条通知</text></view>
+  </view>
+
+  <!-- 加载态 / 错误态 -->
+  <view class="empty-card" wx:if="{{loading}}">
+    <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+  </view>
+  <view class="empty-card" wx:elif="{{loadError}}">
+    <text class="empty-text muted">通知加载失败</text>
+    <button class="btn-secondary-sm" bindtap="loadNotices">重试</button>
+  </view>
+
+  <!-- 空态 -->
+  <view class="empty-card" wx:elif="{{notices.length === 0}}">
+    <text class="empty-icon">📭</text>
+    <text class="empty-title">暂无通知</text>
+    <text class="empty-text muted">当市场发布公告或重要通知时，将在此显示</text>
+  </view>
+
+  <!-- 通知列表 -->
+  <block wx:else>
+    <view class="notice-list">
+      <view wx:for="{{notices}}" wx:key="id" class="notice-card notice-{{item.notice_type || 'info'}} {{expandedId === item.id ? 'expanded' : ''}}" data-id="{{item.id}}" bindtap="toggleExpand">
+
+        <!-- 通知头部 -->
+        <view class="notice-head">
+          <text class="notice-emoji">{{notice.config(item.notice_type).emoji}}</text>
+          <view class="notice-head-body">
+            <text class="notice-title">{{item.title}}</text>
+            <view class="notice-meta">
+              <text class="notice-type-tag {{item.notice_type || 'info'}}">{{notice.config(item.notice_type).label}}</text>
+              <text class="notice-time">{{notice.formatTime(item.created_at)}}</text>
+            </view>
+          </view>
+          <text class="notice-arrow">{{expandedId === item.id ? '▾' : '▸'}}</text>
+        </view>
+
+        <!-- 通知正文（可展开） -->
+        <view class="notice-body" wx:if="{{expandedId === item.id}}">
+          <text class="notice-content">{{item.content}}</text>
+        </view>
+      </view>
+    </view>
+  </block>
+
+</view>

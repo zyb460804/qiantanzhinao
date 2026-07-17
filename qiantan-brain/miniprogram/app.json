@@ -20,7 +20,10 @@
     "pages/finance/finance",
     "pages/trace/trace",
     "pages/doc/doc",
-    "pages/supplier/supplier"
+    "pages/supplier/supplier",
+    "pages/staff/staff",
+    "pages/notices/notices",
+    "pages/tenant/tenant"
   ],
   "window": {
     "navigationBarBackgroundColor": "#123D30",

@@ -231,3 +231,27 @@
 .history-top { display: flex; align-items: center; justify-content: space-between; }
 .history-no { color: var(--ink); font-size: 23rpx; font-weight: 680; font-family: monospace; }
 .history-meta { display: flex; gap: 18rpx; margin-top: 8rpx; color: var(--muted); font-size: 21rpx; }
+
+/* ── 手动录入弹窗 ── */
+.mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.manual-dialog { width: 600rpx; max-height: 80vh; overflow-y: auto; background: var(--paper); border-radius: 20rpx; padding: 36rpx 32rpx; display: flex; flex-direction: column; gap: 20rpx; }
+.manual-title { font-size: 34rpx; font-weight: 700; color: var(--ink); text-align: center; }
+
+.manual-item-list { display: flex; flex-direction: column; gap: 8rpx; }
+.manual-item { display: flex; justify-content: space-between; align-items: center; padding: 12rpx 16rpx; background: var(--paper-2); border-radius: 10rpx; font-size: 26rpx; color: var(--ink); }
+.manual-remove { color: var(--tomato); font-size: 30rpx; padding: 4rpx 8rpx; }
+
+.manual-form { display: flex; flex-direction: column; gap: 12rpx; }
+.form-input { height: 72rpx; border: 2rpx solid var(--line); border-radius: 12rpx; padding: 0 20rpx; font-size: 28rpx; background: var(--paper-2); }
+.form-picker-sm { height: 72rpx; border: 2rpx solid var(--line); border-radius: 12rpx; padding: 0 20rpx; font-size: 28rpx; display: flex; align-items: center; background: var(--paper-2); min-width: 120rpx; }
+.manual-row { display: flex; gap: 12rpx; align-items: center; }
+.flex-2 { flex: 2; }
+
+.manual-actions { display: flex; gap: 12rpx; justify-content: flex-end; margin-top: 8rpx; }
+.btn-primary { font-size: 28rpx; padding: 16rpx 36rpx; border-radius: 12rpx; background: var(--green-700); color: #fff; border: none; line-height: 1.4; }
+.btn-secondary { font-size: 28rpx; padding: 16rpx 36rpx; border-radius: 12rpx; background: var(--paper-3); color: var(--ink-2); border: none; line-height: 1.4; }
+.btn-secondary-sm { font-size: 24rpx; padding: 10rpx 24rpx; border-radius: 10rpx; background: var(--paper-3); color: var(--ink-2); border: none; line-height: 1.4; }
+.btn-primary[disabled], .btn-secondary[disabled] { opacity: 0.5; }
+
+.two-btns { display: flex; gap: 16rpx; justify-content: center; }
+.empty-action { min-width: 200rpx; }

@@ -1,0 +1,200 @@
+<!-- 租户中心 — 订阅·用量·账单 -->
+<wxs module="tu">
+  var FEATURE_LABELS = {
+    ai_advisor: 'AI 参谋', voice_accounting: '语音记账', vision: '视觉识别',
+    pos: '收银开单', purchase: '采购管理', stocktake: '库存盘点',
+    reports: '经营报表', devices: '设备管理', export_data: '数据导出',
+    offline_sync: '离线同步', experience_cloud: '经验云'
+  };
+  module.exports = {
+    featureLabel: function(k) { return FEATURE_LABELS[k] || k; },
+    money: function(v) { return Number(v || 0).toFixed(2); },
+    quotaPct: function(cur, lim) {
+      if (!lim || lim <= 0) return 0;
+      return Math.min(100, Math.round(cur / lim * 100));
+    },
+    statusLabel: function(s) {
+      var m = { draft:'草稿', sent:'已发出', paid:'已付', overdue:'逾期', 'void':'作废' };
+      return m[s] || s;
+    },
+    formatDate: function(iso) {
+      if (!iso) return ''; return iso.replace('T',' ').substring(0,10);
+    },
+    trendMax: function(trend) {
+      if (!trend || trend.length === 0) return 1;
+      var max = 0;
+      for (var i = 0; i < trend.length; i++) {
+        if (trend[i].value > max) max = trend[i].value;
+      }
+      return max || 1;
+    }
+  }
+</wxs>
+
+<view class="page-shell tenant-page {{skinClass}}">
+
+  <!-- Hero -->
+  <view class="page-hero tenant-hero">
+    <text class="eyebrow">TENANT · 租户中心</text>
+    <text class="hero-title">我的租户</text>
+    <text class="hero-desc">查看当前套餐、用量配额与账单记录</text>
+  </view>
+
+  <!-- Tab 切换 -->
+  <view class="tenant-tabs">
+    <view class="tab-item {{activeTab === 'subscription' ? 'active' : ''}}" data-tab="subscription" bindtap="switchTab">订阅套餐</view>
+    <view class="tab-item {{activeTab === 'usage' ? 'active' : ''}}" data-tab="usage" bindtap="switchTab">用量配额</view>
+    <view class="tab-item {{activeTab === 'invoices' ? 'active' : ''}}" data-tab="invoices" bindtap="switchTab">账单记录</view>
+  </view>
+
+  <!-- ═══ 订阅套餐 Tab ═══ -->
+  <block wx:if="{{activeTab === 'subscription'}}">
+    <view class="empty-card" wx:if="{{loading}}">
+      <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    </view>
+
+    <view class="empty-card" wx:elif="{{subscriptionError}}">
+      <text class="empty-text muted">加载失败，下拉刷新重试</text>
+    </view>
+
+    <view class="sub-card" wx:elif="{{subscription}}">
+      <view class="sub-header">
+        <text class="sub-plan-name">{{subscription.plan_name || '免费版'}}</text>
+        <text class="sub-status {{subscription.status}}">
+          {{subscription.status === 'active' ? '使用中' : (subscription.status === 'trialing' ? '试用中' : subscription.status)}}
+        </text>
+      </view>
+
+      <view class="sub-details" wx:if="{{subscription.billing_cycle || subscription.current_period_end}}">
+        <view class="sub-row" wx:if="{{subscription.billing_cycle}}">
+          <text class="sub-label">计费方式</text>
+          <text class="sub-value">{{subscription.billing_cycle === 'yearly' ? '年付' : '月付'}}</text>
+        </view>
+        <view class="sub-row" wx:if="{{subscription.current_period_end}}">
+          <text class="sub-label">到期时间</text>
+          <text class="sub-value">{{subscription.current_period_end}}</text>
+        </view>
+        <view class="sub-row" wx:if="{{subscription.auto_renew !== undefined}}">
+          <text class="sub-label">自动续费</text>
+          <text class="sub-value">{{subscription.auto_renew ? '已开启' : '未开启'}}</text>
+        </view>
+      </view>
+
+      <!-- 配额概览 -->
+      <view class="sub-quota-section" wx:if="{{subscription.max_merchants || subscription.max_api_calls_monthly || subscription.max_storage_mb}}">
+        <text class="section-label">套餐配额</text>
+        <view class="quota-mini-grid">
+          <view class="quota-mini" wx:if="{{subscription.max_merchants}}">
+            <text class="quota-mini-num">{{subscription.max_merchants}}</text>
+            <text class="quota-mini-label">商户数</text>
+          </view>
+          <view class="quota-mini" wx:if="{{subscription.max_api_calls_monthly}}">
+            <text class="quota-mini-num">{{subscription.max_api_calls_monthly}}</text>
+            <text class="quota-mini-label">API/月</text>
+          </view>
+          <view class="quota-mini" wx:if="{{subscription.max_storage_mb}}">
+            <text class="quota-mini-num">{{subscription.max_storage_mb}}MB</text>
+            <text class="quota-mini-label">存储空间</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="empty-card" wx:elif="{{!loading && !subscriptionError && !subscription}}">
+      <text class="empty-icon">📋</text>
+      <text class="empty-title">暂无订阅信息</text>
+      <text class="empty-text muted">请联系平台管理员开通套餐</text>
+    </view>
+  </block>
+
+  <!-- ═══ 用量配额 Tab ═══ -->
+  <block wx:if="{{activeTab === 'usage'}}">
+    <view class="empty-card" wx:if="{{loading}}">
+      <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    </view>
+
+    <view class="empty-card" wx:elif="{{quotasError}}">
+      <text class="empty-text muted">加载失败，下拉刷新重试</text>
+    </view>
+
+    <block wx:elif="{{quotas.length > 0}}">
+      <!-- 配额卡片 -->
+      <view class="quota-list">
+        <view wx:for="{{quotas}}" wx:key="metric" class="quota-card {{item.exceeded ? 'exceeded' : ''}}">
+          <view class="quota-head">
+            <text class="quota-metric">
+              {{item.metric === 'api_calls' ? 'API 调用' : (item.metric === 'storage_mb' ? '存储用量' : (item.metric === 'merchant_count' ? '商户数' : (item.metric === 'voice_seconds' ? '语音时长' : item.metric)))}}
+            </text>
+            <text class="quota-remaining">
+              {{item.exceeded ? '已超限' : ('剩余 ' + item.remaining)}}
+            </text>
+          </view>
+          <view class="quota-bar-bg">
+            <view class="quota-bar-fill {{item.metric}}" style="width: {{tu.quotaPct(item.current, item.limit)}}%"></view>
+          </view>
+          <view class="quota-foot">
+            <text class="quota-used">{{item.current}} / {{item.limit}}</text>
+            <text class="quota-pct">{{tu.quotaPct(item.current, item.limit)}}%</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 趋势图（简易 Canvas） -->
+      <view class="trend-section" wx:if="{{usageTrend.length > 0}}">
+        <view class="trend-head">
+          <text class="section-label">30 天用量趋势</text>
+          <view class="trend-tabs">
+            <text class="trend-tab {{usageTrendMetric === 'api_calls' ? 'active' : ''}}" data-metric="api_calls" bindtap="onTrendMetricChange">API</text>
+            <text class="trend-tab {{usageTrendMetric === 'storage_mb' ? 'active' : ''}}" data-metric="storage_mb" bindtap="onTrendMetricChange">存储</text>
+            <text class="trend-tab {{usageTrendMetric === 'merchant_count' ? 'active' : ''}}" data-metric="merchant_count" bindtap="onTrendMetricChange">商户</text>
+          </view>
+        </view>
+        <view class="trend-chart">
+          <view wx:for="{{usageTrend}}" wx:key="date" class="trend-bar-wrap" style="height: {{item.value / tu.trendMax(usageTrend) * 200}}rpx">
+            <view class="trend-bar" style="height: {{item.value / tu.trendMax(usageTrend) * 100}}%;"></view>
+          </view>
+        </view>
+        <view class="trend-labels">
+          <text wx:for="{{usageTrend}}" wx:key="date" class="trend-label">{{item.date.substring(5)}}</text>
+        </view>
+      </view>
+    </block>
+  </block>
+
+  <!-- ═══ 账单记录 Tab ═══ -->
+  <block wx:if="{{activeTab === 'invoices'}}">
+    <view class="empty-card" wx:if="{{loading}}">
+      <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    </view>
+
+    <view class="empty-card" wx:elif="{{invoicesError}}">
+      <text class="empty-text muted">加载失败，下拉刷新重试</text>
+    </view>
+
+    <view class="empty-card" wx:elif="{{invoices.length === 0}}">
+      <text class="empty-icon">🧾</text>
+      <text class="empty-title">暂无账单</text>
+      <text class="empty-text muted">当前没有账单记录</text>
+    </view>
+
+    <block wx:else>
+      <view class="invoice-list">
+        <view wx:for="{{invoices}}" wx:key="id" class="invoice-card">
+          <view class="inv-head">
+            <text class="inv-no">{{item.invoice_no}}</text>
+            <text class="inv-status {{item.status}}">{{tu.statusLabel(item.status)}}</text>
+          </view>
+          <view class="inv-body">
+            <text class="inv-amount">¥{{tu.money(item.amount)}} {{item.currency}}</text>
+          </view>
+          <view class="inv-foot">
+            <text class="inv-date">{{tu.formatDate(item.created_at)}}</text>
+            <text class="inv-due" wx:if="{{item.due_date}}">到期: {{tu.formatDate(item.due_date)}}</text>
+            <text class="inv-paid" wx:if="{{item.paid_at}}">已付: {{tu.formatDate(item.paid_at)}}</text>
+          </view>
+        </view>
+      </view>
+    </block>
+  </block>
+
+</view>

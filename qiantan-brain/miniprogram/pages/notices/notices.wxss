@@ -1,0 +1,58 @@
+/* ── 市场通知 ── */
+.notices-hero { background: linear-gradient(135deg, var(--corn-ink), var(--corn-600)); color: #fff; }
+
+.notices-stats {
+  display: flex; padding: 24rpx 32rpx; margin: 0 24rpx;
+}
+.notice-stat { display: flex; flex-direction: column; align-items: center; }
+.stat-num { font-size: 44rpx; font-weight: 800; color: var(--corn); }
+.stat-label { font-size: 22rpx; color: var(--muted); }
+
+/* 卡片 */
+.notice-list { padding: 8rpx 24rpx 40rpx; }
+
+.notice-card {
+  margin-bottom: 16rpx; border-radius: 16rpx;
+  background: var(--paper); box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.04);
+  overflow: hidden; transition: box-shadow 0.2s;
+  border-left: 6rpx solid transparent;
+}
+.notice-card.notice-info { border-left-color: var(--green-400); }
+.notice-card.notice-warning { border-left-color: var(--corn); }
+.notice-card.notice-urgent { border-left-color: var(--tomato); background: var(--tomato-soft); }
+.notice-card.expanded { box-shadow: 0 4rpx 20rpx rgba(0,0,0,0.08); }
+
+.notice-head {
+  display: flex; align-items: center; padding: 24rpx 28rpx; gap: 16rpx;
+}
+.notice-emoji { font-size: 40rpx; flex-shrink: 0; }
+.notice-head-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
+.notice-title { font-size: 30rpx; font-weight: 600; color: var(--ink); }
+.notice-meta { display: flex; align-items: center; gap: 12rpx; }
+.notice-type-tag {
+  font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 12rpx; color: #fff;
+}
+.notice-type-tag.info { background: var(--green-600); }
+.notice-type-tag.warning { background: var(--corn); color: var(--corn-ink); }
+.notice-type-tag.urgent { background: var(--tomato); }
+
+.notice-time { font-size: 22rpx; color: var(--muted); }
+.notice-arrow { font-size: 28rpx; color: var(--muted); flex-shrink: 0; }
+
+/* 正文 */
+.notice-body {
+  padding: 0 28rpx 28rpx; border-top: 1rpx solid var(--line-soft);
+}
+.notice-content {
+  font-size: 28rpx; color: var(--ink-2); line-height: 1.7; white-space: pre-wrap;
+}
+
+/* 空态 */
+.empty-card { padding: 80rpx 32rpx; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16rpx; }
+.empty-icon { font-size: 80rpx; }
+.empty-title { font-size: 34rpx; font-weight: 700; color: var(--ink); }
+.empty-text { font-size: 26rpx; max-width: 500rpx; }
+.btn-secondary-sm {
+  font-size: 24rpx; padding: 10rpx 24rpx; border-radius: 10rpx;
+  background: var(--paper-3); color: var(--ink-2); border: none; line-height: 1.4;
+}

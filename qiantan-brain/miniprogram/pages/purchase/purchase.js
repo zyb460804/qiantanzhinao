@@ -26,6 +26,9 @@ Page({
     returnSubmitting: false,
     // 采购历史
     showHistory: false, historyList: [], historyLoaded: false,
+    // 手动录入
+    showManual: false, manualItems: [], manualName: '', manualQty: '', manualUnit: '斤', manualCost: '',
+    manualSubmitting: false,
   },
 
   onLoad: function (options) {
@@ -207,6 +210,60 @@ Page({
     app.request({ url: '/purchase/from-advice', method: 'POST', data: { recommendation_ids: [] } })
       .then(function () { self.setData({ submitting: false }); wx.showToast({ title: '已生成采购清单', icon: 'success' }); self.loadList(); })
       .catch(function () { self.setData({ submitting: false }); });
+  },
+
+  // ── 手动录入 ──────────────────────────────────────────
+
+  showManualForm: function () {
+    this.setData({ showManual: true, manualItems: [], manualName: '', manualQty: '', manualUnit: '斤', manualCost: '' });
+  },
+
+  closeManualForm: function () {
+    if (this.data.manualSubmitting) return;
+    this.setData({ showManual: false });
+  },
+
+  onManualField: function (e) {
+    var f = e.currentTarget.dataset.field;
+    var v = e.detail.value !== undefined ? e.detail.value : e.currentTarget.dataset.val;
+    var up = {};
+    up['manual' + f.charAt(0).toUpperCase() + f.slice(1)] = v;
+    this.setData(up);
+  },
+
+  addManualItem: function () {
+    var name = (this.data.manualName || '').trim();
+    var qty = parseFloat(this.data.manualQty);
+    var unit = this.data.manualUnit || '斤';
+    var cost = parseFloat(this.data.manualCost) || 0;
+    if (!name) { wx.showToast({ title: '请输入商品名', icon: 'none' }); return; }
+    if (!qty || qty <= 0) { wx.showToast({ title: '请输入有效数量', icon: 'none' }); return; }
+    var items = this.data.manualItems.concat([{ name: name, qty: qty, unit: unit, cost: cost }]);
+    this.setData({ manualItems: items, manualName: '', manualQty: '', manualCost: '' });
+  },
+
+  removeManualItem: function (e) {
+    var idx = e.currentTarget.dataset.index;
+    var items = this.data.manualItems.slice();
+    items.splice(idx, 1);
+    this.setData({ manualItems: items });
+  },
+
+  submitManualList: function () {
+    var self = this;
+    var items = this.data.manualItems;
+    if (items.length === 0) { wx.showToast({ title: '请至少添加一个商品', icon: 'none' }); return; }
+    this.setData({ manualSubmitting: true });
+    app.request({ url: '/purchase/from-advice', method: 'POST', data: { items: items } })
+      .then(function () {
+        self.setData({ manualSubmitting: false, showManual: false });
+        wx.showToast({ title: '采购清单已创建', icon: 'success' });
+        self.loadList();
+      })
+      .catch(function (err) {
+        self.setData({ manualSubmitting: false });
+        wx.showToast({ title: (err && err.body && err.body.detail) || '创建失败', icon: 'none' });
+      });
   },
 
   // ── 确认采购单 (draft → confirmed) ─────────────────────

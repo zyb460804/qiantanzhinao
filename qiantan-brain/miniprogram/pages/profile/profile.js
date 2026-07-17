@@ -23,6 +23,9 @@ Page({
 
     // ④ 经营工具 (9个, 去重3个被提权 + 语音记账)
     tools: [
+      { page: 'pos', name: '收银开单', glyph: '收', tone: 'tomato' },
+      { page: 'dashboard', name: '数字孪生', glyph: '镜', tone: 'green' },
+      { page: 'purchase', name: '采购管理', glyph: '购', tone: 'corn' },
       { page: 'report', name: '经营报告', glyph: '报', tone: 'blue' },
       { page: 'sandbox', name: '决策沙盘', glyph: '算', tone: 'corn' },
       { page: 'stocktake', name: '库存盘点', glyph: '盘', tone: 'corn' },
@@ -33,6 +36,10 @@ Page({
       { page: 'devices', name: '设备管理', glyph: '设', tone: 'blue' },
       { page: 'finance', name: '财务管理', glyph: '财', tone: 'green' },
       { page: 'supplier', name: '供应商档案', glyph: '供', tone: 'corn' },
+      { page: 'staff', name: '员工管理', glyph: '员', tone: 'corn' },
+      { page: 'notices', name: '市场通知', glyph: '告', tone: 'tomato' },
+      { page: 'tenant', name: '租户中心', glyph: '租', tone: 'green' },
+      { page: 'trace', name: '安全追溯', glyph: '溯', tone: 'green' },
     ],
 
     // ⑤ 摊位设置
