@@ -20,7 +20,7 @@
 
 | 模块 | 技术 |
 |------|------|
-| 前端（小程序） | 微信小程序原生 · 23 个页面 · Canvas 自绘图表 |
+| 前端（小程序） | 微信小程序原生 · 24 个页面 · Canvas 自绘图表 |
 | 前端（管理后台） | React 18 · Vite · Ant Design 5 · Recharts · Axios |
 | 后端 | FastAPI · Python 3.11 · SQLAlchemy 2.0 async · Alembic |
 | 数据库 | PostgreSQL 16（生产） / SQLite（本地开发） |
@@ -30,11 +30,11 @@
 | 天气 | 和风天气 API（默认 Key 为空走 Mock） |
 | 边缘硬件 | Raspberry Pi 5 · 摄像头模块 · HX711 称重传感器 |
 | 预测 | Facebook Prophet（按数据量自动回退） |
-| 测试 | pytest · 404 个测试 |
+| 测试 | pytest · 549 个测试 |
 
 ---
 
-## 微信小程序（23 个页面）
+## 微信小程序（24 个页面）
 
 ### 底部导航
 
@@ -69,7 +69,7 @@
 
 ---
 
-## Web 管理后台（12 个页面）
+## Web 管理后台（14 个页面）
 
 平台管理员通过邮箱+密码登录，JWT 仅存 HttpOnly Cookie。
 
@@ -131,7 +131,7 @@ qiantan-brain/
 │   │   ├── main.py              # 应用入口，路由注册
 │   │   ├── config.py            # Pydantic Settings 配置
 │   │   ├── database.py          # SQLAlchemy 引擎 + Alembic 启动
-│   │   ├── models/              # 24 个数据模型
+│   │   ├── models/              # 29 个数据模型
 │   │   │   ├── merchant.py      # 商户（租户绑定 + 微信openid）
 │   │   │   ├── saas.py          # 租户/套餐/订阅/发票/用量/密钥/管理员
 │   │   │   ├── staff.py         # 员工 + 敏感操作审计
@@ -143,7 +143,7 @@ qiantan-brain/
 │   │   │   ├── batch.py         # 批次生命周期 FIFO
 │   │   │   └── …                # 更多模型
 │   │   ├── schemas/             # Pydantic 请求/响应模型
-│   │   ├── routers/             # 35 个路由模块
+│   │   ├── routers/             # 37 个路由模块
 │   │   │   ├── voice.py         # 语音解析/确认/纠错/作废
 │   │   │   ├── inventory.py     # 库存/盘点
 │   │   │   ├── pos.py           # POS 收银
@@ -165,7 +165,7 @@ qiantan-brain/
 │   │   │   │   └── export.py    # CSV 导出
 │   │   │   └── tenant/
 │   │   │       └── portal.py    # 租户自助（订阅/用量/发票）
-│   │   ├── services/            # 18 个业务服务
+│   │   ├── services/            # 31 个业务服务
 │   │   │   ├── voice_parser.py  # NLU 文本→结构化
 │   │   │   ├── advisor.py       # 建议生成引擎
 │   │   │   ├── env_engine.py    # 环境系数引擎
@@ -182,13 +182,13 @@ qiantan-brain/
 │   │       └── middleware.py    # 请求ID/租户上下文中间件
 │   ├── admin-web/               # React Web 管理后台
 │   │   ├── src/
-│   │   │   ├── pages/           # 12 个页面组件
+│   │   │   ├── pages/           # 14 个页面组件
 │   │   │   ├── layouts/         # 管理后台布局
 │   │   │   ├── context/         # AuthContext 认证上下文
 │   │   │   ├── api/             # Axios 客户端
 │   │   │   └── permissions/     # 前端权限门控
 │   │   └── vite.config.js       # Vite 配置（API 代理 → :8000）
-│   ├── tests/                   # 404 个测试
+│   ├── tests/                   # 549 个测试
 │   ├── scripts/
 │   │   ├── seed_db.py           # 基础种子数据
 │   │   └── seed_saas.py         # SaaS 种子（套餐/租户/管理员）
@@ -206,7 +206,7 @@ qiantan-brain/
 │   └── prophet_predict.py
 │
 ├── datasets/                    # 训练数据集
-├── docs/                        # 17 篇文档
+├── docs/                        # 21 篇文档
 └── reference/                   # 参考实现（离线同步）
 ```
 
@@ -253,7 +253,19 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-404 个测试，覆盖全部核心功能。
+549 个测试，覆盖全部核心功能。
+
+### 6. 质量门禁（pre-commit / 一键脚本）
+
+项目已配 ruff + mypy + pre-commit，规则集中在 [backend/pyproject.toml](backend/pyproject.toml)。
+
+```bash
+cd backend
+./scripts/check.sh          # 一键跑 ruff + mypy + pytest（与 CI 同源）
+
+# 首次启用 git 提交前自动检查（.pre-commit-config.yaml 已就绪）：
+pre-commit install
+```
 
 ---
 
@@ -307,9 +319,9 @@ python -m pytest tests/ -v
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| 微信小程序 | ✅ | 23 个页面，覆盖经营全流程 |
-| FastAPI 后端 | ✅ | 35 个路由，404 个测试通过 |
-| Web 管理后台 | ✅ | React + Ant Design，12 个功能页 |
+| 微信小程序 | ✅ | 24 个页面，覆盖经营全流程 |
+| FastAPI 后端 | ✅ | 37 个路由，549 个测试通过 |
+| Web 管理后台 | ✅ | React + Ant Design，14 个页面 |
 | SaaS 多租户 | ✅ | 租户/套餐/订阅/发票/用量/门禁链 |
 | 员工权限系统 | ✅ | 6 种角色 × 14 项权限 |
 | 方言语音 ASR | 🟡 | 讯飞接口已接；无凭证时走 Mock |

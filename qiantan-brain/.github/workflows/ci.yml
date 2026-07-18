@@ -55,9 +55,16 @@ jobs:
       - name: Import check
         run: python -c "import app.main"
 
-      # ═══ 第 2 道门禁：Lint（Ruff）═══
-      - name: Ruff
-        run: ruff check app/ --select F,E,I,B --statistics
+      # ═══ 第 2 道门禁：Lint + 格式 + 类型（读 pyproject.toml 规则）═══
+      # ruff 不再传 --select：规则集统一由 backend/pyproject.toml 决定，
+      # 避免 CI 与本地/pre-commit 配置漂移（历史教训：曾因 --select 子集
+      # 漏掉 UP 规则，本地与 CI 结果不一致）。
+      - name: Ruff lint
+        run: ruff check app/
+      - name: Ruff format
+        run: ruff format app/ --check
+      - name: Mypy
+        run: mypy app/
 
       # ═══ 第 3 道门禁：测试收集（验证无导入层崩溃）═══
       - name: Test collection
