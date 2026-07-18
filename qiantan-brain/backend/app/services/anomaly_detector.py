@@ -31,23 +31,21 @@
 from __future__ import annotations
 
 import math
-from collections import deque
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import date
 from enum import Enum
-from typing import Optional
 
 
 # ── 异常类型枚举 ──────────────────────────────────────────────────
 class AnomalyType(str, Enum):
-    SPIKE = "spike"              # 突发峰值
-    DROP = "drop"                # 骤降
+    SPIKE = "spike"  # 突发峰值
+    DROP = "drop"  # 骤降
     TREND_BREAK = "trend_break"  # 趋势突变
-    STOCKOUT_RISK = "stockout_risk"   # 缺货风险
-    OVERSTOCK = "overstock"           # 库存积压
-    ZERO_SALES = "zero_sales"         # 连续零销
-    DATA_ERROR = "data_error"         # 数据异常
-    PATTERN_SHIFT = "pattern_shift"   # 模式漂移
+    STOCKOUT_RISK = "stockout_risk"  # 缺货风险
+    OVERSTOCK = "overstock"  # 库存积压
+    ZERO_SALES = "zero_sales"  # 连续零销
+    DATA_ERROR = "data_error"  # 数据异常
+    PATTERN_SHIFT = "pattern_shift"  # 模式漂移
 
 
 class Severity(str, Enum):
@@ -61,14 +59,15 @@ class Severity(str, Enum):
 @dataclass
 class AnomalySignal:
     """单个异常信号。"""
+
     date: str
     product_name: str
     anomaly_type: AnomalyType
     severity: Severity
     actual_value: float
     expected_value: float
-    deviation: float                  # 偏离比例
-    detector: str                     # 检测到该异常的检测器
+    deviation: float  # 偏离比例
+    detector: str  # 检测到该异常的检测器
     details: str
     suggestion: str = ""
 
@@ -76,18 +75,20 @@ class AnomalySignal:
 @dataclass
 class DetectionConfig:
     """检测器配置参数。"""
-    zscore_threshold: float = 3.0           # Z-Score阈值
+
+    zscore_threshold: float = 3.0  # Z-Score阈值
     modified_zscore_threshold: float = 3.5  # Modified Z-Score阈值
-    iqr_multiplier: float = 1.5             # IQR乘数
-    moving_avg_window: int = 7              # 移动平均窗口
-    seasonal_period: int = 7                # 季节性周期(天)
-    min_data_points: int = 5                # 最少需要的数据点
-    ensemble_vote_threshold: int = 2        # 集成投票阈值(至少N个检测器同意)
+    iqr_multiplier: float = 1.5  # IQR乘数
+    moving_avg_window: int = 7  # 移动平均窗口
+    seasonal_period: int = 7  # 季节性周期(天)
+    min_data_points: int = 5  # 最少需要的数据点
+    ensemble_vote_threshold: int = 2  # 集成投票阈值(至少N个检测器同意)
 
 
 @dataclass
 class AnomalyReport:
     """异常检测报告。"""
+
     total_signals: int
     by_type: dict[str, int]
     by_severity: dict[str, int]
@@ -164,7 +165,8 @@ class AnomalyDetector:
 
             # 只保留有多检测器共识的信号
             signals = [
-                s for s in signals
+                s
+                for s in signals
                 if type_counts.get(s.anomaly_type.value, 0) >= self.config.ensemble_vote_threshold
             ]
 
@@ -181,7 +183,7 @@ class AnomalyDetector:
             if i < self.config.min_data_points:
                 continue
 
-            history = [s["qty"] for s in series[max(0, i - 30): i]]
+            history = [s["qty"] for s in series[max(0, i - 30) : i]]
             current = point["qty"]
             product = point.get("product", "未知")
             date_str = point.get("date", "")
@@ -267,12 +269,15 @@ class AnomalyDetector:
 
         deviation = abs(current - median) / max(abs(median), 0.01)
 
+        mz_r = round(m_z, 2)
+        med_r = round(median, 1)
+        mad_r = round(mad, 1)
         if m_z > 0:
             a_type = AnomalyType.SPIKE
-            details = f"Modified Z={round(m_z, 2)} (median={round(median, 1)}, MAD={round(mad, 1)}) — 远高于中位数"
+            details = f"Modified Z={mz_r} (median={med_r}, MAD={mad_r}) — 远高于中位数"
         else:
             a_type = AnomalyType.DROP
-            details = f"Modified Z={round(m_z, 2)} (median={round(median, 1)}, MAD={round(mad, 1)}) — 远低于中位数"
+            details = f"Modified Z={mz_r} (median={med_r}, MAD={mad_r}) — 远低于中位数"
 
         severity = self._zscore_severity(abs(m_z))
         return a_type, severity, round(deviation, 2), details
@@ -308,23 +313,30 @@ class AnomalyDetector:
         median = sorted_h[n // 2]
         deviation = abs(current - median) / max(abs(median), 0.01)
 
+        cur_r = round(current, 1)
+        q1_r = round(q1, 1)
+        q3_r = round(q3, 1)
         if current > upper:
             a_type = AnomalyType.SPIKE
-            details = f"IQR: {round(current,1)} > 上界{round(upper,1)} (Q1={round(q1,1)}, Q3={round(q3,1)})"
+            details = f"IQR: {cur_r} > 上界{round(upper, 1)} (Q1={q1_r}, Q3={q3_r})"
         else:
             a_type = AnomalyType.DROP
-            details = f"IQR: {round(current,1)} < 下界{round(lower,1)} (Q1={round(q1,1)}, Q3={round(q3,1)})"
+            details = f"IQR: {cur_r} < 下界{round(lower, 1)} (Q1={q1_r}, Q3={q3_r})"
 
         # severity based on how far out of bounds
         dist_ratio = max(
-            (current - upper) / max(iqr, 0.01) if current > upper
+            (current - upper) / max(iqr, 0.01)
+            if current > upper
             else (lower - current) / max(iqr, 0.01),
             0,
         )
         severity = (
-            Severity.CRITICAL if dist_ratio > 4
-            else Severity.HIGH if dist_ratio > 2
-            else Severity.MEDIUM if dist_ratio > 1
+            Severity.CRITICAL
+            if dist_ratio > 4
+            else Severity.HIGH
+            if dist_ratio > 2
+            else Severity.MEDIUM
+            if dist_ratio > 1
             else Severity.LOW
         )
 
@@ -361,12 +373,15 @@ class AnomalyDetector:
 
         deviation_pct = abs(current - ma) / ma
 
+        cur_r = round(current, 1)
+        ma_r = round(ma, 1)
+        dev_r = round(deviation_ratio, 1)
         if current > ma:
             a_type = AnomalyType.SPIKE
-            details = f"移动平均偏离: {round(current,1)} vs MA{window}={round(ma,1)}, {round(deviation_ratio,1)}σ"
+            details = f"移动平均偏离: {cur_r} vs MA{window}={ma_r}, {dev_r}σ"
         else:
             a_type = AnomalyType.DROP
-            details = f"移动平均偏离: {round(current,1)} vs MA{window}={round(ma,1)}, {round(deviation_ratio,1)}σ"
+            details = f"移动平均偏离: {cur_r} vs MA{window}={ma_r}, {dev_r}σ"
 
         severity = self._zscore_severity(abs(deviation_ratio))
         return a_type, severity, round(deviation_pct, 2), details
@@ -439,13 +454,13 @@ class AnomalyDetector:
         if current_residual > 0:
             a_type = AnomalyType.PATTERN_SHIFT
             details = (
-                f"季节性偏离: 实际{round(current,1)} vs 预期{round(expected,1)}, "
+                f"季节性偏离: 实际{round(current, 1)} vs 预期{round(expected, 1)}, "
                 f"残差Z={round(residual_z, 2)}"
             )
         else:
             a_type = AnomalyType.PATTERN_SHIFT
             details = (
-                f"季节性偏离: 实际{round(current,1)} vs 预期{round(expected,1)}, "
+                f"季节性偏离: 实际{round(current, 1)} vs 预期{round(expected, 1)}, "
                 f"残差Z={round(residual_z, 2)}"
             )
 
@@ -480,8 +495,10 @@ class AnomalyDetector:
 
         a_type = AnomalyType.ZERO_SALES
         severity = (
-            Severity.CRITICAL if total_zeros >= 7
-            else Severity.HIGH if total_zeros >= 5
+            Severity.CRITICAL
+            if total_zeros >= 7
+            else Severity.HIGH
+            if total_zeros >= 5
             else Severity.MEDIUM
         )
         deviation = 1.0  # 100%低于预期
@@ -518,10 +535,14 @@ class AnomalyDetector:
         severity = Severity.HIGH
         deviation = ratio
 
+        cur_r = round(current, 1)
+        mean_r = round(mean, 1)
         if ratio > 10:
-            details = f"数量级异常: 当前值({round(current,1)})是均值({round(mean,1)})的{round(ratio,0)}倍 — 可能多录了0"
+            ratio_r = round(ratio, 0)
+            details = f"数量级异常: 当前值({cur_r})是均值({mean_r})的{ratio_r}倍 — 可能多录了0"
         else:
-            details = f"数量级异常: 当前值({round(current,1)})仅为均值({round(mean,1)})的{round(ratio*100,0)}% — 可能漏录了0"
+            pct_r = round(ratio * 100, 0)
+            details = f"数量级异常: 当前值({cur_r})仅为均值({mean_r})的{pct_r}% — 可能漏录了0"
 
         return a_type, severity, round(deviation, 2), details
 
@@ -550,10 +571,16 @@ class AnomalyDetector:
             (AnomalyType.SPIKE, Severity.HIGH): "销量/进货异常偏高, 建议核实是否有促销/补货活动",
             (AnomalyType.DROP, Severity.CRITICAL): "销量/库存骤降, 请检查是否漏记录或存在经营异常",
             (AnomalyType.DROP, Severity.HIGH): "销量明显下降, 关注竞争或天气因素",
-            (AnomalyType.ZERO_SALES, Severity.CRITICAL): "连续多日无销售记录, 请立即核实是否忘记记账",
+            (
+                AnomalyType.ZERO_SALES,
+                Severity.CRITICAL,
+            ): "连续多日无销售记录, 请立即核实是否忘记记账",
             (AnomalyType.ZERO_SALES, Severity.HIGH): "连续无销售, 建议检查经营状况和记录习惯",
             (AnomalyType.DATA_ERROR, Severity.HIGH): "疑似数据录入错误, 请核对原始记录",
-            (AnomalyType.PATTERN_SHIFT, Severity.CRITICAL): "销售模式发生重大变化, 检查品类/价格/竞争变化",
+            (
+                AnomalyType.PATTERN_SHIFT,
+                Severity.CRITICAL,
+            ): "销售模式发生重大变化, 检查品类/价格/竞争变化",
             (AnomalyType.STOCKOUT_RISK, Severity.HIGH): "库存异常偏低, 有断货风险, 请尽快补货",
             (AnomalyType.OVERSTOCK, Severity.HIGH): "库存异常偏高, 有积压风险, 考虑促销出清",
             (AnomalyType.TREND_BREAK, Severity.HIGH): "长期趋势突变, 建议审视经营策略调整的影响",
@@ -565,7 +592,7 @@ class AnomalyDetector:
             return suggestions[key]
 
         # 回退: 匹配类型 + 任意严重度
-        for (t, s), sug in suggestions.items():
+        for (t, _s), sug in suggestions.items():
             if t == a_type:
                 return sug
 
@@ -602,8 +629,10 @@ class AnomalyDetector:
             return None  # 库存充足
 
         severity = (
-            Severity.CRITICAL if days_remaining <= lead_time_days * 0.5
-            else Severity.HIGH if days_remaining <= lead_time_days
+            Severity.CRITICAL
+            if days_remaining <= lead_time_days * 0.5
+            else Severity.HIGH
+            if days_remaining <= lead_time_days
             else Severity.MEDIUM
         )
 
@@ -617,7 +646,8 @@ class AnomalyDetector:
             deviation=round(1.0 - days_remaining / (lead_time_days * 1.5), 2),
             detector="stockout_check",
             details=f"库存仅够{days_remaining:.1f}天 (提前期{lead_time_days}天)",
-            suggestion="库存偏低, 有断货风险, 建议尽快下单补货" if severity != Severity.MEDIUM
+            suggestion="库存偏低, 有断货风险, 建议尽快下单补货"
+            if severity != Severity.MEDIUM
             else "库存略低, 建议关注并准备补货",
         )
 
@@ -641,8 +671,10 @@ class AnomalyDetector:
             return None
 
         severity = (
-            Severity.CRITICAL if days_remaining > max_days_cover * 3
-            else Severity.HIGH if days_remaining > max_days_cover * 2
+            Severity.CRITICAL
+            if days_remaining > max_days_cover * 3
+            else Severity.HIGH
+            if days_remaining > max_days_cover * 2
             else Severity.MEDIUM
         )
 
@@ -656,7 +688,8 @@ class AnomalyDetector:
             deviation=round(days_remaining / max_days_cover - 1.0, 2),
             detector="overstock_check",
             details=f"库存可售{days_remaining:.1f}天 (建议上限{max_days_cover}天)",
-            suggestion="库存积压严重, 建议减少采购或促销出清" if severity != Severity.MEDIUM
+            suggestion="库存积压严重, 建议减少采购或促销出清"
+            if severity != Severity.MEDIUM
             else "库存偏高, 建议控制下次采购量",
         )
 

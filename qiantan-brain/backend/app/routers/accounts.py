@@ -155,18 +155,24 @@ async def pay_supplier(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    db.add(AuditLog(
-        merchant_id=merchant.id, action="supplier_payment",
-        target_table="supplier_payables", target_id=str(payment.id),
-        after_data={"supplier_id": str(supplier_id), "amount": float(amount), "method": method},
-        reason=note, operator="merchant",
-    ))
+    db.add(
+        AuditLog(
+            merchant_id=merchant.id,
+            action="supplier_payment",
+            target_table="supplier_payables",
+            target_id=str(payment.id),
+            after_data={"supplier_id": str(supplier_id), "amount": float(amount), "method": method},
+            reason=note,
+            operator="merchant",
+        )
+    )
     await db.commit()
 
     new_balance = await get_supplier_balance(db, merchant.id, supplier_id)
 
     return {
-        "code": 0, "message": f"已向供应商付款 ¥{float(amount)}",
+        "code": 0,
+        "message": f"已向供应商付款 ¥{float(amount)}",
         "data": {
             "payment_id": str(payment.id),
             "supplier_id": str(supplier_id),

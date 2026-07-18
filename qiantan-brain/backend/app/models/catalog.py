@@ -144,18 +144,12 @@ class Supplier(Base):
     default_credit_days: Mapped[int | None] = mapped_column(sa.Integer)  # 默认账期(天)
     certificates: Mapped[str | None] = mapped_column(sa.Text)  # 证照/凭证 JSON
     # --- 质量评分 (§4.2) ---
-    shortage_rate: Mapped[Decimal | None] = mapped_column(
-        sa.Numeric(5, 2)
-    )  # 缺斤率 0.00-100.00
-    return_rate: Mapped[Decimal | None] = mapped_column(
-        sa.Numeric(5, 2)
-    )  # 退货率 0.00-100.00
+    shortage_rate: Mapped[Decimal | None] = mapped_column(sa.Numeric(5, 2))  # 缺斤率 0.00-100.00
+    return_rate: Mapped[Decimal | None] = mapped_column(sa.Numeric(5, 2))  # 退货率 0.00-100.00
     quality_issue_rate: Mapped[Decimal | None] = mapped_column(
         sa.Numeric(5, 2)
     )  # 质量问题率 0.00-100.00
-    on_time_rate: Mapped[Decimal | None] = mapped_column(
-        sa.Numeric(5, 2)
-    )  # 准时率 0.00-100.00
+    on_time_rate: Mapped[Decimal | None] = mapped_column(sa.Numeric(5, 2))  # 准时率 0.00-100.00
     composite_score: Mapped[Decimal | None] = mapped_column(
         sa.Numeric(5, 2)
     )  # 综合评分 0.00-100.00

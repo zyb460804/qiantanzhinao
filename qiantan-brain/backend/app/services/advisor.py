@@ -25,7 +25,6 @@ from app.services.env_engine import EnvFactors, estimate_demand
 from app.services.forecast import predict_demand
 from app.services.inventory_optimizer import (
     InventoryOptimizer,
-    Urgency,
     _estimate_waste_percentage,
 )
 from app.services.sku_service import resolve_sku_id

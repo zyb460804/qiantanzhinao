@@ -92,9 +92,7 @@ async def login(
     # 限流检查
     check_rate_limit(request, req.email)
 
-    result = await db.execute(
-        select(PlatformAdmin).where(PlatformAdmin.email == req.email)
-    )
+    result = await db.execute(select(PlatformAdmin).where(PlatformAdmin.email == req.email))
     admin = result.scalar_one_or_none()
 
     if admin is None or not verify_password(req.password, admin.password_hash):
@@ -190,7 +188,9 @@ async def get_permissions(
     """获取当前管理员的权限列表和全部权限矩阵。"""
     manifest = get_permission_manifest()
     manifest["my_role"] = admin.role
-    manifest["my_permissions"] = sorted(
-        ROLE_PERMISSIONS.get(admin.role, ROLE_PERMISSIONS.get("ops_admin", set()))
-    ) if admin.role != "super_admin" else sorted(manifest["roles"]["super_admin"])
+    manifest["my_permissions"] = (
+        sorted(ROLE_PERMISSIONS.get(admin.role, ROLE_PERMISSIONS.get("ops_admin", set())))
+        if admin.role != "super_admin"
+        else sorted(manifest["roles"]["super_admin"])
+    )
     return manifest

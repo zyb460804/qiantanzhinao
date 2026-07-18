@@ -38,9 +38,7 @@ class Tenant(Base):
     # URL 友好标识，用于管理后台路由 / admin?tenant=xxx
     slug: Mapped[str] = mapped_column(sa.String(60), unique=True, nullable=False)
     # 当前订阅套餐（外键到 plans.id）
-    plan_id: Mapped[uuid.UUID | None] = mapped_column(
-        sa.Uuid, sa.ForeignKey("plans.id")
-    )
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, sa.ForeignKey("plans.id"))
     # 租户状态: trial(试用) / active(正常) / suspended(已停用) / expired(已过期)
     status: Mapped[str] = mapped_column(sa.String(20), default="trial", nullable=False)
     # 联系人/邮箱（平台管理员联系租户用）
@@ -201,7 +199,9 @@ class UsageRecord(Base):
     __table_args__ = (
         # 每租户每日每指标唯一，防止重复记录
         sa.UniqueConstraint(
-            "tenant_id", "metric", "recorded_date",
+            "tenant_id",
+            "metric",
+            "recorded_date",
             name="uq_usage_per_tenant_metric_date",
         ),
     )

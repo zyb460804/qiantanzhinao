@@ -450,9 +450,7 @@ async def get_supplier_statement(
                 "due_date": row.due_date.isoformat() if row.due_date else None,
                 "settled": row.settled,
                 "settled_amount": float(settled_amount),
-                "remaining_amount": float(remaining_amount)
-                if row.direction == "purchase"
-                else 0,
+                "remaining_amount": float(remaining_amount) if row.direction == "purchase" else 0,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
         )

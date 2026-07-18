@@ -61,9 +61,7 @@ async def _persist_ingest(
         event_id = str(uuid.uuid4())
 
     # 幂等去重：相同 event_id 直接返回已接受
-    existing = await db.scalar(
-        select(EdgeEvent.id).where(EdgeEvent.event_id == event_id)
-    )
+    existing = await db.scalar(select(EdgeEvent.id).where(EdgeEvent.event_id == event_id))
     if existing:
         logger.info("edge ingest: duplicate event_id=%s, skipped", event_id)
         return {
@@ -145,9 +143,7 @@ async def ingest_edge_record(
 
     适用于小程序触发的数据上报或开发调试场景。
     """
-    return await _persist_ingest(
-        db, body, merchant_id, allow_generated_event_id=True
-    )
+    return await _persist_ingest(db, body, merchant_id, allow_generated_event_id=True)
 
 
 @router.post("/ingest/device", response_model=EdgeIngestResponse)
@@ -279,7 +275,9 @@ async def ota_report(
             await db.commit()
         logger.info("OTA success: device=%s version=%s", device_id, firmware_version)
     else:
-        logger.warning("OTA failed: device=%s version=%s error=%s", device_id, firmware_version, error)
+        logger.warning(
+            "OTA failed: device=%s version=%s error=%s", device_id, firmware_version, error
+        )
 
     return {"code": 0, "data": {"ack": True}}
 
@@ -331,7 +329,9 @@ async def report_model_version(
 
     logger.info(
         "model version: device=%s model=%s version=%s",
-        device.get("device_id"), model_type, model_version,
+        device.get("device_id"),
+        model_type,
+        model_version,
     )
     return {"code": 0, "data": {"ack": True}}
 
@@ -389,7 +389,9 @@ async def upload_device_logs(
             db.add(log_entry)
             accepted += 1
         except Exception as exc:
-            logger.warning("device log insert failed: device=%s error=%s", device.get("device_id"), exc)
+            logger.warning(
+                "device log insert failed: device=%s error=%s", device.get("device_id"), exc
+            )
             rejected += 1
 
     rejected += max(0, len(entries) - remaining)
@@ -397,7 +399,9 @@ async def upload_device_logs(
     await db.commit()
     logger.info(
         "device logs: device=%s accepted=%d rejected=%d",
-        device.get("device_id"), accepted, rejected,
+        device.get("device_id"),
+        accepted,
+        rejected,
     )
     return {"code": 0, "data": {"accepted": accepted, "rejected": rejected}}
 
@@ -414,7 +418,7 @@ def _version_gt(a: str, b: str) -> bool:
     parts_a.extend([0] * (max_len - len(parts_a)))
     parts_b.extend([0] * (max_len - len(parts_b)))
 
-    for pa, pb in zip(parts_a, parts_b):
+    for pa, pb in zip(parts_a, parts_b, strict=True):
         if pa > pb:
             return True
         if pa < pb:

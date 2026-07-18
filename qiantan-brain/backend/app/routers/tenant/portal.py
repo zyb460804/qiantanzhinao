@@ -39,6 +39,7 @@ async def get_tenant_merchant(
         if STRICT_TENANT_REQUIRED:
             raise HTTPException(status_code=403, detail="商户未绑定租户")
         import logging
+
         logging.getLogger(__name__).warning("tenant_id 为空，跳过租户校验（过渡期）")
         return merchant
     if merchant.role not in ("owner", "tenant_admin"):
@@ -86,7 +87,21 @@ async def get_my_subscription(
     """查看本租户的订阅信息。"""
     tenant_id = _require_tenant_id(merchant)
     if tenant_id is None:
-        return {"code": 0, "data": {"plan_code": "free", "plan_name": "免费版（开发模式）", "billing_cycle": None, "status": "active", "current_period_start": None, "current_period_end": None, "auto_renew": False, "max_merchants": 1, "max_api_calls_monthly": 999, "max_storage_mb": 999}}
+        return {
+            "code": 0,
+            "data": {
+                "plan_code": "free",
+                "plan_name": "免费版（开发模式）",
+                "billing_cycle": None,
+                "status": "active",
+                "current_period_start": None,
+                "current_period_end": None,
+                "auto_renew": False,
+                "max_merchants": 1,
+                "max_api_calls_monthly": 999,
+                "max_storage_mb": 999,
+            },
+        }
     result = await db.execute(
         select(Subscription).where(
             Subscription.tenant_id == tenant_id,
@@ -125,7 +140,9 @@ async def get_my_subscription(
             "current_period_start": sub.current_period_start.isoformat()
             if sub.current_period_start
             else None,
-            "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+            "current_period_end": sub.current_period_end.isoformat()
+            if sub.current_period_end
+            else None,
             "auto_renew": sub.auto_renew,
             "max_merchants": plan.max_merchants if plan else 0,
             "max_api_calls_monthly": plan.max_api_calls_monthly if plan else 0,
@@ -147,11 +164,34 @@ async def get_my_quotas(
 
     tenant_id = _require_tenant_id(merchant)
     if tenant_id is None:
-        return {"code": 0, "data": {"quotas": [
-            {"metric": "api_calls", "current": 0, "limit": 999, "remaining": 999, "exceeded": False},
-            {"metric": "storage_mb", "current": 0, "limit": 999, "remaining": 999, "exceeded": False},
-            {"metric": "merchant_count", "current": 1, "limit": 99, "remaining": 98, "exceeded": False},
-        ]}}
+        return {
+            "code": 0,
+            "data": {
+                "quotas": [
+                    {
+                        "metric": "api_calls",
+                        "current": 0,
+                        "limit": 999,
+                        "remaining": 999,
+                        "exceeded": False,
+                    },
+                    {
+                        "metric": "storage_mb",
+                        "current": 0,
+                        "limit": 999,
+                        "remaining": 999,
+                        "exceeded": False,
+                    },
+                    {
+                        "metric": "merchant_count",
+                        "current": 1,
+                        "limit": 99,
+                        "remaining": 98,
+                        "exceeded": False,
+                    },
+                ]
+            },
+        }
     quotas = await get_all_quotas(db, tenant_id)
     return {"code": 0, "data": {"quotas": quotas}}
 

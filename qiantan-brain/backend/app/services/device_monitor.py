@@ -9,10 +9,9 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import utc_now
@@ -43,10 +42,8 @@ async def detect_device_faults(db: AsyncSession) -> list[dict]:
                 "device_type": dev.device_type,
                 "severity": "alert",
                 "type": "heartbeat_timeout",
-                "detail": f"超过 24 小时未上报心跳",
-                "last_heartbeat": (
-                    dev.last_heartbeat.isoformat() if dev.last_heartbeat else None
-                ),
+                "detail": "超过 24 小时未上报心跳",
+                "last_heartbeat": (dev.last_heartbeat.isoformat() if dev.last_heartbeat else None),
             }
         )
 
@@ -67,10 +64,8 @@ async def detect_device_faults(db: AsyncSession) -> list[dict]:
                 "device_type": dev.device_type,
                 "severity": "warning",
                 "type": "heartbeat_timeout",
-                "detail": f"超过 2 小时未上报心跳",
-                "last_heartbeat": (
-                    dev.last_heartbeat.isoformat() if dev.last_heartbeat else None
-                ),
+                "detail": "超过 2 小时未上报心跳",
+                "last_heartbeat": (dev.last_heartbeat.isoformat() if dev.last_heartbeat else None),
             }
         )
 
@@ -90,9 +85,7 @@ async def detect_device_faults(db: AsyncSession) -> list[dict]:
                 "severity": "warning",
                 "type": "device_error",
                 "detail": dev.last_error,
-                "last_heartbeat": (
-                    dev.last_heartbeat.isoformat() if dev.last_heartbeat else None
-                ),
+                "last_heartbeat": (dev.last_heartbeat.isoformat() if dev.last_heartbeat else None),
             }
         )
 

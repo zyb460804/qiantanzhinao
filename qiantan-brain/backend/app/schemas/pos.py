@@ -20,6 +20,7 @@ PaymentMethod = Literal["cash", "wechat", "alipay", "card", "credit"]
 
 class PaymentItem(BaseModel):
     """单笔支付项 — 组合支付时一笔订单可拆成多笔。"""
+
     method: PaymentMethod
     amount: float = Field(gt=0, le=1000000)
 
@@ -71,6 +72,7 @@ class PaySaleOrderRequest(BaseModel):
 
 class RefundItemRequest(BaseModel):
     """单品退款行。不传 items 则整单退款。"""
+
     item_id: uuid.UUID
     quantity: float = Field(gt=0)  # 退款数量，不能超过原购买量
     return_to_stock: bool = True  # 是否退回可售库存
@@ -78,9 +80,7 @@ class RefundItemRequest(BaseModel):
 
 class RefundOrderRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
-    items: list[RefundItemRequest] | None = Field(
-        default=None, max_length=100
-    )  # None = 整单退款
+    items: list[RefundItemRequest] | None = Field(default=None, max_length=100)  # None = 整单退款
     return_to_stock: bool = True  # 整单退款时是否全部退回库存
 
 

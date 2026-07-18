@@ -4,7 +4,6 @@ from app.models.accounts import CustomerCreditProfile, CustomerReceivable, Suppl
 from app.models.admin_audit import AdminAuditLog
 from app.models.ai_action import AIAction
 from app.models.audit import AuditLog
-from app.models.dead_letter import DeadLetterEvent
 from app.models.auth import AuthRevokedToken
 from app.models.batch import BatchLifecycle
 from app.models.catalog import (
@@ -17,7 +16,14 @@ from app.models.catalog import (
     Unit,
     UnitConversion,
 )
-from app.models.device import Device, DeviceFirmware, DeviceModelVersion, DeviceRemoteLog, PriceDisplay
+from app.models.dead_letter import DeadLetterEvent
+from app.models.device import (
+    Device,
+    DeviceFirmware,
+    DeviceModelVersion,
+    DeviceRemoteLog,
+    PriceDisplay,
+)
 from app.models.edge_event import EdgeEvent
 from app.models.environment import EnvironmentRecord
 from app.models.expense import Expense as ExpenseRecord

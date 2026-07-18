@@ -56,16 +56,12 @@ class Settings(BaseSettings):
     wechat_pay_mch_id: str = os.getenv("WECHAT_PAY_MCH_ID", "")
     wechat_pay_serial_no: str = os.getenv("WECHAT_PAY_SERIAL_NO", "")
     wechat_pay_private_key_path: str = os.getenv("WECHAT_PAY_PRIVATE_KEY_PATH", "")
-    wechat_pay_api_base: str = os.getenv(
-        "WECHAT_PAY_API_BASE", "https://api.mch.weixin.qq.com"
-    )
+    wechat_pay_api_base: str = os.getenv("WECHAT_PAY_API_BASE", "https://api.mch.weixin.qq.com")
 
     # 支付宝开放平台账单下载。
     alipay_app_id: str = os.getenv("ALIPAY_APP_ID", "")
     alipay_private_key_path: str = os.getenv("ALIPAY_PRIVATE_KEY_PATH", "")
-    alipay_gateway: str = os.getenv(
-        "ALIPAY_GATEWAY", "https://openapi.alipay.com/gateway.do"
-    )
+    alipay_gateway: str = os.getenv("ALIPAY_GATEWAY", "https://openapi.alipay.com/gateway.do")
 
     # ------------------------------------------------------------------
     # JWT（P0-1 鉴权）：身份只来自 token，绝不来自请求体
@@ -92,29 +88,21 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     vision_model_path: str = os.getenv("VISION_MODEL_PATH", "")
     vision_model_device: str = os.getenv("VISION_MODEL_DEVICE", "cpu")
-    vision_confidence_threshold: float = float(
-        os.getenv("VISION_CONFIDENCE_THRESHOLD", "0.5")
-    )
-    vision_strict_mode: bool = (
-        os.getenv("VISION_STRICT_MODE", "false").lower() == "true"
-    )
+    vision_confidence_threshold: float = float(os.getenv("VISION_CONFIDENCE_THRESHOLD", "0.5"))
+    vision_strict_mode: bool = os.getenv("VISION_STRICT_MODE", "false").lower() == "true"
 
     # ------------------------------------------------------------------
     # Sentry error tracking
     # ------------------------------------------------------------------
     sentry_dsn: str = os.getenv("SENTRY_DSN", "")
     sentry_environment: str = os.getenv("SENTRY_ENVIRONMENT", "")
-    sentry_traces_sample_rate: float = float(
-        os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")
-    )
+    sentry_traces_sample_rate: float = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
 
     # ------------------------------------------------------------------
     # Audit log archiving
     # ------------------------------------------------------------------
     audit_archive_days: int = int(os.getenv("AUDIT_ARCHIVE_DAYS", "90"))
-    audit_archive_enabled: bool = (
-        os.getenv("AUDIT_ARCHIVE_ENABLED", "true").lower() == "true"
-    )
+    audit_archive_enabled: bool = os.getenv("AUDIT_ARCHIVE_ENABLED", "true").lower() == "true"
 
     # ------------------------------------------------------------------
     # Backup

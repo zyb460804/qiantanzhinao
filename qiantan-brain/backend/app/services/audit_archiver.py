@@ -13,6 +13,7 @@ from app.config import settings
 from app.core.timezone import utc_now
 from app.models.admin_audit import AdminAuditLog
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,9 +36,7 @@ async def archive_old_audit_logs(db: AsyncSession) -> dict:
 
     # Fetch records to archive (limit batch size to avoid memory pressure)
     result = await db.execute(
-        select(AdminAuditLog)
-        .where(AdminAuditLog.created_at < cutoff)
-        .limit(10000)
+        select(AdminAuditLog).where(AdminAuditLog.created_at < cutoff).limit(10000)
     )
     records = result.scalars().all()
 

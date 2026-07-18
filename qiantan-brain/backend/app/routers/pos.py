@@ -89,9 +89,7 @@ def _decimal_value(value: object | None) -> Decimal:
     return Decimal(str(value))
 
 
-def _product_label(
-    product_map: dict[int, ProductCategory], product_id: int | None
-) -> str:
+def _product_label(product_map: dict[int, ProductCategory], product_id: int | None) -> str:
     if product_id is None:
         return "未知商品（历史订单行缺少商品关联）"
     product = product_map.get(product_id)
@@ -1101,9 +1099,7 @@ async def resume_held_order(
         order.customer_name = body.customer_name.strip() or None
 
     # Validate all historical rows before consuming any batch, preventing partial deductions.
-    product_ids_by_item = {
-        item.id: _require_product_id(item, action="取回挂单") for item in items
-    }
+    product_ids_by_item = {item.id: _require_product_id(item, action="取回挂单") for item in items}
     product_map = await _resolve_product_map(db, set(product_ids_by_item.values()))
     for item in items:
         product_id = product_ids_by_item[item.id]
@@ -1226,13 +1222,17 @@ async def _auto_reconcile_after_payment(
     """
     try:
         payments = (
-            await db.execute(
-                select(Payment.method).where(
-                    Payment.order_id == order.id,
-                    Payment.status == "success",
+            (
+                await db.execute(
+                    select(Payment.method).where(
+                        Payment.order_id == order.id,
+                        Payment.status == "success",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         unique_channels = set(payments)
         today = utc_now().date()
@@ -1241,9 +1241,7 @@ async def _auto_reconcile_after_payment(
         for channel in unique_channels:
             task = await get_or_create_task(db, merchant_id, channel, today)
             import_count = await db.scalar(
-                select(func.count(ChannelBillImport.id)).where(
-                    ChannelBillImport.task_id == task.id
-                )
+                select(func.count(ChannelBillImport.id)).where(ChannelBillImport.task_id == task.id)
             )
             if import_count and import_count > 0:
                 await reconcile_task(db, task, fee_rate=fee_rate)
@@ -1285,8 +1283,7 @@ async def _estimate_daily_cogs(
                 InventoryRecord.product_id,
                 InventoryRecord.quantity,
                 InventoryRecord.unit_cost,
-            )
-            .where(
+            ).where(
                 InventoryRecord.merchant_id == merchant_id,
                 InventoryRecord.is_voided.is_(False),
                 InventoryRecord.event_type.in_(("sale", "refund")),
@@ -1330,8 +1327,7 @@ async def _estimate_daily_cogs(
         )
     ).all()
     average_costs = {
-        product_id: _decimal_value(average_cost)
-        for product_id, average_cost in average_cost_rows
+        product_id: _decimal_value(average_cost) for product_id, average_cost in average_cost_rows
     }
     fallback_cogs = sum(
         (

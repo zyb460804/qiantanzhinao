@@ -19,6 +19,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 logger = logging.getLogger(__name__)
 
 # ── 租户上下文 (跨异步任务安全) ──────────────────────────────────────
@@ -27,8 +28,8 @@ tenant_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 # 特殊值
-RLS_BYPASS = "__RLS_BYPASS__"   # 绕过所有 RLS (超级管理员)
-RLS_NONE = "__RLS_NONE__"       # 未设置租户 → 所有查询返回空
+RLS_BYPASS = "__RLS_BYPASS__"  # 绕过所有 RLS (超级管理员)
+RLS_NONE = "__RLS_NONE__"  # 未设置租户 → 所有查询返回空
 
 
 # ── 表名列表 (所有需要租户隔离的表) ──────────────────────────────────
@@ -65,9 +66,7 @@ async def set_tenant_context(session: AsyncSession, tenant_id: str) -> None:
     """
     tenant_ctx.set(tenant_id)
     # PostgreSQL 会话变量 — RLS 策略读取此值
-    await session.execute(
-        text("SET app.current_tenant_id = :tid"), {"tid": tenant_id}
-    )
+    await session.execute(text("SET app.current_tenant_id = :tid"), {"tid": tenant_id})
 
 
 async def clear_tenant_context(session: AsyncSession) -> None:
@@ -97,6 +96,7 @@ def get_current_tenant_id() -> str | None:
 
 
 # ── RLS 策略 SQL (生成 Alembic migration 用) ─────────────────────────
+
 
 def generate_rls_policy_sql(table_name: str) -> str:
     """为指定表生成 RLS 策略的 SQL。

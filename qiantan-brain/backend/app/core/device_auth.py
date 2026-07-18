@@ -281,6 +281,7 @@ class DeviceAuth:
     @staticmethod
     def require(scope: str):
         """创建要求特定 scope 的设备鉴权依赖。"""
+
         async def _auth(
             request: Request,
             x_api_key: str | None = Header(None, alias="X-Api-Key"),
@@ -298,4 +299,5 @@ class DeviceAuth:
                     detail=f"设备无 {scope} 权限",
                 )
             return ctx
+
         return _auth

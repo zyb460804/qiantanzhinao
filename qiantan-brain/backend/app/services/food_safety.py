@@ -28,23 +28,22 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime
 from enum import Enum
-from typing import Optional
 
 
 # ── 枚举定义 ──────────────────────────────────────────────────────
 class CCPStatus(str, Enum):
-    OK = "ok"              # 合格
-    WARNING = "warning"    # 接近限值
+    OK = "ok"  # 合格
+    WARNING = "warning"  # 接近限值
     VIOLATION = "violation"  # 超标
     NOT_APPLICABLE = "na"  # 不适用
 
 
 class NCRSeverity(str, Enum):
-    MINOR = "minor"        # 轻微不符合
-    MAJOR = "major"        # 重大不符合
+    MINOR = "minor"  # 轻微不符合
+    MAJOR = "major"  # 重大不符合
     CRITICAL = "critical"  # 严重不符合
 
 
@@ -56,26 +55,29 @@ class InspectionResult(str, Enum):
 
 # ── 数据类 ────────────────────────────────────────────────────────
 
+
 @dataclass
 class CCPDefinition:
     """关键控制点定义。"""
-    code: str                     # CCP-1
-    name: str                     # 冷藏温度
+
+    code: str  # CCP-1
+    name: str  # 冷藏温度
     description: str
-    category: str                 # temperature / time / hygiene / traceability
-    critical_limit: str           # "< 4°C" 或 "> 60°C"
-    warning_limit: str | None     # 预警限值
-    check_frequency: str          # "每2小时" / "每日" / "每批"
-    corrective_action: str        # 超标时的纠正措施
+    category: str  # temperature / time / hygiene / traceability
+    critical_limit: str  # "< 4°C" 或 "> 60°C"
+    warning_limit: str | None  # 预警限值
+    check_frequency: str  # "每2小时" / "每日" / "每批"
+    corrective_action: str  # 超标时的纠正措施
     applicable_categories: list[str]  # 适用品类
 
 
 @dataclass
 class CCPReading:
     """CCP检测读数。"""
+
     ccp_code: str
     value: float
-    unit: str                     # °C / 小时 / 次
+    unit: str  # °C / 小时 / 次
     status: CCPStatus
     checked_at: str
     checked_by: str | None = None
@@ -85,6 +87,7 @@ class CCPReading:
 @dataclass
 class NCRRecord:
     """不合格报告 (Non-Conformance Report)。"""
+
     id: str
     ccp_code: str
     severity: NCRSeverity
@@ -100,6 +103,7 @@ class NCRRecord:
 @dataclass
 class DailyChecklist:
     """每日食品安全检查清单。"""
+
     date: str
     items: list[dict]  # [{"item": "洗手消毒", "done": True, "notes": ""}, ...]
     overall_result: InspectionResult
@@ -110,18 +114,19 @@ class DailyChecklist:
 @dataclass
 class FoodSafetyScorecard:
     """食品安全综合评分卡。"""
+
     date: str
-    overall_score: float           # 0-100
-    grade: str                     # A/B/C/D/F
+    overall_score: float  # 0-100
+    grade: str  # A/B/C/D/F
     ccp_compliance: dict[str, CCPStatus]  # 各CCP状态
-    temperature_score: float       # 温度管理 0-25
-    hygiene_score: float           # 卫生管理 0-25
-    traceability_score: float      # 来源可溯 0-20
-    expiry_score: float            # 保质期管理 0-15
-    documentation_score: float     # 记录完整性 0-15
-    open_ncrs: int                 # 未关闭NCR数
+    temperature_score: float  # 温度管理 0-25
+    hygiene_score: float  # 卫生管理 0-25
+    traceability_score: float  # 来源可溯 0-20
+    expiry_score: float  # 保质期管理 0-15
+    documentation_score: float  # 记录完整性 0-15
+    open_ncrs: int  # 未关闭NCR数
     recommendations: list[str]
-    risk_level: str                # low / medium / high / critical
+    risk_level: str  # low / medium / high / critical
 
 
 # ── CCP 定义表 ────────────────────────────────────────────────────
@@ -168,7 +173,16 @@ DEFAULT_CCPS: list[CCPDefinition] = [
         warning_limit=None,
         check_frequency="每日",
         corrective_action="立即清洁消毒, 检查清洁用品是否充足",
-        applicable_categories=["vegetable", "leafy_green", "fruit", "meat", "seafood", "cooked_food", "dairy", "dry_goods"],
+        applicable_categories=[
+            "vegetable",
+            "leafy_green",
+            "fruit",
+            "meat",
+            "seafood",
+            "cooked_food",
+            "dairy",
+            "dry_goods",
+        ],
     ),
     CCPDefinition(
         code="CCP-5",
@@ -179,7 +193,16 @@ DEFAULT_CCPS: list[CCPDefinition] = [
         warning_limit=None,
         check_frequency="每批",
         corrective_action="暂停从无证供应商进货, 补全进货记录",
-        applicable_categories=["vegetable", "leafy_green", "fruit", "meat", "seafood", "cooked_food", "dairy", "dry_goods"],
+        applicable_categories=[
+            "vegetable",
+            "leafy_green",
+            "fruit",
+            "meat",
+            "seafood",
+            "cooked_food",
+            "dairy",
+            "dry_goods",
+        ],
     ),
     CCPDefinition(
         code="CCP-6",
@@ -313,7 +336,7 @@ class FoodSafetyEngine:
             unit="°C",
             status=CCPStatus.OK,
             checked_at=datetime.now().isoformat(),
-            notes=f"常温存储, 无需温度监控",
+            notes="常温存储, 无需温度监控",
         )
 
     def check_time_limit(
@@ -452,7 +475,9 @@ class FoodSafetyEngine:
             id=ncr_id or f"NCR-{datetime.now().strftime('%Y%m%d%H%M%S')}",
             ccp_code=reading.ccp_code,
             severity=severity,
-            description=f"{ccp.name}超标: {reading.value}{reading.unit} (限值: {ccp.critical_limit})",
+            description=(
+                f"{ccp.name}超标: {reading.value}{reading.unit} (限值: {ccp.critical_limit})"
+            ),
             detected_at=reading.checked_at,
             root_cause=None,
             correction=ccp.corrective_action,
@@ -526,10 +551,7 @@ class FoodSafetyEngine:
             recommendations.append("存在临期/过期食品风险, 建议加强保质期管理和促销出清")
 
         # 统计未关闭NCR
-        open_ncrs = sum(
-            1 for r in ccp_readings
-            if r.status == CCPStatus.VIOLATION
-        )
+        open_ncrs = sum(1 for r in ccp_readings if r.status == CCPStatus.VIOLATION)
 
         if not recommendations:
             recommendations.append("食品安全管理良好, 保持当前做法")
@@ -605,9 +627,7 @@ class FoodSafetyEngine:
 
         return max(0.0, min(25.0, score))
 
-    def _score_traceability(
-        self, cert_count: int, total_count: int
-    ) -> float:
+    def _score_traceability(self, cert_count: int, total_count: int) -> float:
         """来源可追溯评分。"""
         if total_count == 0:
             return 10.0
@@ -620,7 +640,6 @@ class FoodSafetyEngine:
         if not expiry_items:
             return 10.0  # 无数据, 给基础分
 
-        total = len(expiry_items)
         expired = sum(1 for e in expiry_items if e.get("status") == "expired")
         critical = sum(1 for e in expiry_items if e.get("status") == "critical")
         warning = sum(1 for e in expiry_items if e.get("status") == "warning")
@@ -651,37 +670,43 @@ class FoodSafetyEngine:
 
     # ── 每日检查清单生成 ────────────────────────────────────────
 
-    def generate_daily_checklist(
-        self, categories: list[str] | None = None
-    ) -> DailyChecklist:
+    def generate_daily_checklist(self, categories: list[str] | None = None) -> DailyChecklist:
         """生成每日食品安全检查清单。"""
         items = []
 
         # 通用检查项
-        items.append({
-            "item": "洗手消毒 — 上岗前用洗手液彻底洗手",
-            "category": "hygiene",
-            "done": False,
-            "notes": "",
-        })
-        items.append({
-            "item": "工作服/围裙清洁 — 穿戴干净工作服",
-            "category": "hygiene",
-            "done": False,
-            "notes": "",
-        })
-        items.append({
-            "item": "台面/工具清洁 — 接触食品的表面和刀具/砧板已消毒",
-            "category": "hygiene",
-            "done": False,
-            "notes": "",
-        })
-        items.append({
-            "item": "垃圾清理 — 垃圾桶已清空并更换垃圾袋",
-            "category": "hygiene",
-            "done": False,
-            "notes": "",
-        })
+        items.append(
+            {
+                "item": "洗手消毒 — 上岗前用洗手液彻底洗手",
+                "category": "hygiene",
+                "done": False,
+                "notes": "",
+            }
+        )
+        items.append(
+            {
+                "item": "工作服/围裙清洁 — 穿戴干净工作服",
+                "category": "hygiene",
+                "done": False,
+                "notes": "",
+            }
+        )
+        items.append(
+            {
+                "item": "台面/工具清洁 — 接触食品的表面和刀具/砧板已消毒",
+                "category": "hygiene",
+                "done": False,
+                "notes": "",
+            }
+        )
+        items.append(
+            {
+                "item": "垃圾清理 — 垃圾桶已清空并更换垃圾袋",
+                "category": "hygiene",
+                "done": False,
+                "notes": "",
+            }
+        )
 
         # 温度相关
         cats = categories or []
@@ -689,45 +714,55 @@ class FoodSafetyEngine:
         has_hot = "cooked_food" in cats
 
         if has_cold:
-            items.append({
-                "item": "冷藏设备温度检查 — 确认温度 < 4°C",
-                "category": "temperature",
-                "done": False,
-                "notes": "",
-            })
+            items.append(
+                {
+                    "item": "冷藏设备温度检查 — 确认温度 < 4°C",
+                    "category": "temperature",
+                    "done": False,
+                    "notes": "",
+                }
+            )
 
         if has_hot:
-            items.append({
-                "item": "热柜温度检查 — 确认温度 > 60°C",
-                "category": "temperature",
-                "done": False,
-                "notes": "",
-            })
+            items.append(
+                {
+                    "item": "热柜温度检查 — 确认温度 > 60°C",
+                    "category": "temperature",
+                    "done": False,
+                    "notes": "",
+                }
+            )
 
         # 交叉污染
         if any(c in ("meat", "seafood") for c in cats) and "cooked_food" in cats:
-            items.append({
-                "item": "生熟分开 — 确认生肉/水产与熟食分区存放, 使用不同工具",
-                "category": "hygiene",
-                "done": False,
-                "notes": "",
-            })
+            items.append(
+                {
+                    "item": "生熟分开 — 确认生肉/水产与熟食分区存放, 使用不同工具",
+                    "category": "hygiene",
+                    "done": False,
+                    "notes": "",
+                }
+            )
 
         # 来源追溯
-        items.append({
-            "item": "进货记录 — 今日进货已记录来源和数量",
-            "category": "traceability",
-            "done": False,
-            "notes": "",
-        })
+        items.append(
+            {
+                "item": "进货记录 — 今日进货已记录来源和数量",
+                "category": "traceability",
+                "done": False,
+                "notes": "",
+            }
+        )
 
         # 保质期
-        items.append({
-            "item": "保质期检查 — 巡视所有商品, 临期品移至前排/促销区",
-            "category": "expiry",
-            "done": False,
-            "notes": "",
-        })
+        items.append(
+            {
+                "item": "保质期检查 — 巡视所有商品, 临期品移至前排/促销区",
+                "category": "expiry",
+                "done": False,
+                "notes": "",
+            }
+        )
 
         return DailyChecklist(
             date=date.today().isoformat(),
@@ -762,7 +797,8 @@ def quick_food_safety_check(
         date=date.today().isoformat(),
         items=items,
         overall_result=(
-            InspectionResult.PASS if checklist_done_ratio >= 0.8
+            InspectionResult.PASS
+            if checklist_done_ratio >= 0.8
             else InspectionResult.CONDITIONAL_PASS
         ),
     )

@@ -173,9 +173,7 @@ async def upsert_offline_item(
     product_name_str = item.product_name or f"商品{product_id}"
     now = utc_now()
     if event_type == "purchase":
-        unit_cost = (
-            Decimal(str(item.unit_cost)) if item.unit_cost is not None else None
-        )
+        unit_cost = Decimal(str(item.unit_cost)) if item.unit_cost is not None else None
         await create_batch(
             db,
             merchant_id=merchant_id,
@@ -263,9 +261,9 @@ async def _log_dead_letter(
     result: dict,
 ) -> None:
     """Persist a DeadLetterEvent for an item that failed to sync."""
-    from app.models.dead_letter import DeadLetterEvent
-
     from sqlalchemy import select as _select
+
+    from app.models.dead_letter import DeadLetterEvent
 
     # Check if a dead letter already exists for this idempotency key.
     if item.idempotency_key:

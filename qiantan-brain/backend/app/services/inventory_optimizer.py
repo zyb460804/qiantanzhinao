@@ -27,6 +27,7 @@ from enum import Enum
 
 import numpy as np
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,13 +49,13 @@ SERVICE_LEVEL_Z: dict[float, float] = {
 # ── 生鲜品类半衰期 (25°C 下的品质衰减一半所需小时数) ────────────────
 # 参考: USDA FoodKeeper / StillTasty.com 公开数据
 PERISHABLE_HALF_LIFE: dict[str, float] = {
-    "叶菜类": 60.0,    # 白菜/生菜/菠菜
-    "根茎类": 168.0,   # 土豆/萝卜/洋葱
-    "水果类": 96.0,    # 苹果/西瓜/香蕉
-    "肉类": 24.0,      # 猪/牛/鸡 (4°C冷藏)
-    "豆制品": 18.0,    # 豆腐/豆皮
+    "叶菜类": 60.0,  # 白菜/生菜/菠菜
+    "根茎类": 168.0,  # 土豆/萝卜/洋葱
+    "水果类": 96.0,  # 苹果/西瓜/香蕉
+    "肉类": 24.0,  # 猪/牛/鸡 (4°C冷藏)
+    "豆制品": 18.0,  # 豆腐/豆皮
     "菌菇类": 48.0,
-    "蛋类": 336.0,     # 鸡蛋
+    "蛋类": 336.0,  # 鸡蛋
     "乳制品": 72.0,
     "干货类": 2160.0,  # 米/面/调味品 (~90天)
     "default": 72.0,
@@ -63,31 +64,33 @@ PERISHABLE_HALF_LIFE: dict[str, float] = {
 
 class Urgency(str, Enum):
     """补货紧急程度"""
-    CRITICAL = "critical"   # 已缺货或今日售罄
-    URGENT = "urgent"       # 1-2天内需补货
-    SOON = "soon"           # 3-7天内需补货
-    OK = "ok"               # 库存充足
+
+    CRITICAL = "critical"  # 已缺货或今日售罄
+    URGENT = "urgent"  # 1-2天内需补货
+    SOON = "soon"  # 3-7天内需补货
+    OK = "ok"  # 库存充足
 
 
 @dataclass
 class ReorderRecommendation:
     """单条补货建议"""
+
     product_id: int
     product_name: str
     # 核心指标
-    daily_forecast: float       # 预测日需求量
-    demand_std: float           # 需求标准差
-    safety_stock: float         # 安全库存
-    reorder_point: float        # 再订货点 (库存低于此值应立即补货)
+    daily_forecast: float  # 预测日需求量
+    demand_std: float  # 需求标准差
+    safety_stock: float  # 安全库存
+    reorder_point: float  # 再订货点 (库存低于此值应立即补货)
     recommended_order_qty: float  # 推荐补货量
-    current_inventory: float    # 当前库存
+    current_inventory: float  # 当前库存
     # 诊断指标
     days_until_stockout: float  # 按当前需求速率，库存可支撑天数
-    stockout_risk: float        # 缺货概率 (0-1)
-    urgency: Urgency            # 紧急程度
+    stockout_risk: float  # 缺货概率 (0-1)
+    urgency: Urgency  # 紧急程度
     # 成本估算
     estimated_cost: float = 0.0
-    potential_waste_pct: float = 0.0   # 基于保质期的潜在损耗率
+    potential_waste_pct: float = 0.0  # 基于保质期的潜在损耗率
     # 解释
     explanation: list[str] = field(default_factory=list)
 
@@ -95,6 +98,7 @@ class ReorderRecommendation:
 @dataclass
 class OptimizationResult:
     """批量优化结果"""
+
     recommendations: list[ReorderRecommendation]
     summary: dict
     generated_at: str
@@ -368,6 +372,7 @@ class InventoryOptimizer:
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────
 
+
 def _estimate_waste_percentage(
     current_inventory: float,
     daily_forecast: float,
@@ -416,9 +421,8 @@ def _build_explanation(
         lines.append(f"建议采购 {product_name} {recommended_qty:.1f} 斤")
 
         if safety_stock > 0:
-            lines.append(
-                f"  安全库存={safety_stock:.1f}斤 (覆盖{int(safety_stock/max(daily_forecast, 0.01))}天波动)"
-            )
+            cover_days = int(safety_stock / max(daily_forecast, 0.01))
+            lines.append(f"  安全库存={safety_stock:.1f}斤 (覆盖{cover_days}天波动)")
         lines.append(f"  再订货点={reorder_point:.1f}斤 (库存低于此值应立即补货)")
     else:
         lines.append(f"{product_name} 库存充足 (还可卖{days_left:.0f}天)，暂无需补货")
@@ -458,16 +462,17 @@ def _build_explanation(
 @dataclass
 class NewsvendorResult:
     """报童模型计算结果"""
-    critical_ratio: float          # 临界比率 (最优服务水平)
-    optimal_quantity: float        # 最优订货量 Q*
-    underage_cost: float           # 缺货成本 Cu
-    overage_cost: float            # 超储成本 Co
-    expected_profit: float         # 期望利润
-    expected_sales: float          # 期望销量
-    expected_leftover: float       # 期望剩余 (损耗)
-    expected_lost_sales: float     # 期望缺货量
-    stockout_probability: float    # 缺货概率 (1-CR)
-    waste_rate: float              # 期望损耗率
+
+    critical_ratio: float  # 临界比率 (最优服务水平)
+    optimal_quantity: float  # 最优订货量 Q*
+    underage_cost: float  # 缺货成本 Cu
+    overage_cost: float  # 超储成本 Co
+    expected_profit: float  # 期望利润
+    expected_sales: float  # 期望销量
+    expected_leftover: float  # 期望剩余 (损耗)
+    expected_lost_sales: float  # 期望缺货量
+    stockout_probability: float  # 缺货概率 (1-CR)
+    waste_rate: float  # 期望损耗率
 
 
 def newsvendor_normal(
@@ -502,7 +507,7 @@ def newsvendor_normal(
     """
     from scipy.stats import norm as scipy_norm
 
-    Cu = selling_price - unit_cost           # 缺货成本: 少卖1斤少赚多少
+    Cu = selling_price - unit_cost  # 缺货成本: 少卖1斤少赚多少
     Co = max(unit_cost - salvage_value, 0.01)  # 超储成本: 多进1斤烂掉亏多少 (最小0.01防止除零)
     CR = Cu / (Cu + Co) if (Cu + Co) > 0 else 0.5
 

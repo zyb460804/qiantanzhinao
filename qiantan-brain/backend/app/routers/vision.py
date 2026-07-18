@@ -16,7 +16,7 @@ import logging
 import random
 import time
 from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
@@ -33,6 +33,14 @@ from app.schemas.vision import (
     VisionFeedbackResponse,
     VisionRecognizeResponse,
 )
+
+
+if TYPE_CHECKING:
+    # Only needed for the string annotations below; the heavy ONNX service is
+    # imported lazily at runtime inside ``_get_vision_service`` to avoid pulling
+    # optional numpy/onnxruntime deps when the model is not configured.
+    from app.services.vision_model_onnx import OnnxVisionModelService
+
 
 logger = logging.getLogger("vision_router")
 
@@ -245,9 +253,7 @@ async def recognize_product(
 
     # 3b — Strict-production enforcement (P0-3 core deliverable)
     if settings.vision_strict_mode and settings.app_env == "production":
-        logger.critical(
-            "Vision model unavailable in strict-production mode — returning 503"
-        )
+        logger.critical("Vision model unavailable in strict-production mode — returning 503")
         raise HTTPException(
             status_code=503,
             detail=(

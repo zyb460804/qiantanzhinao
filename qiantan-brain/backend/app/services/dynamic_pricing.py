@@ -28,78 +28,81 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from enum import Enum
-from typing import Optional
 
 
 # ── 策略枚举 ──────────────────────────────────────────────────────
 class MarkdownStrategy(str, Enum):
-    AGE_BASED = "age_based"          # 按剩余货架期
+    AGE_BASED = "age_based"  # 按剩余货架期
     INVENTORY_BASED = "inventory_based"  # 按库存水平
-    COMBINED = "combined"            # 综合信号
-    CLEARANCE = "clearance"          # 关门前出清
+    COMBINED = "combined"  # 综合信号
+    CLEARANCE = "clearance"  # 关门前出清
 
 
 class PriceTier(str, Enum):
     """价格档位 — 控制降价激进程度。"""
+
     CONSERVATIVE = "conservative"  # 保守: 保利润
-    BALANCED = "balanced"          # 平衡: 利润与出清兼顾
-    AGGRESSIVE = "aggressive"      # 激进: 优先出清
+    BALANCED = "balanced"  # 平衡: 利润与出清兼顾
+    AGGRESSIVE = "aggressive"  # 激进: 优先出清
 
 
 # ── 数据类 ────────────────────────────────────────────────────────
 @dataclass
 class PricingContext:
     """定价决策所需的上下文信息。"""
+
     product_name: str
-    category: str                          # 品类 (蔬菜/水果/肉类/水产/熟食...)
-    unit_cost: float                       # 单位成本
-    original_price: float                  # 原始售价
-    current_inventory: float               # 当前库存
-    daily_forecast: float                  # 预测日销量
-    shelf_life_hours: int = 72            # 总货架期(小时)
-    hours_since_arrival: float = 0        # 已上架小时数
-    hours_until_close: float = 8          # 距离关门小时数
-    demand_std: float = 0                 # 需求标准差
-    min_margin: float = 0.10              # 最低毛利率
+    category: str  # 品类 (蔬菜/水果/肉类/水产/熟食...)
+    unit_cost: float  # 单位成本
+    original_price: float  # 原始售价
+    current_inventory: float  # 当前库存
+    daily_forecast: float  # 预测日销量
+    shelf_life_hours: int = 72  # 总货架期(小时)
+    hours_since_arrival: float = 0  # 已上架小时数
+    hours_until_close: float = 8  # 距离关门小时数
+    demand_std: float = 0  # 需求标准差
+    min_margin: float = 0.10  # 最低毛利率
 
 
 @dataclass
 class MarkdownStep:
     """一个降价阶梯。"""
+
     trigger_hours_remaining: float  # 剩余货架期低于此时触发
-    discount_pct: float             # 降价百分比 (0.0-1.0)
-    label: str                      # 人类可读标签
+    discount_pct: float  # 降价百分比 (0.0-1.0)
+    label: str  # 人类可读标签
 
 
 @dataclass
 class PricingRecommendation:
     """定价建议输出。"""
+
     product_name: str
     strategy: MarkdownStrategy
     original_price: float
     recommended_price: float
     discount_pct: float
     reason: str
-    urgency: str                    # low / medium / high / critical
-    expected_revenue: float         # 预期收入 (按当前库存)
-    expected_waste_pct: float       # 预期损耗率
+    urgency: str  # low / medium / high / critical
+    expected_revenue: float  # 预期收入 (按当前库存)
+    expected_waste_pct: float  # 预期损耗率
     alternative_prices: list[dict] = field(default_factory=list)
 
 
 # ── 品类货架期常量 (Q10=2, 基准温度20°C) ──────────────────────────
 CATEGORY_SHELF_LIFE: dict[str, int] = {
-    "vegetable": 72,     # 蔬菜: 3天
-    "leafy_green": 36,   # 叶菜: 1.5天
-    "fruit": 96,         # 水果: 4天
-    "meat": 48,          # 鲜肉: 2天
-    "seafood": 24,       # 水产: 1天
-    "cooked_food": 12,   # 熟食: 半天
-    "dairy": 120,        # 乳制品: 5天
-    "dry_goods": 2160,   # 干货: 90天 (基本不涉及降价)
+    "vegetable": 72,  # 蔬菜: 3天
+    "leafy_green": 36,  # 叶菜: 1.5天
+    "fruit": 96,  # 水果: 4天
+    "meat": 48,  # 鲜肉: 2天
+    "seafood": 24,  # 水产: 1天
+    "cooked_food": 12,  # 熟食: 半天
+    "dairy": 120,  # 乳制品: 5天
+    "dry_goods": 2160,  # 干货: 90天 (基本不涉及降价)
     "default": 72,
 }
+
 
 # 温度修正系数 (每升高10°C, 变质速率翻倍)
 # 返回 shelf_life 的修正因子
@@ -302,7 +305,9 @@ class DynamicPricingEngine:
         demand_uplift = estimate_demand_uplift(discount, ctx.category)
         effective_demand = ctx.daily_forecast * demand_uplift
         expected_sell = min(ctx.current_inventory, effective_demand)
-        expected_waste = max(0.0, ctx.current_inventory - expected_sell) / max(ctx.current_inventory, 0.01)
+        expected_waste = max(0.0, ctx.current_inventory - expected_sell) / max(
+            ctx.current_inventory, 0.01
+        )
         expected_revenue = expected_sell * recommended_price
 
         return PricingRecommendation(
@@ -311,7 +316,10 @@ class DynamicPricingEngine:
             original_price=ctx.original_price,
             recommended_price=recommended_price,
             discount_pct=round(discount * 100, 1),
-            reason=f"货架期已过{round((1-quality)*100)}% — 质量评分{round(quality*100)}% → {label}",
+            reason=(
+                f"货架期已过{round((1 - quality) * 100)}% — "
+                f"质量评分{round(quality * 100)}% → {label}"
+            ),
             urgency=self._urgency(quality, ctx.current_inventory / max(ctx.daily_forecast, 0.01)),
             expected_revenue=round(expected_revenue, 2),
             expected_waste_pct=round(expected_waste * 100, 1),
@@ -348,10 +356,12 @@ class DynamicPricingEngine:
         demand_uplift = estimate_demand_uplift(discount, ctx.category)
         effective_demand = ctx.daily_forecast * demand_uplift
         expected_sell = min(ctx.current_inventory, effective_demand)
-        expected_waste = max(0.0, ctx.current_inventory - expected_sell) / max(ctx.current_inventory, 0.01)
+        expected_waste = max(0.0, ctx.current_inventory - expected_sell) / max(
+            ctx.current_inventory, 0.01
+        )
         expected_revenue = expected_sell * recommended_price
 
-        label = f"{round((1-discount)*10)}折" if discount > 0 else "原价"
+        label = f"{round((1 - discount) * 10)}折" if discount > 0 else "原价"
         return PricingRecommendation(
             product_name=ctx.product_name,
             strategy=MarkdownStrategy.INVENTORY_BASED,
@@ -395,11 +405,13 @@ class DynamicPricingEngine:
         demand_uplift = estimate_demand_uplift(discount, ctx.category)
         effective_demand = ctx.daily_forecast * demand_uplift * 1.5  # 出清时额外1.5倍需求
         expected_sell = min(ctx.current_inventory, effective_demand)
-        expected_waste = max(0.0, ctx.current_inventory - expected_sell) / max(ctx.current_inventory, 0.01)
+        expected_waste = max(0.0, ctx.current_inventory - expected_sell) / max(
+            ctx.current_inventory, 0.01
+        )
         expected_revenue = expected_sell * recommended_price
 
         close_str = f"距关门{ctx.hours_until_close:.0f}小时" if ctx.hours_until_close <= 2 else ""
-        quality_str = f"质量仅{round(quality*100)}%" if quality < 0.3 else ""
+        quality_str = f"质量仅{round(quality * 100)}%" if quality < 0.3 else ""
         reason_parts = [p for p in [close_str, quality_str, "出清"] if p]
 
         return PricingRecommendation(
@@ -436,9 +448,7 @@ class DynamicPricingEngine:
         quality_weight = 0.4 + 0.3 * (1.0 - quality)
         inventory_weight = 1.0 - quality_weight
 
-        combined_discount = (
-            quality_weight * age_discount + inventory_weight * inv_discount
-        )
+        combined_discount = quality_weight * age_discount + inventory_weight * inv_discount
         combined_discount = min(combined_discount * tier, 0.65)
 
         recommended_price = round(ctx.original_price * (1.0 - combined_discount), 2)
@@ -447,7 +457,9 @@ class DynamicPricingEngine:
         demand_uplift = estimate_demand_uplift(combined_discount, ctx.category)
         effective_demand = ctx.daily_forecast * demand_uplift
         expected_sell = min(ctx.current_inventory, effective_demand)
-        expected_waste = max(0.0, ctx.current_inventory - expected_sell) / max(ctx.current_inventory, 0.01)
+        expected_waste = max(0.0, ctx.current_inventory - expected_sell) / max(
+            ctx.current_inventory, 0.01
+        )
         expected_revenue = expected_sell * recommended_price
 
         return PricingRecommendation(
@@ -457,8 +469,8 @@ class DynamicPricingEngine:
             recommended_price=recommended_price,
             discount_pct=round(combined_discount * 100, 1),
             reason=(
-                f"质量{round(quality*100)}% × 库存{days_cover:.1f}天 → "
-                f"综合折扣{round(combined_discount*100)}%"
+                f"质量{round(quality * 100)}% × 库存{days_cover:.1f}天 → "
+                f"综合折扣{round(combined_discount * 100)}%"
             ),
             urgency=self._urgency(quality, days_cover),
             expected_revenue=round(expected_revenue, 2),
@@ -529,16 +541,18 @@ class DynamicPricingEngine:
             profit = revenue - cost
             margin = profit / revenue if revenue > 0 else -999.0
 
-            results.append({
-                "discount_pct": round(d * 100, 1),
-                "price": round(price, 2),
-                "expected_sell": round(expected_sell, 1),
-                "expected_waste": round(expected_waste, 1),
-                "revenue": round(revenue, 2),
-                "profit": round(profit, 2),
-                "margin_pct": round(margin * 100, 1),
-                "waste_rate": round(expected_waste / max(ctx.current_inventory, 0.01) * 100, 1),
-            })
+            results.append(
+                {
+                    "discount_pct": round(d * 100, 1),
+                    "price": round(price, 2),
+                    "expected_sell": round(expected_sell, 1),
+                    "expected_waste": round(expected_waste, 1),
+                    "revenue": round(revenue, 2),
+                    "profit": round(profit, 2),
+                    "margin_pct": round(margin * 100, 1),
+                    "waste_rate": round(expected_waste / max(ctx.current_inventory, 0.01) * 100, 1),
+                }
+            )
 
         return results
 

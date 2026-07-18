@@ -22,12 +22,12 @@ from app.core.admin_permissions import (
 from app.core.admin_security import get_current_admin
 from app.core.audit import log_action
 from app.database import get_db
-from app.models.merchant import Merchant
 from app.models.admin_audit import AdminAuditLog
 from app.models.ai_action import AIAction
 from app.models.audit import AuditLog
 from app.models.device import Device
 from app.models.edge_event import EdgeEvent
+from app.models.merchant import Merchant
 from app.models.saas import Plan, PlatformAdmin, Subscription, Tenant, UsageRecord
 from app.models.voice import VoiceLog
 from app.services.state_machine import validate_tenant_transition
@@ -164,12 +164,8 @@ async def list_tenants(
 
     if search:
         pattern = f"%{search}%"
-        base_query = base_query.where(
-            (Tenant.name.ilike(pattern)) | (Tenant.slug.ilike(pattern))
-        )
-        count_query = count_query.where(
-            (Tenant.name.ilike(pattern)) | (Tenant.slug.ilike(pattern))
-        )
+        base_query = base_query.where((Tenant.name.ilike(pattern)) | (Tenant.slug.ilike(pattern)))
+        count_query = count_query.where((Tenant.name.ilike(pattern)) | (Tenant.slug.ilike(pattern)))
 
     total = await db.scalar(count_query) or 0
 
@@ -284,9 +280,8 @@ async def update_tenant(
                 detail=f"状态无效，允许: {', '.join(valid)}",
             )
         # 暂停/恢复租户需要 TENANT_SUSPEND 权限
-        is_suspend_transition = (
-            (update.status == "suspended" and tenant.status != "suspended") or
-            (tenant.status == "suspended" and update.status != "suspended")
+        is_suspend_transition = (update.status == "suspended" and tenant.status != "suspended") or (
+            tenant.status == "suspended" and update.status != "suspended"
         )
         if is_suspend_transition:
             check_suspend_permission(admin)
@@ -306,8 +301,12 @@ async def update_tenant(
 
     # 审计日志（与业务变更同事务）
     await log_action(
-        db, admin.id, admin.email, "update",
-        resource_type="tenant", resource_id=str(tenant_id),
+        db,
+        admin.id,
+        admin.email,
+        "update",
+        resource_type="tenant",
+        resource_id=str(tenant_id),
         detail={
             "name": tenant.name,
             "status": f"{old_status} -> {tenant.status}",
@@ -317,7 +316,7 @@ async def update_tenant(
     )
     await db.commit()
     await db.refresh(tenant)
-    
+
     # 返回详情
     merchant_count = await db.scalar(
         select(func.count(Merchant.id)).where(Merchant.tenant_id == tenant_id)
@@ -441,20 +440,17 @@ async def get_tenant_ai_usage(
     _perm=Depends(require_admin_permission(USAGE_READ)),
 ):
     """获取租户近 30 天 AI 使用统计（视觉识别、语音识别、AI 建议）。"""
-    start_dt = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=29)
+    start_dt = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+        days=29
+    )
 
     # 获取该租户的所有商户 ID
-    mid_result = await db.execute(
-        select(Merchant.id).where(Merchant.tenant_id == tenant_id)
-    )
+    mid_result = await db.execute(select(Merchant.id).where(Merchant.tenant_id == tenant_id))
     merchant_ids = [row[0] for row in mid_result.all()]
 
     if not merchant_ids:
         # 生成空日期序列
-        all_dates = [
-            (start_dt + timedelta(days=i)).strftime("%Y-%m-%d")
-            for i in range(30)
-        ]
+        all_dates = [(start_dt + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(30)]
         return AIUsageResponse(
             dates=all_dates,
             vision_counts=[0] * 30,
@@ -509,7 +505,7 @@ async def get_tenant_ai_usage(
     advice_map: dict[str, int] = {row[0]: row[1] for row in advice_rows.all()}
 
     # 生成 30 天日期序列
-    all_dates: list[str] = []
+    all_dates = []
     for i in range(30):
         d = start_dt + timedelta(days=i)
         all_dates.append(d.strftime("%Y-%m-%d"))
@@ -535,28 +531,34 @@ async def get_tenant_risk_audit(
     thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
 
     # 商户数
-    merchant_count = await db.scalar(
-        select(func.count(Merchant.id)).where(Merchant.tenant_id == tenant_id)
-    ) or 0
+    merchant_count = (
+        await db.scalar(select(func.count(Merchant.id)).where(Merchant.tenant_id == tenant_id)) or 0
+    )
 
     # 商户审计日志（通过 merchant_id → tenant_id 过滤）
-    audit_count = await db.scalar(
-        select(func.count(AuditLog.id))
-        .join(Merchant, AuditLog.merchant_id == Merchant.id)
-        .where(
-            Merchant.tenant_id == tenant_id,
-            AuditLog.created_at >= thirty_days_ago,
+    audit_count = (
+        await db.scalar(
+            select(func.count(AuditLog.id))
+            .join(Merchant, AuditLog.merchant_id == Merchant.id)
+            .where(
+                Merchant.tenant_id == tenant_id,
+                AuditLog.created_at >= thirty_days_ago,
+            )
         )
-    ) or 0
+        or 0
+    )
 
     # 管理员操作日志（针对此租户的操作）
-    admin_audit_count = await db.scalar(
-        select(func.count(AdminAuditLog.id)).where(
-            AdminAuditLog.resource_type == "tenant",
-            AdminAuditLog.resource_id == str(tenant_id),
-            AdminAuditLog.created_at >= thirty_days_ago,
+    admin_audit_count = (
+        await db.scalar(
+            select(func.count(AdminAuditLog.id)).where(
+                AdminAuditLog.resource_type == "tenant",
+                AdminAuditLog.resource_id == str(tenant_id),
+                AdminAuditLog.created_at >= thirty_days_ago,
+            )
         )
-    ) or 0
+        or 0
+    )
 
     return RiskAuditResponse(
         merchant_count=merchant_count,
@@ -570,6 +572,7 @@ async def get_tenant_risk_audit(
 
 class TenantCreate(BaseModel):
     """创建租户请求。"""
+
     name: str = Field(..., min_length=2, max_length=100, description="租户名称")
     slug: str = Field(
         ...,
@@ -606,6 +609,7 @@ class TenantCreate(BaseModel):
 
 class TenantOnboardResult(BaseModel):
     """租户接入结果。"""
+
     tenant_id: uuid.UUID
     tenant_name: str
     slug: str
@@ -638,9 +642,7 @@ async def create_tenant(
       5. 初始化当天 UsageRecord（api_calls=0, storage_mb=0, merchant_count=1）
     """
     # 1. 校验 slug 唯一
-    existing = await db.execute(
-        select(Tenant.id).where(func.lower(Tenant.slug) == req.slug)
-    )
+    existing = await db.execute(select(Tenant.id).where(func.lower(Tenant.slug) == req.slug))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"slug '{req.slug}' 已存在")
 
@@ -691,17 +693,23 @@ async def create_tenant(
     # 6. 初始化当天 UsageRecord
     today = now.strftime("%Y-%m-%d")
     for metric, val in [("api_calls", 0), ("storage_mb", 0), ("merchant_count", 1)]:
-        db.add(UsageRecord(
-            tenant_id=tenant.id,
-            metric=metric,
-            recorded_date=today,
-            value=val,
-        ))
+        db.add(
+            UsageRecord(
+                tenant_id=tenant.id,
+                metric=metric,
+                recorded_date=today,
+                value=val,
+            )
+        )
 
     # 审计日志（与业务创建同事务）
     await log_action(
-        db, admin.id, admin.email, "create",
-        resource_type="tenant", resource_id=str(tenant.id),
+        db,
+        admin.id,
+        admin.email,
+        "create",
+        resource_type="tenant",
+        resource_id=str(tenant.id),
         detail={
             "tenant_name": tenant.name,
             "slug": tenant.slug,

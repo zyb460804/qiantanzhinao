@@ -74,32 +74,57 @@ AUDIT_READ = "audit.read"
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "super_admin": {
         DASHBOARD_READ,
-        TENANT_READ, TENANT_CREATE, TENANT_UPDATE, TENANT_SUSPEND,
-        PLAN_READ, PLAN_CREATE, PLAN_UPDATE, PLAN_DELETE,
-        SUBSCRIPTION_READ, SUBSCRIPTION_CREATE, SUBSCRIPTION_CHANGE,
-        INVOICE_READ, INVOICE_CREATE, INVOICE_UPDATE, INVOICE_MARK_PAID,
-        USAGE_READ, USAGE_ADJUST,
+        TENANT_READ,
+        TENANT_CREATE,
+        TENANT_UPDATE,
+        TENANT_SUSPEND,
+        PLAN_READ,
+        PLAN_CREATE,
+        PLAN_UPDATE,
+        PLAN_DELETE,
+        SUBSCRIPTION_READ,
+        SUBSCRIPTION_CREATE,
+        SUBSCRIPTION_CHANGE,
+        INVOICE_READ,
+        INVOICE_CREATE,
+        INVOICE_UPDATE,
+        INVOICE_MARK_PAID,
+        USAGE_READ,
+        USAGE_ADJUST,
         EXPORT_DATA,
-        AI_ACTION_READ, AI_ACTION_APPROVE,
+        AI_ACTION_READ,
+        AI_ACTION_APPROVE,
         ADMIN_MANAGE,
         AUDIT_READ,
     },
     "ops_admin": {
         DASHBOARD_READ,
-        TENANT_READ, TENANT_CREATE, TENANT_UPDATE,
+        TENANT_READ,
+        TENANT_CREATE,
+        TENANT_UPDATE,
         SUBSCRIPTION_READ,
         INVOICE_READ,
         USAGE_READ,
-        AI_ACTION_READ, AI_ACTION_APPROVE,
+        AI_ACTION_READ,
+        AI_ACTION_APPROVE,
         AUDIT_READ,
     },
     "billing_admin": {
         DASHBOARD_READ,
         TENANT_READ,
-        PLAN_READ, PLAN_CREATE, PLAN_UPDATE, PLAN_DELETE,
-        SUBSCRIPTION_READ, SUBSCRIPTION_CREATE, SUBSCRIPTION_CHANGE,
-        INVOICE_READ, INVOICE_CREATE, INVOICE_UPDATE, INVOICE_MARK_PAID,
-        USAGE_READ, USAGE_ADJUST,
+        PLAN_READ,
+        PLAN_CREATE,
+        PLAN_UPDATE,
+        PLAN_DELETE,
+        SUBSCRIPTION_READ,
+        SUBSCRIPTION_CREATE,
+        SUBSCRIPTION_CHANGE,
+        INVOICE_READ,
+        INVOICE_CREATE,
+        INVOICE_UPDATE,
+        INVOICE_MARK_PAID,
+        USAGE_READ,
+        USAGE_ADJUST,
         EXPORT_DATA,
         AUDIT_READ,
     },
@@ -132,6 +157,7 @@ for _perms in ROLE_PERMISSIONS.values():
 # ═══════════════════════════════════════════
 # 依赖工厂
 # ═══════════════════════════════════════════
+
 
 class AdminPermissionContext:
     """权限上下文 — 记录当前管理员身份和权限。"""
@@ -232,6 +258,7 @@ async def _log_permission_check(
 ) -> None:
     """记录高风险操作权限检查审计。"""
     from app.core.audit import log_action
+
     await log_action(
         db=db,
         admin_id=admin.id,
@@ -266,13 +293,11 @@ def check_suspend_permission(admin: PlatformAdmin) -> None:
 # 前端权限列表导出
 # ═══════════════════════════════════════════
 
+
 def get_permission_manifest() -> dict[str, Any]:
     """返回所有权限点和角色映射，供前端 /api/admin/permissions 使用。"""
     return {
         "permissions": sorted(ALL_PERMISSIONS),
-        "roles": {
-            role: sorted(perms)
-            for role, perms in ROLE_PERMISSIONS.items()
-        },
+        "roles": {role: sorted(perms) for role, perms in ROLE_PERMISSIONS.items()},
         "high_risk": sorted(HIGH_RISK_PERMISSIONS),
     }

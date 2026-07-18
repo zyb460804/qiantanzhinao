@@ -1,4 +1,5 @@
 """Merchant feedback model."""
+
 import uuid as _uuid
 from datetime import date as _date
 

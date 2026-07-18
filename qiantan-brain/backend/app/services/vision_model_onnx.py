@@ -13,13 +13,17 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-# numpy and PIL imported lazily to avoid hard dependency in environments
-# without a vision model (e.g. CI; dev with VISION_MODEL_PATH empty).
-
 from app.services.vision_model import Detection
 
+
+# numpy / PIL / onnxruntime are heavy and optional (no model in CI / dev):
+# imported lazily inside methods at runtime, and only under TYPE_CHECKING
+# here so annotations like ``np.ndarray`` / ``Image.Image`` resolve for static
+# analysis without forcing a hard install-time dependency.
 if TYPE_CHECKING:
+    import numpy as np
     import onnxruntime as ort
+    from PIL import Image
 
 logger = logging.getLogger("vision_model_onnx")
 
@@ -143,10 +147,13 @@ class OnnxVisionModelService:
         5. Non-Maximum Suppression (simple IoU threshold).
         6. Map surviving boxes to ``Detection`` dicts.
         """
-        import numpy as np
+        # ``recognize()`` only dispatches here when ``is_available`` is True,
+        # which is set iff the ONNX session loaded successfully.
+        assert self._session is not None
 
         # --- decode ---------------------------------------------------
         from PIL import Image as PILImage
+
         image = PILImage.open(__import__("io").BytesIO(image_bytes)).convert("RGB")
 
         # --- preprocess ------------------------------------------------
@@ -154,7 +161,7 @@ class OnnxVisionModelService:
 
         # --- infer -----------------------------------------------------
         outputs = self._session.run(None, {self._input_name: input_tensor})
-        raw_boxes: "np.ndarray" = outputs[0]  # shape [N, 6] or [1, N, 6]
+        raw_boxes: np.ndarray = outputs[0]  # shape [N, 6] or [1, N, 6]
 
         # Handle batched output — take first batch item
         if raw_boxes.ndim == 3:
@@ -167,7 +174,7 @@ class OnnxVisionModelService:
         detections = self._postprocess(raw_boxes, image.size)
         return detections
 
-    def _preprocess(self, image: "Image.Image") -> "np.ndarray":
+    def _preprocess(self, image: Image.Image) -> np.ndarray:
         """Resize, letterbox, normalise → (1, 3, H, W) float32 CHW."""
         import numpy as np
         from PIL import Image as PILImage
@@ -194,7 +201,7 @@ class OnnxVisionModelService:
         return arr
 
     def _postprocess(
-        self, raw_boxes: "np.ndarray", original_size: tuple[int, int]
+        self, raw_boxes: np.ndarray, original_size: tuple[int, int]
     ) -> list[Detection]:
         """Convert raw model output to ``Detection`` dicts.
 
@@ -239,7 +246,7 @@ class OnnxVisionModelService:
         return detections
 
     @staticmethod
-    def _nms(boxes: "np.ndarray", iou_threshold: float = 0.45) -> list[int]:
+    def _nms(boxes: np.ndarray, iou_threshold: float = 0.45) -> list[int]:
         """Greedy Non-Maximum Suppression on xyxy boxes.
 
         Returns indices of boxes to keep, ordered by descending confidence.

@@ -23,11 +23,9 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 
 # ── 等级枚举 ──────────────────────────────────────────────────────
@@ -50,32 +48,33 @@ class RiskLevel(str, Enum):
 @dataclass
 class SupplierMetrics:
     """供应商绩效原始指标 — 从历史采购数据聚合。"""
+
     supplier_id: str
     supplier_name: str
 
     # 交期指标
     total_orders: int = 0
     on_time_deliveries: int = 0
-    avg_lead_time_hours: float = 0          # 平均提前期
-    lead_time_std_hours: float = 0          # 提前期标准差
-    promised_vs_actual_ratio: float = 1.0   # 承诺/实际 比值 (>1逾期)
+    avg_lead_time_hours: float = 0  # 平均提前期
+    lead_time_std_hours: float = 0  # 提前期标准差
+    promised_vs_actual_ratio: float = 1.0  # 承诺/实际 比值 (>1逾期)
 
     # 质量指标
     total_qty_ordered: float = 0
-    accepted_qty: float = 0                 # 合格品
-    shortage_qty: float = 0                 # 缺斤
-    damaged_qty: float = 0                  # 破损
-    rejected_qty: float = 0                 # 拒收
+    accepted_qty: float = 0  # 合格品
+    shortage_qty: float = 0  # 缺斤
+    damaged_qty: float = 0  # 破损
+    rejected_qty: float = 0  # 拒收
 
     # 价格指标
     avg_unit_price: float = 0
-    price_vs_market_ratio: float = 1.0      # vs 市场均价
-    price_volatility: float = 0             # 价格波动 (变异系数)
+    price_vs_market_ratio: float = 1.0  # vs 市场均价
+    price_volatility: float = 0  # 价格波动 (变异系数)
 
     # 服务指标
-    response_time_hours: float = 24         # 响应时间(小时)
-    flexibility_score: float = 3.0          # 灵活度 1-5 (最小起订量/临时加单)
-    communication_score: float = 3.0        # 沟通 1-5
+    response_time_hours: float = 24  # 响应时间(小时)
+    flexibility_score: float = 3.0  # 灵活度 1-5 (最小起订量/临时加单)
+    communication_score: float = 3.0  # 沟通 1-5
 
     # 时间范围
     first_order_date: str | None = None
@@ -85,9 +84,10 @@ class SupplierMetrics:
 @dataclass
 class DimensionScore:
     """单维度评分详情。"""
+
     name: str
-    raw_score: float       # 0-100
-    weight: float          # 权重
+    raw_score: float  # 0-100
+    weight: float  # 权重
     weighted_score: float  # raw_score * weight
     details: dict = field(default_factory=dict)
 
@@ -95,36 +95,38 @@ class DimensionScore:
 @dataclass
 class SupplierScorecard:
     """供应商综合评分卡。"""
+
     supplier_id: str
     supplier_name: str
-    composite_score: float         # 0-100
+    composite_score: float  # 0-100
     grade: SupplierGrade
     risk_level: RiskLevel
     dimensions: list[DimensionScore]
     strengths: list[str]
     weaknesses: list[str]
     recommendations: list[str]
-    lead_time_prediction: dict     # 提前期预测
-    comparison_percentile: float   # 在所有供应商中的百分位
+    lead_time_prediction: dict  # 提前期预测
+    comparison_percentile: float  # 在所有供应商中的百分位
     updated_at: str
 
 
 @dataclass
 class LeadTimePrediction:
     """提前期预测 — Dual-Band模式。"""
-    expected_hours: float       # Model A: 最可能值
+
+    expected_hours: float  # Model A: 最可能值
     safety_buffer_hours: float  # Model B: 95分位
-    worst_case_hours: float     # 最坏情况 = expected + safety_buffer
-    confidence: float           # 预测置信度 (0-1)
+    worst_case_hours: float  # 最坏情况 = expected + safety_buffer
+    confidence: float  # 预测置信度 (0-1)
 
 
 # ── 评分权重配置 ──────────────────────────────────────────────────
 DEFAULT_WEIGHTS = {
-    "quality": 0.25,     # 质量: 合格率/缺斤率/退货率
-    "delivery": 0.25,    # 交期: 准时率/提前期稳定性
-    "price": 0.20,       # 价格: 价格水平/价格波动
-    "stability": 0.15,   # 稳定: 供应连续性/历史波动
-    "service": 0.15,     # 服务: 响应速度/灵活度/沟通
+    "quality": 0.25,  # 质量: 合格率/缺斤率/退货率
+    "delivery": 0.25,  # 交期: 准时率/提前期稳定性
+    "price": 0.20,  # 价格: 价格水平/价格波动
+    "stability": 0.15,  # 稳定: 供应连续性/历史波动
+    "service": 0.15,  # 服务: 响应速度/灵活度/沟通
 }
 
 
@@ -267,6 +269,7 @@ class SupplierScorer:
             promise_score = 30.0
 
         raw = on_time_score + stability_score + promise_score
+        lead_time_cv = round(m.lead_time_std_hours / max(m.avg_lead_time_hours, 0.01), 2)
         return DimensionScore(
             name="交期",
             raw_score=round(raw, 1),
@@ -275,7 +278,7 @@ class SupplierScorer:
             details={
                 "准时率": f"{round(on_time_rate * 100, 1)}%",
                 "平均提前期": f"{round(m.avg_lead_time_hours, 1)}小时",
-                "提前期稳定性(CV)": f"{round(m.lead_time_std_hours / max(m.avg_lead_time_hours, 0.01), 2)}",
+                "提前期稳定性(CV)": f"{lead_time_cv}",
                 "承诺/实际比": f"{round(m.promised_vs_actual_ratio, 2)}",
                 "历史订单数": str(m.total_orders),
             },
@@ -308,7 +311,7 @@ class SupplierScorer:
             elif m.price_vs_market_ratio <= 1.30:
                 price_score = 10.0  # 明显高于市场
             else:
-                price_score = 0.0   # 远高于市场
+                price_score = 0.0  # 远高于市场
         else:
             price_score = 30.0
 
@@ -358,9 +361,8 @@ class SupplierScorer:
 
         # 品质一致性: 合格率的标准差相关 (简化: 用缺斤率波动)
         # 这里用 退货+拒收 的总比例作为不一致信号
-        inconsistency = (
-            (m.shortage_qty + m.damaged_qty + m.rejected_qty)
-            / max(m.total_qty_ordered, 0.01)
+        inconsistency = (m.shortage_qty + m.damaged_qty + m.rejected_qty) / max(
+            m.total_qty_ordered, 0.01
         )
         consistency_score = max(0.0, 40.0 * (1.0 - min(inconsistency * 2.0, 1.0)))
 
@@ -377,7 +379,9 @@ class SupplierScorer:
             details={
                 "历史订单": str(m.total_orders),
                 "不一致率": f"{round(inconsistency * 100, 1)}%",
-                "数据可信度": "高" if m.total_orders >= 10 else ("中" if m.total_orders >= 5 else "低"),
+                "数据可信度": "高"
+                if m.total_orders >= 10
+                else ("中" if m.total_orders >= 5 else "低"),
             },
         )
 
@@ -456,9 +460,7 @@ class SupplierScorer:
 
     # ── 强弱项分析 ──────────────────────────────────────────────
 
-    def _analyze(
-        self, dims: list[DimensionScore]
-    ) -> tuple[list[str], list[str]]:
+    def _analyze(self, dims: list[DimensionScore]) -> tuple[list[str], list[str]]:
         """分析优势与劣势维度。"""
         strengths = []
         weaknesses = []
@@ -564,9 +566,7 @@ class SupplierScorer:
 
     # ── 批量评估 ────────────────────────────────────────────────
 
-    def batch_evaluate(
-        self, metrics_list: list[SupplierMetrics]
-    ) -> list[SupplierScorecard]:
+    def batch_evaluate(self, metrics_list: list[SupplierMetrics]) -> list[SupplierScorecard]:
         """批量评估 — 自动计算百分位排名。"""
         cards = [self.evaluate(m) for m in metrics_list]
 
@@ -588,9 +588,7 @@ class SupplierScorer:
 
     # ── 供应商对比 ──────────────────────────────────────────────
 
-    def compare(
-        self, cards: list[SupplierScorecard]
-    ) -> dict:
+    def compare(self, cards: list[SupplierScorecard]) -> dict:
         """多供应商对比分析。"""
         if not cards:
             return {"error": "无供应商数据"}
@@ -604,7 +602,7 @@ class SupplierScorer:
 
         for dn in dim_names:
             best_dim = None
-            best_score = -1
+            best_score: float = -1.0
             for c in cards:
                 for d in c.dimensions:
                     if d.name == dn and d.raw_score > best_score:
@@ -635,9 +633,7 @@ class SupplierScorer:
                     "grade": c.grade.value,
                     "risk": c.risk_level.value,
                 }
-                for i, c in enumerate(
-                    sorted(cards, key=lambda x: x.composite_score, reverse=True)
-                )
+                for i, c in enumerate(sorted(cards, key=lambda x: x.composite_score, reverse=True))
             ],
         }
 

@@ -18,20 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.timezone import utc_now
 
 
-async def get_sync_dead_letter_count(
-    db: AsyncSession, merchant_id: uuid.UUID | None = None
-) -> int:
+async def get_sync_dead_letter_count(db: AsyncSession, merchant_id: uuid.UUID | None = None) -> int:
     """Count dead-letter events that are still pending, retrying, or permanently failed."""
     from app.models.dead_letter import DeadLetterEvent
 
-    filters: list = [
-        DeadLetterEvent.status.in_(["pending", "retrying", "permanent_failure"])
-    ]
+    filters: list = [DeadLetterEvent.status.in_(["pending", "retrying", "permanent_failure"])]
     if merchant_id:
         filters.append(DeadLetterEvent.merchant_id == merchant_id)
-    result = await db.execute(
-        select(func.count(DeadLetterEvent.id)).where(*filters)
-    )
+    result = await db.execute(select(func.count(DeadLetterEvent.id)).where(*filters))
     return result.scalar() or 0
 
 

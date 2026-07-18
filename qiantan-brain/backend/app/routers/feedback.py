@@ -1,4 +1,5 @@
 """Feedback API router — user feedback collection."""
+
 import uuid
 from datetime import date
 

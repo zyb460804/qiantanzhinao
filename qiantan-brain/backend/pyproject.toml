@@ -40,6 +40,10 @@ ignore = [
     # FastAPI 惯用法：Depends(get_merchant_id) 写在默认参数里会触发 B008，
     # 这是官方推荐写法，非 bug，整体忽略（如需个别保留可加 # noqa: B008）。
     "B008",
+    # UP042 建议 `class X(str, Enum)` → `class X(StrEnum)`，但两者 str() 行为不同
+    # （前者 str(member) == "X.member"，StrEnum == member.value），项目大量枚举被
+    # 序列化/比较，盲改会改变运行时行为，故整体忽略。
+    "UP042",
     # Pinned mypy 1.11 requires conventional Generic[T] syntax.
     "UP046",
 ]

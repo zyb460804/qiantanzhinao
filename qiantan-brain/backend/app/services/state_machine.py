@@ -35,7 +35,7 @@ SUBSCRIPTION_TRANSITIONS: dict[str, set[str]] = {
     "past_due": {"active", "suspended", "canceled", "expired"},
     "suspended": {"active", "canceled", "expired"},
     "canceled": set(),  # 终态
-    "expired": set(),   # 终态
+    "expired": set(),  # 终态
 }
 
 
@@ -54,8 +54,8 @@ INVOICE_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"sent", "void"},
     "sent": {"paid", "overdue", "void"},
     "overdue": {"paid", "void"},
-    "paid": set(),   # 终态，只能冲正（新记录）
-    "void": set(),   # 终态
+    "paid": set(),  # 终态，只能冲正（新记录）
+    "void": set(),  # 终态
 }
 
 
@@ -72,10 +72,10 @@ def validate_invoice_transition(from_status: str, to_status: str) -> None:
 
 AI_ACTION_TRANSITIONS: dict[str, set[str]] = {
     "pending": {"executed", "rejected", "cancelled", "failed"},
-    "executed": set(),     # 终态
-    "rejected": set(),     # 终态
-    "failed": {"pending"}, # 可重试
-    "cancelled": set(),    # 终态
+    "executed": set(),  # 终态
+    "rejected": set(),  # 终态
+    "failed": {"pending"},  # 可重试
+    "cancelled": set(),  # 终态
 }
 
 

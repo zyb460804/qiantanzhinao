@@ -517,17 +517,19 @@ async def reconcile_task(
 
     # Query existing resolved/ignored differences to avoid duplicates
     existing_diffs = (
-        await db.execute(
-            select(ReconciliationDifference).where(
-                ReconciliationDifference.task_id == task.id,
-                ReconciliationDifference.status.in_(["resolved", "ignored"]),
+        (
+            await db.execute(
+                select(ReconciliationDifference).where(
+                    ReconciliationDifference.task_id == task.id,
+                    ReconciliationDifference.status.in_(["resolved", "ignored"]),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    existing_keys = {
-        (d.diff_type, d.system_ref or "", d.channel_ref or "") for d in existing_diffs
-    }
+    existing_keys = {(d.diff_type, d.system_ref or "", d.channel_ref or "") for d in existing_diffs}
 
     # Filter out differences that already exist as resolved/ignored
     new_differences = [

@@ -78,9 +78,7 @@ class DeviceFirmware(Base):
     __tablename__ = "device_firmwares"
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
-    device_type: Mapped[str] = mapped_column(
-        sa.String(30), nullable=False
-    )  # scale/camera/esl/all
+    device_type: Mapped[str] = mapped_column(sa.String(30), nullable=False)  # scale/camera/esl/all
     version: Mapped[str] = mapped_column(sa.String(20), nullable=False)
     file_url: Mapped[str] = mapped_column(sa.String(500), nullable=False)
     file_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)  # SHA-256

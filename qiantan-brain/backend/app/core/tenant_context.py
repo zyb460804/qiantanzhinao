@@ -152,19 +152,25 @@ async def require_active_subscription(
         return None  # 过渡期放行
 
     result = await db.execute(
-        select(Subscription).where(
+        select(Subscription)
+        .where(
             Subscription.tenant_id == tenant.id,
             Subscription.status.in_(("trialing", "active")),
-        ).order_by(Subscription.created_at.desc()).limit(1)
+        )
+        .order_by(Subscription.created_at.desc())
+        .limit(1)
     )
     sub = result.scalar_one_or_none()
 
     if sub is None:
         # 检查是否有逾期/过期订阅（给出更明确的错误信息）
         result2 = await db.execute(
-            select(Subscription).where(
+            select(Subscription)
+            .where(
                 Subscription.tenant_id == tenant.id,
-            ).order_by(Subscription.created_at.desc()).limit(1)
+            )
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
         )
         latest = result2.scalar_one_or_none()
         if latest:
@@ -245,7 +251,7 @@ async def require_quota_check(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"「{metric}」用量已超限（{quota_info['current']}/{quota_info['limit']}），"
-                   f"请升级套餐或等待下个计费周期",
+            f"请升级套餐或等待下个计费周期",
         )
 
     # 后记录（增量）

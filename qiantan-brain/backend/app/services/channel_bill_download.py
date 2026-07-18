@@ -104,9 +104,7 @@ async def download_wechat_bill(
     ):
         raise ChannelBillDownloadError("微信支付账单下载凭据未配置")
     private_key = _load_private_key(config.wechat_pay_private_key_path)
-    request_path = (
-        f"/v3/bill/tradebill?bill_date={bill_date.isoformat()}&bill_type=ALL"
-    )
+    request_path = f"/v3/bill/tradebill?bill_date={bill_date.isoformat()}&bill_type=ALL"
     timestamp = str(int(time.time()))
     nonce = secrets.token_hex(16)
     signature = _rsa_sign(
@@ -114,7 +112,7 @@ async def download_wechat_bill(
         f"GET\n{request_path}\n{timestamp}\n{nonce}\n\n",
     )
     authorization = (
-        'WECHATPAY2-SHA256-RSA2048 '
+        "WECHATPAY2-SHA256-RSA2048 "
         f'mchid="{config.wechat_pay_mch_id}",nonce_str="{nonce}",'
         f'timestamp="{timestamp}",serial_no="{config.wechat_pay_serial_no}",'
         f'signature="{signature}"'
@@ -127,9 +125,7 @@ async def download_wechat_bill(
             headers={"Authorization": authorization, "Accept": "application/json"},
         )
         if response.status_code != 200:
-            raise ChannelBillDownloadError(
-                f"微信支付账单申请失败，HTTP {response.status_code}"
-            )
+            raise ChannelBillDownloadError(f"微信支付账单申请失败，HTTP {response.status_code}")
         payload = response.json()
         download_url = payload.get("download_url")
         if not isinstance(download_url, str):
@@ -178,12 +174,8 @@ async def download_alipay_bill(
     try:
         response = await http.post(config.alipay_gateway, data=params)
         if response.status_code != 200:
-            raise ChannelBillDownloadError(
-                f"支付宝账单申请失败，HTTP {response.status_code}"
-            )
-        payload = response.json().get(
-            "alipay_data_dataservice_bill_downloadurl_query_response", {}
-        )
+            raise ChannelBillDownloadError(f"支付宝账单申请失败，HTTP {response.status_code}")
+        payload = response.json().get("alipay_data_dataservice_bill_downloadurl_query_response", {})
         if payload.get("code") != "10000":
             message = payload.get("sub_msg") or payload.get("msg") or "未知错误"
             raise ChannelBillDownloadError(f"支付宝账单申请失败: {message}")

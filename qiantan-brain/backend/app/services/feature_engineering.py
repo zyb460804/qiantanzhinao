@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+
 logger = logging.getLogger(__name__)
 
 # ── 默认参数 ──────────────────────────────────────────────────────────
@@ -44,6 +45,7 @@ DEFAULT_FEATURE_NAMES: list[str] = [
 @dataclass
 class FeatureSet:
     """一个时间点的特征向量。"""
+
     date_str: str
     values: dict[str, float]  # feature_name → value
     target: float | None = None  # 实际需求 (训练时有值，预测时为 None)
@@ -52,6 +54,7 @@ class FeatureSet:
 @dataclass
 class FeatureMatrix:
     """特征矩阵 — 训练或预测用。"""
+
     features: list[str]
     X: list[list[float]]
     y: list[float] | None = None
@@ -77,7 +80,9 @@ def build_features_from_history(
     if n < max(lag_days) + 1:
         logger.warning(
             "History too short (%d days) for lag=%s features. Minimum %d required.",
-            n, lag_days, max(lag_days) + 1,
+            n,
+            lag_days,
+            max(lag_days) + 1,
         )
         return FeatureMatrix(features=[], X=[], y=[], dates=[])
 
@@ -109,7 +114,7 @@ def build_features_from_history(
         features=feature_names,
         X=X,
         y=y,
-        dates=dates[max(max_lag, max_window):],
+        dates=dates[max(max_lag, max_window) :],
     )
 
 
@@ -185,6 +190,7 @@ def build_prediction_features(
 
 # ── 内部辅助 ──────────────────────────────────────────────────────────
 
+
 def _build_feature_names(
     lag_days: tuple[int, ...],
     rolling_windows: tuple[int, ...],
@@ -226,7 +232,7 @@ def _build_single_row(
     # Rolling features
     for window in rolling_windows:
         start = max(0, idx - window + 1)
-        window_data = qty_arr[start:idx + 1]
+        window_data = qty_arr[start : idx + 1]
         row[f"demand_rolling_{window}"] = float(np.mean(window_data))
         row[f"demand_std_{window}"] = float(np.std(window_data)) if len(window_data) > 1 else 0.0
 

@@ -531,9 +531,7 @@ async def get_dashboard_activities(db: AsyncSession = Depends(get_db)):
                 id=f"quota-{tenant.id}",
                 type="quota_warning",
                 title=f"API 配额已使用 {usage_percent:.1f}%",
-                description=(
-                    f"{tenant.name} 本月已使用 {int(api_calls or 0):,} / {limit:,} 次"
-                ),
+                description=(f"{tenant.name} 本月已使用 {int(api_calls or 0):,} / {limit:,} 次"),
                 priority="high" if usage_percent >= 100 else "medium",
                 tenant_id=str(tenant.id),
                 tenant_name=tenant.name,
@@ -839,9 +837,7 @@ async def list_dead_letters(
         except ValueError:
             pass
 
-    total = await db.scalar(
-        select(func.count(DeadLetterEvent.id)).where(*filters)
-    ) or 0
+    total = await db.scalar(select(func.count(DeadLetterEvent.id)).where(*filters)) or 0
 
     query = (
         select(DeadLetterEvent)
@@ -857,9 +853,7 @@ async def list_dead_letters(
     merchant_ids = list({e.merchant_id for e in events})
     merchant_names: dict = {}
     if merchant_ids:
-        m_result = await db.execute(
-            select(Merchant).where(Merchant.id.in_(merchant_ids))
-        )
+        m_result = await db.execute(select(Merchant).where(Merchant.id.in_(merchant_ids)))
         merchant_names = {m.id: m.name for m in m_result.scalars().all()}
 
     items = [
@@ -976,9 +970,7 @@ async def list_device_faults(
             tid = None
         if tid:
             # 批量查询该租户下的所有商户
-            t_result = await db.execute(
-                select(Merchant.id).where(Merchant.tenant_id == tid)
-            )
+            t_result = await db.execute(select(Merchant.id).where(Merchant.tenant_id == tid))
             merchant_ids = {row[0] for row in t_result.fetchall()}
             # 批量查询这些商户下的所有设备
             d_result = await db.execute(

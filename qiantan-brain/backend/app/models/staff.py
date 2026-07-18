@@ -17,27 +17,48 @@ from app.database import Base
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "owner": {
-        "view_profit", "change_price", "purchase_confirm", "supplier_payment",
-        "credit_sale", "order_refund", "inventory_adjust", "record_waste",
-        "daily_settle", "void_record", "export_data", "manage_staff",
-        "batch_lock", "batch_destroy",
+        "view_profit",
+        "change_price",
+        "purchase_confirm",
+        "supplier_payment",
+        "credit_sale",
+        "order_refund",
+        "inventory_adjust",
+        "record_waste",
+        "daily_settle",
+        "void_record",
+        "export_data",
+        "manage_staff",
+        "batch_lock",
+        "batch_destroy",
     },
     "manager": {
-        "view_profit", "change_price", "purchase_confirm", "supplier_payment",
-        "credit_sale", "order_refund", "inventory_adjust", "record_waste",
-        "daily_settle", "export_data",
+        "view_profit",
+        "change_price",
+        "purchase_confirm",
+        "supplier_payment",
+        "credit_sale",
+        "order_refund",
+        "inventory_adjust",
+        "record_waste",
+        "daily_settle",
+        "export_data",
     },
     "cashier": {
-        "credit_sale", "order_refund",
+        "credit_sale",
+        "order_refund",
     },
     "purchaser": {
         "purchase_confirm",
     },
     "stocker": {
-        "inventory_adjust", "record_waste",
+        "inventory_adjust",
+        "record_waste",
     },
     "market_admin": {
-        "batch_lock", "batch_destroy", "export_data",
+        "batch_lock",
+        "batch_destroy",
+        "export_data",
     },
 }
 
@@ -79,7 +100,7 @@ class SensitiveOperation(Base):
     target_type: Mapped[str] = mapped_column(sa.String(50), nullable=False)
     target_id: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     before_snapshot: Mapped[str | None] = mapped_column(sa.Text)  # JSON
-    after_snapshot: Mapped[str | None] = mapped_column(sa.Text)   # JSON
+    after_snapshot: Mapped[str | None] = mapped_column(sa.Text)  # JSON
     authorized_by: Mapped[str | None] = mapped_column(sa.String(50))
     reason: Mapped[str | None] = mapped_column(sa.String(500))
     created_at: Mapped[datetime] = mapped_column(

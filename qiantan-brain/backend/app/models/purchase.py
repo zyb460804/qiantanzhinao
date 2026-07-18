@@ -82,22 +82,22 @@ class PurchaseItem(Base):
     # 包装与称重
     package_count: Mapped[int | None] = mapped_column(sa.Integer)  # 筐/袋/件数
     gross_weight: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 毛重
-    tare_weight: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))   # 皮重
-    net_weight: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))    # 净重
+    tare_weight: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 皮重
+    net_weight: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 净重
     # 到货差异
-    arrival_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))   # 实际到货
+    arrival_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 实际到货
     shortage_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 缺斤
-    damaged_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))   # 破损
+    damaged_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 破损
     rejected_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 不合格拒收
     returned_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 退货
-    replenish_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2)) # 供应商补货
+    replenish_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 供应商补货
     # 验收结果
     accepted_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))  # 合格入库量
-    quality_ok: Mapped[bool | None] = mapped_column(sa.Boolean)              # 质量是否合格
-    acceptance_photos: Mapped[str | None] = mapped_column(sa.Text)           # 到货照片(JSON array)
+    quality_ok: Mapped[bool | None] = mapped_column(sa.Boolean)  # 质量是否合格
+    acceptance_photos: Mapped[str | None] = mapped_column(sa.Text)  # 到货照片(JSON array)
     # 凭证(合格证/检疫证, JSON array)
     certificates: Mapped[str | None] = mapped_column(sa.Text)
-    acceptance_notes: Mapped[str | None] = mapped_column(sa.Text)            # 验收备注
+    acceptance_notes: Mapped[str | None] = mapped_column(sa.Text)  # 验收备注
     # Inventory record generated on confirm (idempotency)
     inventory_record_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())

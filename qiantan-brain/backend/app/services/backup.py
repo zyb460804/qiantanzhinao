@@ -5,13 +5,13 @@ Rotates old backups based on retention configuration.
 """
 
 import logging
-import os
 import shutil
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ def _extract_sqlite_path(database_url: str) -> str | None:
     # Strip prefix: "sqlite+aiosqlite:///" or "sqlite:///"
     for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
         if database_url.startswith(prefix):
-            return database_url[len(prefix):]
+            return database_url[len(prefix) :]
     return None
 
 
@@ -45,7 +45,7 @@ async def run_database_backup() -> dict:
     backup_dir = Path(settings.backup_dir)
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
 
     if settings.db_backend == "sqlite":
         return await _backup_sqlite(backup_dir, timestamp)
@@ -133,11 +133,11 @@ async def _backup_postgres(backup_dir: Path, timestamp: str) -> dict:
 
 def _rotate_backups(base_dir: Path, prefix: str, suffix: str) -> None:
     """Delete backup files older than the configured retention period."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.backup_retention_daily)
+    cutoff = datetime.now(UTC) - timedelta(days=settings.backup_retention_daily)
     deleted = 0
 
     for f in base_dir.glob(f"{prefix}*{suffix}"):
-        mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
+        mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=UTC)
         if mtime < cutoff:
             try:
                 f.unlink()
@@ -146,4 +146,6 @@ def _rotate_backups(base_dir: Path, prefix: str, suffix: str) -> None:
                 logger.warning("Failed to delete old backup %s: %s", f, exc)
 
     if deleted > 0:
-        logger.info("Rotated %d old backup(s) older than %d days", deleted, settings.backup_retention_daily)
+        logger.info(
+            "Rotated %d old backup(s) older than %d days", deleted, settings.backup_retention_daily
+        )

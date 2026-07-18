@@ -161,9 +161,7 @@ class ChannelBillEntry(Base):
     matched_payment_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.Uuid, sa.ForeignKey("payments.id"), index=True
     )
-    match_status: Mapped[str] = mapped_column(
-        sa.String(30), nullable=False, default="unmatched"
-    )
+    match_status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="unmatched")
     raw_data: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime, server_default=sa.func.now(), nullable=False

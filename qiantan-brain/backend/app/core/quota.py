@@ -47,9 +47,7 @@ async def get_quota_limit(db: AsyncSession, tenant_id: uuid.UUID, metric: str) -
     return limits.get(metric, 0)
 
 
-async def get_current_usage(
-    db: AsyncSession, tenant_id: uuid.UUID, metric: str
-) -> int:
+async def get_current_usage(db: AsyncSession, tenant_id: uuid.UUID, metric: str) -> int:
     """获取当前月份的累计用量。"""
     now = datetime.now(UTC)
     month_prefix = now.strftime("%Y-%m")
@@ -64,9 +62,7 @@ async def get_current_usage(
     return int(result.scalar() or 0)
 
 
-async def check_quota(
-    db: AsyncSession, tenant_id: uuid.UUID, metric: str
-) -> dict[str, Any]:
+async def check_quota(db: AsyncSession, tenant_id: uuid.UUID, metric: str) -> dict[str, Any]:
     """检查租户是否超出配额。
 
     返回: {exceeded, current, limit, remaining, metric}
@@ -129,13 +125,18 @@ async def record_usage(
             if attempt < max_retries - 1:
                 logger.debug(
                     "record_usage 并发冲突，重试 %d/%d (tenant=%s metric=%s)",
-                    attempt + 1, max_retries, tenant_id, metric,
+                    attempt + 1,
+                    max_retries,
+                    tenant_id,
+                    metric,
                 )
                 await asyncio.sleep(0.1 * (attempt + 1))  # 指数退避
             else:
                 logger.error(
                     "record_usage 重试耗尽 (tenant=%s metric=%s date=%s)",
-                    tenant_id, metric, today,
+                    tenant_id,
+                    metric,
+                    today,
                 )
                 raise
 
@@ -166,18 +167,18 @@ async def get_usage_trend(
     current_date = start_date
     while current_date <= end_date:
         date_str = current_date.strftime("%Y-%m-%d")
-        trend.append({
-            "date": date_str,
-            "value": date_map.get(date_str, 0),
-        })
+        trend.append(
+            {
+                "date": date_str,
+                "value": date_map.get(date_str, 0),
+            }
+        )
         current_date += timedelta(days=1)
 
     return trend
 
 
-async def get_all_quotas(
-    db: AsyncSession, tenant_id: uuid.UUID
-) -> list[dict[str, Any]]:
+async def get_all_quotas(db: AsyncSession, tenant_id: uuid.UUID) -> list[dict[str, Any]]:
     """获取租户所有指标的配额状态。"""
     metrics = ["api_calls", "storage_mb", "merchant_count"]
     results = []
