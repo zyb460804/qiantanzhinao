@@ -13,6 +13,6 @@ pytest-asyncio==1.4.0
 
 # ── 代码质量门禁（团队技术能力提升方案）──
 # ruff: lint + 格式化（替代 flake8/isort/black 三件套，单一工具、极快）
-ruff==0.6.9
+ruff==0.15.21
 # mypy: 类型检查，配合 pyproject.toml 的 [tool.mypy]
-mypy==1.11.2
+mypy==2.2.0

@@ -1,25 +1,42 @@
 # 千摊智脑 · pre-commit 质量门禁
+#
+# 重要：git 仓库根在上级目录（含 qiantan-brain/ 子目录），所以下方 files 正则
+# 与 entry 的脚本路径都相对 git 根、需带 qiantan-brain/ 前缀，否则匹配不到
+# 任何文件（历史教训：曾因前缀缺失导致钩子"空跑通过"，从未真正检查）。
+#
+# ruff 范围限定 backend/app/，与 CI（ruff check app/、ruff format app/、
+# mypy app/）一致；migrations/ 为自动生成脚本，不做格式化。
+#
+# ruff 用 local system（环境已 pip 安装 ruff），避免每次钩子运行都需联网
+# 拉取 ruff-pre-commit 仓库——在受限网络下会卡死提交。规则集由
+# backend/pyproject.toml 统一控制。
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
-    hooks:
-      - id: ruff
-        args: [--fix]
-        files: ^backend/
-      - id: ruff-format
-        files: ^backend/
-
   - repo: local
     hooks:
+      - id: ruff-check
+        name: ruff check (--fix)
+        entry: ruff check --fix --force-exclude
+        language: system
+        types: [python]
+        files: ^qiantan-brain/backend/app/
+        pass_filenames: true
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format --force-exclude
+        language: system
+        types: [python]
+        files: ^qiantan-brain/backend/app/
+        pass_filenames: true
+
       - id: wxss-lint
         name: WXSS 兼容性扫描
-        entry: python scripts/wxss_lint.py
+        entry: python qiantan-brain/scripts/wxss_lint.py
         language: system
         files: \.wxss$
 
       - id: no-large-binary
         name: 大文件与敏感文件检查
-        entry: python scripts/check_large_files.py
+        entry: python qiantan-brain/scripts/check_large_files.py
         language: system
         pass_filenames: true
         exclude: (^|/)\.env\.example$
