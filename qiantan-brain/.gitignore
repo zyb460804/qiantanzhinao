@@ -44,3 +44,18 @@ audio/
 
 # WeChat Mini Program
 miniprogram/project.private.config.json
+
+# Local test, analysis, and tool artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.codegraph/
+.workbuddy/
+.run/
+.coverage
+coverage/
+htmlcov/
+
+# Admin web build artifacts
+backend/admin-web/dist/
+backend/admin-web/node_modules/

@@ -66,3 +66,10 @@ project.private.config.json
 .codegraph/
 .cursor/
 .workbuddy/
+# Test coverage artifacts
+.coverage
+coverage/
+htmlcov/
+
+# Local AI assistant configuration
+.claude/
