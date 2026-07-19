@@ -31,8 +31,11 @@ import api from '../api/client'
 import EmptyState, { ErrorState } from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
 import { StatSkeleton } from '../components/SkeletonCard'
+import { chartPalette } from '../theme/tokens'
 
-const COLORS = ['#167A5A', '#2563EB', '#D97706', '#7C3AED', '#0891B2', '#DC2626']
+const COLORS = chartPalette
+// 语义别名，便于面积/柱状等单系列图表引用
+const [GREEN, BLUE] = chartPalette
 
 const TODO_LABELS = {
   expiring_subscription: '订阅到期',
@@ -256,8 +259,8 @@ export default function Dashboard() {
                 <ComposedChart data={trend} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
                   <defs>
                     <linearGradient id="apiFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#2563EB" stopOpacity={0.25} />
-                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.02} />
+                      <stop offset="0%" stopColor={BLUE} stopOpacity={0.25} />
+                      <stop offset="100%" stopColor={BLUE} stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#E6EBE8" />
@@ -271,7 +274,7 @@ export default function Dashboard() {
                     type="monotone"
                     dataKey="api_calls"
                     name="API 请求"
-                    stroke="#2563EB"
+                    stroke={BLUE}
                     fill="url(#apiFill)"
                     strokeWidth={2.5}
                   />
@@ -279,7 +282,7 @@ export default function Dashboard() {
                     yAxisId="tenant"
                     dataKey="new_tenants"
                     name="新增租户"
-                    fill="#22A06B"
+                    fill={GREEN}
                     radius={[4, 4, 0, 0]}
                     maxBarSize={18}
                   />
@@ -333,13 +336,9 @@ export default function Dashboard() {
                   key={item.id}
                   onClick={() => item.target_path && navigate(item.target_path)}
                 >
-                  <Tag color={item.priority === 'high' ? 'red' : 'orange'}>
-                    {TODO_LABELS[item.type] || item.title}
-                  </Tag>
+                  <Tag color={item.priority === 'high' ? 'red' : 'orange'}>{TODO_LABELS[item.type] || item.title}</Tag>
                   <span>{item.description}</span>
-                  {item.due_at && (
-                    <Typography.Text type="secondary">{item.due_at.slice(0, 10)}</Typography.Text>
-                  )}
+                  {item.due_at && <Typography.Text type="secondary">{item.due_at.slice(0, 10)}</Typography.Text>}
                 </button>
               ))
             ) : (

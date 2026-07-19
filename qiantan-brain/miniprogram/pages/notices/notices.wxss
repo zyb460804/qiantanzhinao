@@ -12,15 +12,15 @@
 .notice-list { padding: 8rpx 24rpx 40rpx; }
 
 .notice-card {
-  margin-bottom: 16rpx; border-radius: 16rpx;
-  background: var(--paper); box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.04);
-  overflow: hidden; transition: box-shadow 0.2s;
-  border-left: 6rpx solid transparent;
+  margin-bottom: 16rpx; border-radius: var(--r-md);
+  background: var(--paper); border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm);
+  overflow: hidden; transition: box-shadow var(--dur-fast), border-color var(--dur-fast);
+  border-left: 8rpx solid transparent;
 }
-.notice-card.notice-info { border-left-color: var(--green-400); }
+.notice-card.notice-info { border-left-color: var(--green-500); }
 .notice-card.notice-warning { border-left-color: var(--corn); }
 .notice-card.notice-urgent { border-left-color: var(--tomato); background: var(--tomato-soft); }
-.notice-card.expanded { box-shadow: 0 4rpx 20rpx rgba(0,0,0,0.08); }
+.notice-card.expanded { box-shadow: var(--shadow); }
 
 .notice-head {
   display: flex; align-items: center; padding: 24rpx 28rpx; gap: 16rpx;
@@ -47,12 +47,4 @@
   font-size: 28rpx; color: var(--ink-2); line-height: 1.7; white-space: pre-wrap;
 }
 
-/* 空态 */
-.empty-card { padding: 80rpx 32rpx; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16rpx; }
-.empty-icon { font-size: 80rpx; }
-.empty-title { font-size: 34rpx; font-weight: 700; color: var(--ink); }
-.empty-text { font-size: 26rpx; max-width: 500rpx; }
-.btn-secondary-sm {
-  font-size: 24rpx; padding: 10rpx 24rpx; border-radius: 10rpx;
-  background: var(--paper-3); color: var(--ink-2); border: none; line-height: 1.4;
-}
+/* 空态 / 加载态：复用全局 .empty-state / .skeleton，不再页面内重定义 */

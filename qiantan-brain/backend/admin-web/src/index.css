@@ -52,7 +52,7 @@ select {
 
 .admin-brand:focus-visible,
 .admin-account:focus-visible {
-  outline: 2px solid #167a5a;
+  outline: 2px solid var(--qg-primary);
   outline-offset: -2px;
 }
 
@@ -65,7 +65,7 @@ select {
   justify-content: center;
   border-radius: 9px;
   color: #fff;
-  background: #167a5a;
+  background: var(--qg-primary);
   font-size: 18px;
   font-weight: 700;
 }
@@ -159,40 +159,41 @@ select {
   font-size: 20px;
 }
 
+/* 指标卡 / 监控指标配色：与品牌令牌对齐（绿/蓝/青/紫/金/番茄红） */
 .metric-card--green .metric-card__icon,
 .monitor-metric--green .monitor-metric__icon {
-  color: #16803c;
-  background: #e7f7ed;
+  color: var(--qg-primary);
+  background: #dcf0e6;
 }
 
 .metric-card--blue .metric-card__icon,
 .monitor-metric--blue .monitor-metric__icon {
-  color: #2563eb;
-  background: #e8f0ff;
+  color: var(--qg-info);
+  background: #e3edfd;
 }
 
 .metric-card--cyan .metric-card__icon,
 .monitor-metric--cyan .monitor-metric__icon {
-  color: #087f9c;
+  color: var(--qg-teal);
   background: #e2f7fb;
 }
 
 .metric-card--purple .metric-card__icon,
 .monitor-metric--purple .monitor-metric__icon {
-  color: #7c3aed;
-  background: #f1eafe;
+  color: var(--qg-grape);
+  background: #efe9f8;
 }
 
 .metric-card--orange .metric-card__icon,
 .monitor-metric--orange .monitor-metric__icon {
-  color: #d97706;
-  background: #fff4dc;
+  color: var(--qg-warning);
+  background: #fcefd8;
 }
 
 .metric-card--red .metric-card__icon,
 .monitor-metric--red .monitor-metric__icon {
-  color: #dc2626;
-  background: #fdebec;
+  color: var(--qg-error);
+  background: #fbe4df;
 }
 
 .metric-card__body {
@@ -349,7 +350,7 @@ select {
   width: 7px;
   height: 7px;
   flex: 0 0 7px;
-  background: #2563eb;
+  background: var(--qg-info);
 }
 
 .monitor-overview {
@@ -460,8 +461,8 @@ select {
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  color: #167a5a;
-  background: #e7f7ed;
+  color: var(--qg-primary);
+  background: #dcf0e6;
   font-size: 17px;
 }
 
@@ -484,8 +485,8 @@ select {
   gap: 12px;
   padding: 12px;
   border-radius: 8px;
-  color: #b45309;
-  background: #fff7e6;
+  color: #8a5a08;
+  background: #fcefd8;
 }
 
 .issue-row + .issue-row {

@@ -1,4 +1,5 @@
 import { Empty, Button } from 'antd'
+import { ExclamationCircleFilled } from '@ant-design/icons'
 
 /**
  * 统一空状态组件
@@ -25,8 +26,8 @@ export default function EmptyState({ description = '暂无数据', action, image
 export function ErrorState({ message = '加载数据失败', requestId, onRetry }) {
   return (
     <div style={{ textAlign: 'center', padding: '60px 0' }}>
-      <div style={{ color: '#DC2626', fontSize: 48, marginBottom: 16 }}>!</div>
-      <div style={{ fontSize: 16, color: '#DC2626', marginBottom: 4 }}>{message}</div>
+      <ExclamationCircleFilled style={{ color: 'var(--qg-error)', fontSize: 44, marginBottom: 16 }} />
+      <div style={{ fontSize: 16, color: 'var(--qg-error)', marginBottom: 4 }}>{message}</div>
       {requestId && <div style={{ fontSize: 12, color: '#999', marginBottom: 16 }}>Request ID: {requestId}</div>}
       {onRetry && (
         <Button type="primary" onClick={onRetry} style={{ marginTop: 12 }}>

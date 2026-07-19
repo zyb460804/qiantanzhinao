@@ -25,6 +25,7 @@ page {
   --green-700: #1e7a57;
   --green-600: #23916a;
   --green-500: #2fa06e;
+  --green-400: #4fb088;
   --green-200: #bfe6d4;
   --green-300: #6fbf8f;
   --green-100: #dcf0e6;
@@ -41,6 +42,16 @@ page {
   --corn-600: #d98f1f;
   --corn-soft: #fcefd8;
   --corn-ink: #8a5a08;
+
+  /* ---------- 角色色 · 信息蓝 / 葡萄紫（员工角色、配额区分；克制使用） ---------- */
+  --info: #3b82f6;
+  --info-600: #2f6fd6;
+  --info-soft: #e3edfd;
+  --info-ink: #1e4fb8;
+  --grape: #8b6fc4;
+  --grape-600: #75569f;
+  --grape-soft: #efe9f8;
+  --grape-ink: #5a3f8e;
 
   /* ---------- 时段皮肤（由根视图 .skin-* 覆盖；默认午市） ---------- */
   --skin-accent: var(--green-700);
@@ -364,6 +375,8 @@ button::after { border: 0; }
   --green-100: #1d3a2c;
   --tomato-soft: #3a201b;
   --corn-soft: #3a2e16;
+  --info-soft: #1c2740;
+  --grape-soft: #28223a;
   --shadow-sm: 0 4rpx 14rpx rgba(0,0,0,0.4);
   --shadow: 0 14rpx 34rpx rgba(0,0,0,0.5);
   --shadow-lg: 0 24rpx 60rpx rgba(0,0,0,0.6);
@@ -376,6 +389,7 @@ button::after { border: 0; }
  * 关键帧
  * ============================================================= */
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes breathe { 0%,100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.14); opacity: 1; } }
 /* @keyframes shimmer 已在 L249 定义，此处移除重复定义 */
 @keyframes fab-pulse { 0% { box-shadow: 0 0 0 0 rgba(226,80,62,0.45); } 70% { box-shadow: 0 0 0 26rpx rgba(226,80,62,0); } 100% { box-shadow: 0 0 0 0 rgba(226,80,62,0); } }
@@ -404,6 +418,75 @@ button::after { border: 0; }
 .reduce-motion canvas, .reduce-motion cover-view, .reduce-motion cover-image {
   animation: none !important; transition: none !important;
 }
+
+/* =============================================================
+ * 表单字段（统一 staff/supplier 等管理页的录入控件）
+ * ============================================================= */
+.form-field { display: flex; flex-direction: column; gap: 10rpx; }
+.form-label { display: flex; align-items: center; gap: 6rpx; font-size: 25rpx; font-weight: 600; color: var(--ink-2); }
+.form-label .required { color: var(--tomato); }
+.form-input, .form-picker {
+  width: 100%; min-height: 84rpx; padding: 0 20rpx;
+  background: var(--paper-2); border: 1.5rpx solid var(--line);
+  border-radius: var(--r-md); font-size: 28rpx; color: var(--ink);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.form-picker { display: flex; align-items: center; }
+.form-input:focus, .form-picker:focus { border-color: var(--green-500); }
+.form-input.has-error, .form-picker.has-error { border-color: var(--tomato); background: var(--tomato-soft); }
+.form-error { display: block; margin-top: 4rpx; font-size: 21rpx; color: var(--tomato); }
+.form-hint { display: block; font-size: 22rpx; color: var(--muted); }
+
+/* =============================================================
+ * 居中弹窗 / 对话框（统一 staff 等页的新增编辑弹层）
+ * ============================================================= */
+.dialog-mask {
+  position: fixed; inset: 0; z-index: var(--z-drawer);
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(18, 30, 24, 0.42);
+  animation: fade-in var(--dur-fast) var(--ease-out);
+}
+.dialog {
+  width: 620rpx; max-height: 82%; overflow-y: auto;
+  padding: 40rpx 36rpx; background: var(--paper);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; gap: 24rpx;
+  animation: pop-in var(--dur) var(--ease-spring);
+}
+.dialog-title { font-size: var(--fs-xl); font-weight: 700; color: var(--ink); text-align: center; }
+.dialog-actions { display: flex; gap: var(--s-2); justify-content: flex-end; margin-top: var(--s-1); }
+.dialog-actions .btn-primary, .dialog-actions .btn-secondary, .dialog-actions .btn-tomato { flex: 1; }
+
+/* =============================================================
+ * 分段选项卡（统一 tenant 等页的 Tab 切换）
+ * ============================================================= */
+.seg-tabs {
+  display: flex; margin: 0 var(--s-3); padding-bottom: 4rpx;
+  border-bottom: 1.5rpx solid var(--line);
+}
+.seg-tab {
+  position: relative; flex: 1; text-align: center;
+  padding: 24rpx 0; color: var(--muted); font-size: var(--fs-base);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.seg-tab.is-active { color: var(--green-800); font-weight: 700; }
+.seg-tab.is-active::after {
+  content: ""; position: absolute; bottom: -2rpx; left: 28%; right: 28%;
+  height: 6rpx; border-radius: var(--r-pill);
+  background: var(--green-700); transition: background var(--dur-slow) var(--ease-out);
+}
+
+/* =============================================================
+ * 角色头像（统一 staff/supplier 的圆形象征色头像）
+ * 取值全部来自令牌，避免硬编码 #5b8def / #8e6fc4。
+ * ============================================================= */
+.avatar { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; font-weight: 800; }
+.avatar--green { background: var(--green-700); }
+.avatar--corn { background: var(--corn); color: var(--corn-ink); }
+.avatar--tomato { background: var(--tomato); }
+.avatar--info { background: var(--info); }
+.avatar--grape { background: var(--grape); }
+.avatar--muted { background: var(--muted); }
 
 /* =============================================================
  * 向后兼容别名层（现有 11 页 / 4 组件仍引用旧名，勿删）

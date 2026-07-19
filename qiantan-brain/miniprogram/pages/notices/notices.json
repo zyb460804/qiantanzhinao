@@ -1,4 +1,6 @@
 {
-  "usingComponents": {},
+  "usingComponents": {
+    "mascot": "/components/mascot/mascot"
+  },
   "navigationBarTitleText": "市场通知"
 }

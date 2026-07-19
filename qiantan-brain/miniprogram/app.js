@@ -7,6 +7,38 @@
  *  - 体验版/正式版: 从 wx.getAccountInfoSync() 读取 envVersion，
  *    正式版拒绝 localhost/明文 HTTP，必须使用 HTTPS 合法域名
  */
+/** 将微信/网络层抛出的对象转换为可读错误文本，避免控制台只显示 [object Object]。 */
+function formatRuntimeError(value) {
+  var err = value && value.reason ? value.reason : value;
+  if (!err) return '未知错误';
+  if (typeof err === 'string') return err;
+  if (err.stack) return String(err.stack);
+  if (err.message) return String(err.message);
+  if (err.errMsg) return String(err.errMsg);
+
+  var details = [];
+  if (err.type) details.push('type=' + err.type);
+  if (err.statusCode !== undefined) details.push('statusCode=' + err.statusCode);
+  if (err.body) {
+    try { details.push('body=' + JSON.stringify(err.body)); } catch (e) { details.push('body=[无法序列化]'); }
+  }
+  if (err.err) details.push('cause=' + formatRuntimeError(err.err));
+  if (details.length) return details.join('; ');
+
+  var seen = [];
+  try {
+    return JSON.stringify(err, function (key, item) {
+      if (typeof item === 'object' && item !== null) {
+        if (seen.indexOf(item) >= 0) return '[循环引用]';
+        seen.push(item);
+      }
+      return item;
+    });
+  } catch (e) {
+    return Object.prototype.toString.call(err);
+  }
+}
+
 App({
   globalData: {
     apiBase: '',
@@ -76,8 +108,8 @@ App({
     }.bind(this));
   },
 
-  onError: function (err) { console.error('全局错误:', err && (err.message || err.errMsg || err.stack || JSON.stringify(err)) || err); },
-  onUnhandledRejection: function (res) { console.error('未处理的Promise拒绝:', res && (res.reason && (res.reason.message || res.reason.errMsg || res.reason.stack || JSON.stringify(res.reason))) || res); },
+  onError: function (err) { console.error('[小程序全局错误]', formatRuntimeError(err), err); },
+  onUnhandledRejection: function (res) { console.error('[未处理 Promise 拒绝]', formatRuntimeError(res), res && (res.reason || res)); },
   onPageNotFound: function () { wx.switchTab({ url: '/pages/index/index' }); },
 
   _configurationError: function () {

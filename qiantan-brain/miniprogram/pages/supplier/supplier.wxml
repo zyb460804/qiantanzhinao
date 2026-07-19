@@ -50,7 +50,7 @@
 
   <!-- Empty -->
   <view wx:elif="{{suppliers.length === 0}}" class="empty-state surface">
-    <text class="empty-icon">📋</text>
+    <mascot size="md" mood="idle"/>
     <text class="empty-title" wx:if="{{!searchKeyword}}">暂无供应商档案</text>
     <text class="empty-title" wx:else>未找到匹配的供应商</text>
     <text class="empty-desc" wx:if="{{!searchKeyword}}">添加供应商档案，记录联系方式、供货品类与质量评分</text>

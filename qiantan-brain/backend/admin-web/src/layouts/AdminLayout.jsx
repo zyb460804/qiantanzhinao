@@ -23,6 +23,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { hasPermission, PERMISSIONS } from '../permissions'
+import { antdTokens } from '../theme/tokens'
 
 const { Header, Sider, Content } = Layout
 const DARK_MODE_KEY = 'qiantan_admin_dark_mode'
@@ -62,16 +63,7 @@ const menuItems = [
   { key: '/admins', label: '管理员', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_MANAGE },
 ]
 
-const brandTokens = {
-  colorPrimary: '#167A5A',
-  colorSuccess: '#16803C',
-  colorWarning: '#D97706',
-  colorError: '#DC2626',
-  colorInfo: '#2563EB',
-  borderRadius: 8,
-  fontFamily:
-    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif",
-}
+const brandTokens = antdTokens
 
 function getSelectedMenuKey(pathname, items) {
   const matched = items.find((item) => pathname === item.key || pathname.startsWith(`${item.key}/`))
@@ -118,9 +110,7 @@ export default function AdminLayout() {
 
   if (!admin) return null
 
-  const visibleMenuItems = menuItems.filter((item) =>
-    hasPermission(item.permission, admin.role, admin.permissions),
-  )
+  const visibleMenuItems = menuItems.filter((item) => hasPermission(item.permission, admin.role, admin.permissions))
 
   const avatarMenu = {
     items: [

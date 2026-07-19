@@ -1,4 +1,6 @@
 {
-  "usingComponents": {},
+  "usingComponents": {
+    "mascot": "/components/mascot/mascot"
+  },
   "navigationBarTitleText": "员工管理"
 }

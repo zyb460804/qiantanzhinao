@@ -31,19 +31,21 @@
   </view>
 
   <!-- 加载态 / 错误态 -->
-  <view class="empty-card" wx:if="{{loading}}">
-    <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+  <view class="empty-state surface" wx:if="{{loading}}">
+    <view class="sk-line w60"></view>
+    <view class="sk-line w40"></view>
   </view>
-  <view class="empty-card" wx:elif="{{loadError}}">
-    <text class="empty-text muted">通知加载失败</text>
-    <button class="btn-secondary-sm" bindtap="loadNotices">重试</button>
+  <view class="empty-state surface" wx:elif="{{loadError}}">
+    <mascot size="md" mood="idle"/>
+    <text class="empty-title">通知加载失败</text>
+    <button class="btn-secondary btn-sm" bindtap="loadNotices">重试</button>
   </view>
 
   <!-- 空态 -->
-  <view class="empty-card" wx:elif="{{notices.length === 0}}">
-    <text class="empty-icon">📭</text>
+  <view class="empty-state surface" wx:elif="{{notices.length === 0}}">
+    <mascot size="md" mood="idle"/>
     <text class="empty-title">暂无通知</text>
-    <text class="empty-text muted">当市场发布公告或重要通知时，将在此显示</text>
+    <text class="empty-desc">当市场发布公告或重要通知时，将在此显示</text>
   </view>
 
   <!-- 通知列表 -->

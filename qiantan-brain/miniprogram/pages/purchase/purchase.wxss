@@ -234,7 +234,7 @@
 
 /* ── 手动录入弹窗 ── */
 .mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 100; display: flex; align-items: center; justify-content: center; }
-.manual-dialog { width: 600rpx; max-height: 80vh; overflow-y: auto; background: var(--paper); border-radius: 20rpx; padding: 36rpx 32rpx; display: flex; flex-direction: column; gap: 20rpx; }
+.manual-dialog { width: 600rpx; max-height: 80%; overflow-y: auto; background: var(--paper); border-radius: 20rpx; padding: 36rpx 32rpx; display: flex; flex-direction: column; gap: 20rpx; }
 .manual-title { font-size: 34rpx; font-weight: 700; color: var(--ink); text-align: center; }
 
 .manual-item-list { display: flex; flex-direction: column; gap: 8rpx; }

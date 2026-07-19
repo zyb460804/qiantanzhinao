@@ -1,5 +1,7 @@
 {
-  "usingComponents": {},
+  "usingComponents": {
+    "mascot": "/components/mascot/mascot"
+  },
   "navigationBarTitleText": "供应商管理",
   "enablePullDownRefresh": true
 }

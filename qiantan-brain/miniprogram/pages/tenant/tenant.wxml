@@ -41,20 +41,23 @@
   </view>
 
   <!-- Tab 切换 -->
-  <view class="tenant-tabs">
-    <view class="tab-item {{activeTab === 'subscription' ? 'active' : ''}}" data-tab="subscription" bindtap="switchTab">订阅套餐</view>
-    <view class="tab-item {{activeTab === 'usage' ? 'active' : ''}}" data-tab="usage" bindtap="switchTab">用量配额</view>
-    <view class="tab-item {{activeTab === 'invoices' ? 'active' : ''}}" data-tab="invoices" bindtap="switchTab">账单记录</view>
+  <view class="seg-tabs">
+    <view class="seg-tab {{activeTab === 'subscription' ? 'is-active' : ''}}" data-tab="subscription" bindtap="switchTab">订阅套餐</view>
+    <view class="seg-tab {{activeTab === 'usage' ? 'is-active' : ''}}" data-tab="usage" bindtap="switchTab">用量配额</view>
+    <view class="seg-tab {{activeTab === 'invoices' ? 'is-active' : ''}}" data-tab="invoices" bindtap="switchTab">账单记录</view>
   </view>
 
   <!-- ═══ 订阅套餐 Tab ═══ -->
   <block wx:if="{{activeTab === 'subscription'}}">
-    <view class="empty-card" wx:if="{{loading}}">
-      <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    <view class="empty-state surface" wx:if="{{loading}}">
+      <view class="sk-line w60"></view>
+      <view class="sk-line w40"></view>
     </view>
 
-    <view class="empty-card" wx:elif="{{subscriptionError}}">
-      <text class="empty-text muted">加载失败，下拉刷新重试</text>
+    <view class="empty-state surface" wx:elif="{{subscriptionError}}">
+      <mascot size="md" mood="idle"/>
+      <text class="empty-title">加载失败</text>
+      <text class="empty-desc">下拉刷新重试</text>
     </view>
 
     <view class="sub-card" wx:elif="{{subscription}}">
@@ -100,21 +103,24 @@
       </view>
     </view>
 
-    <view class="empty-card" wx:elif="{{!loading && !subscriptionError && !subscription}}">
-      <text class="empty-icon">📋</text>
+    <view class="empty-state surface" wx:elif="{{!loading && !subscriptionError && !subscription}}">
+      <mascot size="md" mood="idle"/>
       <text class="empty-title">暂无订阅信息</text>
-      <text class="empty-text muted">请联系平台管理员开通套餐</text>
+      <text class="empty-desc">请联系平台管理员开通套餐</text>
     </view>
   </block>
 
   <!-- ═══ 用量配额 Tab ═══ -->
   <block wx:if="{{activeTab === 'usage'}}">
-    <view class="empty-card" wx:if="{{loading}}">
-      <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    <view class="empty-state surface" wx:if="{{loading}}">
+      <view class="sk-line w60"></view>
+      <view class="sk-line w40"></view>
     </view>
 
-    <view class="empty-card" wx:elif="{{quotasError}}">
-      <text class="empty-text muted">加载失败，下拉刷新重试</text>
+    <view class="empty-state surface" wx:elif="{{quotasError}}">
+      <mascot size="md" mood="idle"/>
+      <text class="empty-title">加载失败</text>
+      <text class="empty-desc">下拉刷新重试</text>
     </view>
 
     <block wx:elif="{{quotas.length > 0}}">
@@ -163,18 +169,21 @@
 
   <!-- ═══ 账单记录 Tab ═══ -->
   <block wx:if="{{activeTab === 'invoices'}}">
-    <view class="empty-card" wx:if="{{loading}}">
-      <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
+    <view class="empty-state surface" wx:if="{{loading}}">
+      <view class="sk-line w60"></view>
+      <view class="sk-line w40"></view>
     </view>
 
-    <view class="empty-card" wx:elif="{{invoicesError}}">
-      <text class="empty-text muted">加载失败，下拉刷新重试</text>
+    <view class="empty-state surface" wx:elif="{{invoicesError}}">
+      <mascot size="md" mood="idle"/>
+      <text class="empty-title">加载失败</text>
+      <text class="empty-desc">下拉刷新重试</text>
     </view>
 
-    <view class="empty-card" wx:elif="{{invoices.length === 0}}">
-      <text class="empty-icon">🧾</text>
+    <view class="empty-state surface" wx:elif="{{invoices.length === 0}}">
+      <mascot size="md" mood="idle"/>
       <text class="empty-title">暂无账单</text>
-      <text class="empty-text muted">当前没有账单记录</text>
+      <text class="empty-desc">当前没有账单记录</text>
     </view>
 
     <block wx:else>

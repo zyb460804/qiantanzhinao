@@ -1,18 +1,21 @@
-/* ── 员工管理 ── */
+/* ── 员工管理 — 复用全局 .btn-* / .form-field / .dialog / .empty-state ── */
 .staff-hero { background: linear-gradient(135deg, var(--green-950), var(--green-800)); color: #fff; }
 
 .staff-toolbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 24rpx 32rpx; gap: 16rpx;
 }
+.toolbar-hint { font-size: var(--fs-sm); color: var(--ink-2); }
+.toolbar-hint.muted { color: var(--muted); }
 
-/* 卡片 */
+/* 员工卡片 — 描边立层次（遵守设计系统核心原则） */
 .staff-card {
-  margin: 0 24rpx 16rpx; border-radius: 16rpx;
-  background: var(--paper); box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.04);
-  overflow: hidden; transition: box-shadow 0.2s;
+  margin: 0 24rpx 16rpx; padding: 0;
+  background: var(--paper); border: 1.5rpx solid var(--ring); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm); overflow: hidden;
+  transition: box-shadow var(--dur-fast), border-color var(--dur-fast);
 }
-.staff-card.expanded { box-shadow: 0 4rpx 20rpx rgba(0,0,0,0.08); }
+.staff-card.expanded { box-shadow: var(--shadow); border-color: var(--green-200); }
 
 .staff-row {
   display: flex; align-items: center; padding: 24rpx 28rpx; gap: 20rpx;
@@ -20,30 +23,30 @@
 .staff-avatar {
   width: 72rpx; height: 72rpx; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 28rpx; font-weight: 700; color: #fff;
+  font-size: var(--fs-base); font-weight: 700; color: #fff;
   flex-shrink: 0;
 }
 .staff-avatar.owner { background: var(--green-700); }
 .staff-avatar.manager { background: var(--green-600); }
-.staff-avatar.cashier { background: var(--corn); }
-.staff-avatar.purchaser { background: #5b8def; }
-.staff-avatar.stocker { background: #8e6fc4; }
+.staff-avatar.cashier { background: var(--corn); color: var(--corn-ink); }
+.staff-avatar.purchaser { background: var(--info); }
+.staff-avatar.stocker { background: var(--grape); }
 .staff-avatar.market_admin { background: var(--tomato); }
 
 .staff-info { flex: 1; display: flex; flex-direction: column; gap: 6rpx; min-width: 0; }
 .staff-name { font-size: 30rpx; font-weight: 600; color: var(--ink); }
 .staff-role-tag {
-  display: inline-block; font-size: 22rpx; padding: 2rpx 14rpx; border-radius: 20rpx;
+  display: inline-block; font-size: var(--fs-xs); padding: 4rpx 16rpx; border-radius: var(--r-pill);
   color: #fff; align-self: flex-start;
 }
 .staff-role-tag.owner { background: var(--green-700); }
 .staff-role-tag.manager { background: var(--green-600); }
 .staff-role-tag.cashier { background: var(--corn); color: var(--corn-ink); }
-.staff-role-tag.purchaser { background: #5b8def; }
-.staff-role-tag.stocker { background: #8e6fc4; }
+.staff-role-tag.purchaser { background: var(--info); }
+.staff-role-tag.stocker { background: var(--grape); }
 .staff-role-tag.market_admin { background: var(--tomato); }
 
-.staff-arrow { font-size: 28rpx; color: var(--muted); flex-shrink: 0; }
+.staff-arrow { font-size: var(--fs-base); color: var(--muted); flex-shrink: 0; }
 
 /* 展开区 */
 .staff-detail {
@@ -51,69 +54,17 @@
   display: flex; flex-direction: column; gap: 16rpx;
 }
 .detail-row { display: flex; gap: 16rpx; align-items: center; }
-.detail-label { font-size: 24rpx; color: var(--muted); }
-.detail-value { font-size: 28rpx; color: var(--ink); }
+.detail-label { font-size: var(--fs-sm); color: var(--muted); }
+.detail-value { font-size: var(--fs-base); color: var(--ink); }
 .perm-head { margin-top: 4rpx; }
 
 .perm-tags { display: flex; flex-wrap: wrap; gap: 10rpx; }
 .perm-tag {
-  font-size: 22rpx; padding: 4rpx 16rpx; border-radius: 16rpx;
+  font-size: var(--fs-xs); padding: 6rpx 16rpx; border-radius: var(--r-sm);
   background: var(--green-50); color: var(--green-800);
 }
 .perm-tag.danger { background: var(--tomato-soft); color: var(--tomato-ink); }
 
 .detail-actions { display: flex; gap: 16rpx; margin-top: 8rpx; }
 
-/* 弹窗 */
-.mask {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.4); z-index: 100;
-  display: flex; align-items: center; justify-content: center;
-}
-.form-dialog {
-  width: 600rpx; max-height: 80vh; overflow-y: auto;
-  background: var(--paper); border-radius: 20rpx;
-  padding: 40rpx 36rpx; display: flex; flex-direction: column; gap: 24rpx;
-}
-.form-title { font-size: 34rpx; font-weight: 700; color: var(--ink); text-align: center; }
-
-.form-row { display: flex; flex-direction: column; gap: 8rpx; }
-.form-label { font-size: 26rpx; color: var(--ink-2); }
-.form-input {
-  height: 72rpx; border: 2rpx solid var(--line); border-radius: 12rpx;
-  padding: 0 20rpx; font-size: 28rpx; color: var(--ink); background: var(--paper-2);
-}
-.form-picker {
-  height: 72rpx; border: 2rpx solid var(--line); border-radius: 12rpx;
-  padding: 0 20rpx; font-size: 28rpx; color: var(--ink);
-  display: flex; align-items: center; background: var(--paper-2);
-}
-
-.form-actions { display: flex; gap: 16rpx; justify-content: flex-end; margin-top: 8rpx; }
-
-/* 按钮 */
-.btn-primary-sm {
-  font-size: 26rpx; padding: 12rpx 28rpx; border-radius: 12rpx;
-  background: var(--green-700); color: #fff; border: none; line-height: 1.4;
-}
-.btn-secondary-sm {
-  font-size: 24rpx; padding: 10rpx 24rpx; border-radius: 10rpx;
-  background: var(--paper-3); color: var(--ink-2); border: none; line-height: 1.4;
-}
-.btn-danger-sm {
-  font-size: 24rpx; padding: 10rpx 24rpx; border-radius: 10rpx;
-  background: var(--tomato-soft); color: var(--tomato); border: none; line-height: 1.4;
-}
-.btn-primary {
-  font-size: 28rpx; padding: 16rpx 40rpx; border-radius: 12rpx;
-  background: var(--green-700); color: #fff; border: none; line-height: 1.4;
-}
-.btn-secondary {
-  font-size: 28rpx; padding: 16rpx 40rpx; border-radius: 12rpx;
-  background: var(--paper-3); color: var(--ink-2); border: none; line-height: 1.4;
-}
-.btn-primary[disabled], .btn-secondary[disabled] { opacity: 0.5; }
-
-.empty-card { padding: 60rpx 32rpx; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16rpx; }
-.empty-text { font-size: 28rpx; }
-.toolbar-hint { font-size: 26rpx; color: var(--ink-2); }
+/* 弹窗 / 表单 / 按钮 / 空态：统一复用全局 .dialog / .form-field / .btn-* / .empty-state */

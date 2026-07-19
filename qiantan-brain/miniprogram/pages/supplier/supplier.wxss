@@ -1,7 +1,7 @@
 /* 供应商管理 — 档案·评分·关联商品·黑名单 */
 
 .supplier-page { padding-bottom: 240rpx; }
-.supplier-hero { background: linear-gradient(135deg, #1a3a4a, #1a5c3a); }
+.supplier-hero { background: linear-gradient(135deg, var(--green-950), var(--green-800)); }
 
 /* ── 统计条 ── */
 .supplier-stats {
