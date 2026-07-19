@@ -123,7 +123,7 @@
           </view>
           <text class="tool-arrow">›</text>
         </view>
-        <view class="tool-btn" bindtap="openSupplierPanel">
+        <view class="tool-btn" bindtap="goSupplier">
           <view class="tool-icon-wrap supplier"><text class="tool-btn-icon">供</text></view>
           <view class="tool-copy">
             <text class="tool-label">供应商管理</text>

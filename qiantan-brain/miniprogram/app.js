@@ -49,6 +49,7 @@ App({
     merchantName: '',
     networkOnline: true,
     apiHealthy: null,
+    servicePhone: '',   // 客服电话，由后端在登录/配置接口下发；空表示未配置
     skin: 'noon',
     skinManual: null,
     theme: 'light',

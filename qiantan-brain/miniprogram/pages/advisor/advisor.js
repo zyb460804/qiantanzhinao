@@ -21,16 +21,6 @@ Page({
     aiActions: [],
     aiActionsLoading: false,
     aiHistory: [],
-
-    // 沙盘模拟
-    showSim: false,
-    simProducts: [],
-    simProductIndex: 0,
-    simPurchaseQty: 50,
-    simUnitCost: 0.5,
-    simUnitPrice: 2.0,
-    simResult: null,
-    simLoading: false,
   },
 
   onShow: function () {
@@ -374,30 +364,8 @@ Page({
       }).catch(function () {});
   },
 
-  // ── 沙盘模拟 ───────────────────────────────
-  toggleSim: function () {
-    if (!this.data.showSim) {
-      var recs = this.data.recommendations;
-      if (recs.length > 0) this.setData({ simProducts: recs.map(function (r) { return r.product_name; }), simProductIndex: 0 });
-    }
-    this.setData({ showSim: !this.data.showSim, simResult: null });
-  },
-  onSimField: function (e) {
-    var field = e.detail.field;
-    var val = e.detail.value;
-    var key = 'sim' + field.charAt(0).toUpperCase() + field.slice(1);
-    var patch = {};
-    patch[key] = val;
-    this.setData(patch);
-  },
-  onSimProduct: function (e) { this.setData({ simProductIndex: e.detail.value }); },
-  runSimulation: function () {
-    var self = this;
-    var rec = this.data.recommendations[this.data.simProductIndex];
-    var pid = rec ? rec.product_id : 1;
-    this.setData({ simLoading: true });
-    app.request({ url: '/simulate/what-if', method: 'POST', data: { product_id: pid, scenario: { purchase_qty: this.data.simPurchaseQty, unit_cost: this.data.simUnitCost, unit_price: this.data.simUnitPrice } } })
-      .then(function (res) { self.setData({ simResult: res, simLoading: false }); })
-      .catch(function () { self.setData({ simLoading: false }); wx.showToast({ title: '模拟失败', icon: 'none' }); });
+  // ── 跳转决策沙盘（试算统一在 sandbox 页） ───────────
+  goSandbox: function () {
+    wx.navigateTo({ url: '/pages/sandbox/sandbox' });
   },
 });

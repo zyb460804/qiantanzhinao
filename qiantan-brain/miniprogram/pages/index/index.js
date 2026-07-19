@@ -293,4 +293,5 @@ Page({
   navigateToAdvisor: function () { wx.switchTab({ url: '/pages/advisor/advisor' }); },
   navigateToDashboard: function () { wx.navigateTo({ url: '/pages/dashboard/dashboard' }); },
   navigateToPos: function () { wx.navigateTo({ url: '/pages/pos/pos' }); },
+  navigateToSandbox: function () { wx.navigateTo({ url: '/pages/sandbox/sandbox' }); },
 });

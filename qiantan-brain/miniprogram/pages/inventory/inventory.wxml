@@ -52,13 +52,13 @@
       <view class="insight-action" bindtap="navigateToAdvisor">查看建议</view>
     </view>
 
-    <!-- 临期提醒 -->
+    <!-- 临期提醒：展示在库存页，处理动作（改价/清货）跳到经营管理页 -->
     <view class="block" wx:if="{{expiryAlerts.length > 0}}">
       <view class="section-head">
         <view><text class="section-title">临期提醒</text><text class="tag tag-red">{{expiringCount}}</text></view>
-        <text class="section-caption">按紧急程度排序</text>
+        <text class="section-link" bindtap="navigateToClearance">去清货 ›</text>
       </view>
-      <view class="expiry-list">
+      <view class="expiry-list" bindtap="navigateToClearance">
         <view wx:for="{{expiryAlerts}}" wx:key="batch_id" class="expiry-card {{item.tone}}">
           <view class="expiry-badge {{item.tone}}">{{item.status_text}}</view>
           <view class="expiry-copy">
@@ -72,6 +72,25 @@
               <text wx:if="{{item.discount}}" class="meta-disc">建议优惠 {{item.discount}}%</text>
             </view>
           </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 智能引导：把库存异常接到对应动作，避免用户在只读总览里没有下一步 -->
+    <view class="block" wx:if="{{attentionCount > 0 || emptyCount > 0}}">
+      <view class="section-head"><text class="section-title">建议处理</text><text class="section-caption">基于当前库存状态</text></view>
+      <view class="quick-action-row">
+        <view class="quick-action-card" wx:if="{{emptyCount > 0}}" bindtap="navigateToPurchase">
+          <view class="qa-glyph warn">补</view>
+          <view class="qa-copy"><text class="qa-title">{{emptyCount}} 项售罄</text><text class="qa-desc">去采购补货 ›</text></view>
+        </view>
+        <view class="quick-action-card" wx:if="{{attentionCount > 0}}" bindtap="navigateToPurchase">
+          <view class="qa-glyph warn">补</view>
+          <view class="qa-copy"><text class="qa-title">{{attentionCount}} 项余量较少</text><text class="qa-desc">安排补货 ›</text></view>
+        </view>
+        <view class="quick-action-card" wx:if="{{expiringCount > 0}}" bindtap="navigateToClearance">
+          <view class="qa-glyph danger">清</view>
+          <view class="qa-copy"><text class="qa-title">{{expiringCount}} 项临期</text><text class="qa-desc">降价清货 ›</text></view>
         </view>
       </view>
     </view>
@@ -160,6 +179,10 @@
               </view>
             </view>
             <view class="stock-caption stock-caption-simple"><text>{{item.status_hint}}</text></view>
+            <view class="card-action-row" wx:if="{{item.status !== 'healthy'}}">
+              <text class="card-action-btn" data-name="{{item.display_name}}" catchtap="onRestockTap">补货</text>
+              <text class="card-action-btn warn" wx:if="{{item.status === 'empty'}}" data-name="{{item.display_name}}" catchtap="onRestockTap">立即补货</text>
+            </view>
           </view>
         </view>
       </view>

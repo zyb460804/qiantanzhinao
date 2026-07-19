@@ -147,3 +147,12 @@
 .data-note { display:block; margin:14rpx 6rpx 0; color:var(--muted); font-size:20rpx; line-height:1.5; }
 .tool-row { display:grid; grid-template-columns:1fr 1fr; gap:14rpx; }
 .tool-chip { display:flex; align-items:center; gap:12rpx; padding:22rpx; color:var(--ink-2); background:var(--paper); border:1rpx solid var(--line); border-radius:20rpx; font-size:24rpx; font-weight:650; }
+
+/* 今日建议单卡（v3.1：从分析工具上移，突出高频动作） */
+.today-advisor { display:flex; align-items:center; gap:24rpx; padding:28rpx; background:linear-gradient(135deg, rgba(243,168,59,.12), rgba(23,92,69,.06)); border:1rpx solid rgba(243,168,59,.3); border-radius:22rpx; }
+.today-advisor:active { opacity:.85; }
+.ta-glyph { width:80rpx; height:80rpx; flex:0 0 80rpx; border-radius:20rpx; display:flex; align-items:center; justify-content:center; background:rgba(243,168,59,.18); }
+.ta-copy { flex:1; display:flex; flex-direction:column; gap:6rpx; }
+.ta-title { font-size:28rpx; font-weight:700; color:var(--ink-1, #1f2a24); }
+.ta-desc { font-size:22rpx; color:var(--muted); }
+.ta-arrow { font-size:36rpx; color:var(--corn-deep, #9a6b00); }

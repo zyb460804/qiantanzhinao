@@ -500,7 +500,7 @@ Page({
   // 全局：供应商管理（已迁移至 pages/supplier/ 专用页面）
   // ═══════════════════════════════════════════════════════════
 
-  openSupplierPanel: function () {
+  goSupplier: function () {
     wx.navigateTo({ url: '/pages/supplier/supplier' });
   },
 

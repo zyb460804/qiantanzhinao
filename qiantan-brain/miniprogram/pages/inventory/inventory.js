@@ -123,4 +123,13 @@ Page({
   resetFilters: function () { this.setData({ searchKeyword: '', filterMode: 'all', sortMode: 'low' }, this._applyView); },
   navigateToVoice: function () { wx.switchTab({ url: '/pages/voice/voice' }); },
   navigateToAdvisor: function () { wx.switchTab({ url: '/pages/advisor/advisor' }); },
+  // 临期商品统一到经营管理页处理（改价/清货），避免两处重复展示与操作
+  navigateToClearance: function () { wx.navigateTo({ url: '/pages/ops/ops?tab=clearance' }); },
+  // 余量较少商品快捷补货
+  navigateToPurchase: function () { wx.navigateTo({ url: '/pages/purchase/purchase' }); },
+  // 商品卡上的"补货"动作：直接跳采购页
+  onRestockTap: function (e) {
+    var name = e.currentTarget.dataset.name || '';
+    wx.navigateTo({ url: '/pages/purchase/purchase' + (name ? '?focus=' + encodeURIComponent(name) : '') });
+  },
 });

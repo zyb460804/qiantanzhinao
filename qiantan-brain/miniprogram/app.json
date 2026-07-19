@@ -13,7 +13,6 @@
     "pages/stocktake/stocktake",
     "pages/pos/pos",
     "pages/calendar/calendar",
-    "pages/styleguide/styleguide",
     "pages/catalog/catalog",
     "pages/ops/ops",
     "pages/devices/devices",

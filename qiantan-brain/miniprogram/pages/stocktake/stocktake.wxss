@@ -48,6 +48,7 @@
 /* 快捷调整按钮 */
 .quick-btns { display: flex; gap: 10rpx; margin-top: 16rpx; }
 .quick-btn { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 66rpx; color: var(--green-800); background: var(--green-50); border-radius: 14rpx; font-size: 25rpx; font-weight: 720; }
+.quick-btn.gain { color: var(--corn-deep, #9a6b00); background: rgba(243,168,59,.16); }
 .quick-btn:active { opacity: .78; transform: scale(.97); }
 
 /* 差异显示区域 */

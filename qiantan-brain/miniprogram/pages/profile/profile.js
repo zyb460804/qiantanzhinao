@@ -21,25 +21,45 @@ Page({
     // ③ 设备与同步
     devices: [], offlineQueueCount: 0, deviceError: false,
 
-    // ④ 经营工具 (9个, 去重3个被提权 + 语音记账)
-    tools: [
-      { page: 'pos', name: '收银开单', glyph: '收', tone: 'tomato' },
-      { page: 'dashboard', name: '数字孪生', glyph: '镜', tone: 'green' },
-      { page: 'purchase', name: '采购管理', glyph: '购', tone: 'corn' },
-      { page: 'report', name: '经营报告', glyph: '报', tone: 'blue' },
-      { page: 'sandbox', name: '决策沙盘', glyph: '算', tone: 'corn' },
-      { page: 'stocktake', name: '库存盘点', glyph: '盘', tone: 'corn' },
-      { page: 'calendar', name: '经营日历', glyph: '历', tone: 'blue' },
-      { page: 'vision', name: '拍照识货', glyph: '识', tone: 'blue' },
-      { page: 'catalog', name: '商品目录', glyph: '录', tone: 'green' },
-      { page: 'ops', name: '经营管理', glyph: '管', tone: 'corn' },
-      { page: 'devices', name: '设备管理', glyph: '设', tone: 'blue' },
-      { page: 'finance', name: '财务管理', glyph: '财', tone: 'green' },
-      { page: 'supplier', name: '供应商档案', glyph: '供', tone: 'corn' },
-      { page: 'staff', name: '员工管理', glyph: '员', tone: 'corn' },
-      { page: 'notices', name: '市场通知', glyph: '告', tone: 'tomato' },
-      { page: 'tenant', name: '租户中心', glyph: '租', tone: 'green' },
-      { page: 'trace', name: '安全追溯', glyph: '溯', tone: 'green' },
+    // ④ 经营工具 — 按职能分组（共 17 项），避免一屏宫格过于拥挤
+    toolGroups: [
+      {
+        title: '经营分析', caption: '看数据、做决策',
+        items: [
+          { page: 'dashboard', name: '经营镜像', glyph: '镜', tone: 'green' },
+          { page: 'report', name: '经营报告', glyph: '报', tone: 'blue' },
+          { page: 'sandbox', name: '决策沙盘', glyph: '算', tone: 'corn' },
+          { page: 'calendar', name: '经营日历', glyph: '历', tone: 'blue' },
+        ],
+      },
+      {
+        title: '进货与货', caption: '采购、库存、商品',
+        items: [
+          { page: 'purchase', name: '采购管理', glyph: '购', tone: 'corn' },
+          { page: 'stocktake', name: '库存盘点', glyph: '盘', tone: 'corn' },
+          { page: 'catalog', name: '商品目录', glyph: '录', tone: 'green' },
+          { page: 'supplier', name: '供应商档案', glyph: '供', tone: 'corn' },
+          { page: 'vision', name: '拍照识货', glyph: '识', tone: 'blue' },
+        ],
+      },
+      {
+        title: '钱与安全', caption: '财务、经营、追溯',
+        items: [
+          { page: 'pos', name: '收银开单', glyph: '收', tone: 'tomato' },
+          { page: 'finance', name: '财务管理', glyph: '财', tone: 'green' },
+          { page: 'ops', name: '经营管理', glyph: '管', tone: 'corn' },
+          { page: 'trace', name: '安全追溯', glyph: '溯', tone: 'green' },
+        ],
+      },
+      {
+        title: '团队与设置', caption: '员工、设备、订阅',
+        items: [
+          { page: 'staff', name: '员工管理', glyph: '员', tone: 'corn' },
+          { page: 'devices', name: '设备管理', glyph: '设', tone: 'blue' },
+          { page: 'tenant', name: '租户中心', glyph: '租', tone: 'green' },
+          { page: 'notices', name: '市场通知', glyph: '告', tone: 'tomato' },
+        ],
+      },
     ],
 
     // ⑤ 摊位设置
@@ -273,6 +293,11 @@ Page({
   goDeep: function (e) {
     var page = e.currentTarget.dataset.page;
     if (!page) return;
+    // tabBar 页必须用 switchTab，否则 navigateTo 会失败
+    if (page === 'voice' || page === 'inventory' || page === 'advisor') {
+      wx.switchTab({ url: '/pages/' + page + '/' + page });
+      return;
+    }
     wx.navigateTo({ url: '/pages/' + page + '/' + page });
   },
 
@@ -299,7 +324,27 @@ Page({
   showGuide: function () { wx.navigateTo({ url: '/pages/doc/doc?type=guide' }); },
   showFAQ: function () { wx.navigateTo({ url: '/pages/doc/doc?type=faq' }); },
   contactService: function () {
-    wx.showModal({ title: '联系客服', content: '请拨打客服电话或在微信群反馈', confirmText: '知道了', showCancel: false });
+    var phone = (app.globalData && app.globalData.servicePhone) || '';
+    if (!phone) {
+      wx.showModal({
+        title: '联系客服',
+        content: '客服电话尚未配置，请在千摊智脑微信群反馈，或稍后再试。',
+        confirmText: '知道了', showCancel: false,
+      });
+      return;
+    }
+    wx.showModal({
+      title: '联系客服',
+      content: '客服电话：' + phone + '\n工作时间 9:00-21:00',
+      confirmText: '拨打',
+      cancelText: '取消',
+      success: function (r) {
+        if (!r.confirm) return;
+        var digits = phone.replace(/[^\d]/g, '');
+        if (!digits) return;
+        wx.makePhoneCall({ phoneNumber: digits }).catch(function () {});
+      },
+    });
   },
   showPrivacy: function () { wx.navigateTo({ url: '/pages/doc/doc?type=privacy' }); },
   showTerms: function () { wx.navigateTo({ url: '/pages/doc/doc?type=terms' }); },

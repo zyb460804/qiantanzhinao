@@ -127,3 +127,18 @@
 
 /* v2.3：库存只在同一商品自身单位内解释，不展示混合单位总量和排行榜 */
 .stock-caption-simple { justify-content:flex-start; margin-top:14rpx; padding-top:12rpx; border-top:1rpx solid var(--line); line-height:1.45; }
+
+/* 商品卡快捷动作 + 智能引导（v3.1） */
+.card-action-row { display:flex; gap:14rpx; margin-top:14rpx; }
+.card-action-btn { font-size:22rpx; padding:8rpx 20rpx; border-radius:99rpx; color:var(--green-800); background:var(--green-50, rgba(23,92,69,.08)); }
+.card-action-btn.warn { color:var(--corn-deep, #9a6b00); background:rgba(243,168,59,.14); }
+
+.quick-action-row { display:flex; flex-direction:column; gap:16rpx; }
+.quick-action-card { display:flex; align-items:center; gap:20rpx; padding:24rpx 28rpx; background:var(--surface); border:1rpx solid var(--line); border-radius:var(--r-lg, 20rpx); }
+.quick-action-card:active { opacity:.82; }
+.qa-glyph { width:72rpx; height:72rpx; border-radius:18rpx; display:flex; align-items:center; justify-content:center; font-size:30rpx; font-weight:700; color:#fff; background:var(--green-600); }
+.qa-glyph.warn { background:var(--corn); }
+.qa-glyph.danger { background:var(--red); }
+.qa-copy { display:flex; flex-direction:column; gap:4rpx; }
+.qa-title { font-size:28rpx; font-weight:600; color:var(--text, #1f2a24); }
+.qa-desc { font-size:22rpx; color:var(--green-700); }

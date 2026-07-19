@@ -17,6 +17,14 @@ Page({
     exportStart: '', exportEnd: '', exporting: false,
   },
 
+  onLoad: function (options) {
+    // 允许外部页面带 ?tab=clearance 直接跳到指定模块
+    var valid = { waste: 1, clearance: 1, customers: 1, export: 1 };
+    if (options && options.tab && valid[options.tab]) {
+      this.setData({ tab: options.tab });
+    }
+  },
+
   onShow: function () {
     this.setData({ skin: 'skin-' + app.resolveSkin() });
     this.loadAll();

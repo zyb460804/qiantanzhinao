@@ -1,4 +1,12 @@
 .fin-page { padding-bottom:100rpx; }
+
+/* 数据导出入口（v3.1：财务页为统一入口，执行在经营管理页） */
+.export-portal { margin-top: 16rpx; }
+.export-portal-card { display:flex; align-items:center; gap:24rpx; padding:32rpx 28rpx; background:var(--paper); border:1rpx solid var(--line); border-radius:var(--radius-lg, 20rpx); box-shadow:var(--shadow-sm); }
+.export-portal-glyph { width:88rpx; height:88rpx; flex:0 0 88rpx; border-radius:22rpx; display:flex; align-items:center; justify-content:center; font-size:40rpx; font-weight:800; color:var(--green-800); background:var(--green-50, rgba(23,92,69,.08)); }
+.export-portal-copy { flex:1; display:flex; flex-direction:column; gap:6rpx; }
+.export-portal-title { font-size:28rpx; font-weight:700; color:var(--ink-1, #1f2a24); }
+.export-portal-desc { font-size:22rpx; color:var(--muted); line-height:1.5; }
 .tab-row { display:flex; gap:12rpx; margin:16rpx 0; overflow-x:auto; }
 .tab-chip { padding:14rpx 24rpx; color:var(--muted); background:var(--paper); border:2rpx solid var(--line); border-radius:99rpx; font-size:24rpx; font-weight:700; white-space:nowrap; flex:0 0 auto; }
 .tab-chip.active { color:#fff; background:var(--green-700); border-color:var(--green-700); }

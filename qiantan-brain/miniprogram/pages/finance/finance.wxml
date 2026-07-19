@@ -11,8 +11,23 @@
     </view>
   </view>
   <view class="tab-row fin-tabs">
-    <view wx:for="{{[{k:'expenses',l:'费用'},{k:'report',l:'月报'},{k:'invoices',l:'发票'},{k:'recon',l:'对账'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
+    <view wx:for="{{[{k:'expenses',l:'费用'},{k:'report',l:'月报'},{k:'invoices',l:'发票'},{k:'recon',l:'对账'},{k:'export',l:'导出'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
   </view>
+
+  <!-- 数据导出：财务页为统一入口，跳到经营管理页执行（避免两处重复实现） -->
+  <block wx:if="{{tab==='export'}}">
+    <view class="section-head"><text class="section-title">数据导出</text></view>
+    <view class="export-portal">
+      <view class="export-portal-card">
+        <view class="export-portal-glyph">⬇</view>
+        <view class="export-portal-copy">
+          <text class="export-portal-title">导出销售 / 库存 / 报损 / 往来账</text>
+          <text class="export-portal-desc">按日期范围生成导出文件，统一在经营管理页处理</text>
+        </view>
+        <view class="btn-primary btn-sm" bindtap="goExport">去导出 ›</view>
+      </view>
+    </view>
+  </block>
 
   <!-- 费用 -->
   <block wx:if="{{tab==='expenses'}}">

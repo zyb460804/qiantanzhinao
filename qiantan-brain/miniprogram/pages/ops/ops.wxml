@@ -117,7 +117,7 @@
 
   <!-- ====== 导出 ====== -->
   <block wx:if="{{tab==='export'}}">
-    <view class="section-head"><text class="section-title">数据导出</text></view>
+    <view class="section-head"><text class="section-title">数据导出</text><text class="section-caption">费用/账单导出请前往财务管理</text></view>
     <view class="export-card">
       <text class="form-label">日期范围</text>
       <view class="date-row"><input class="form-input flex-1" type="text" placeholder="开始 YYYY-MM-DD" value="{{exportStart}}" data-field="exportStart" bindinput="onExportDate"/><text class="date-sep">—</text><input class="form-input flex-1" type="text" placeholder="结束 YYYY-MM-DD" value="{{exportEnd}}" data-field="exportEnd" bindinput="onExportDate"/></view>

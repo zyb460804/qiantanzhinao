@@ -1,7 +1,6 @@
 {
   "navigationBarTitleText": "AI参谋",
   "usingComponents": {
-    "sim-input": "/components/sim-input/sim-input",
     "icon": "/components/icon/icon",
     "mascot": "/components/mascot/mascot"
   },

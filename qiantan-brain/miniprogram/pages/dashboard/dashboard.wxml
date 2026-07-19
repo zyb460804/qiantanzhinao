@@ -54,19 +54,6 @@
     </view>
   </view>
 
-  <view wx:if="{{activeTab === 'business'}}">
-    <view class="segmented">
-      <view class="seg {{bizRange === '7d' ? 'active' : ''}}" data-range="7d" bindtap="onBizRangeChange">近7日</view>
-      <view class="seg {{bizRange === '30d' ? 'active' : ''}}" data-range="30d" bindtap="onBizRangeChange">近30日</view>
-    </view>
-    <view class="section-head"><text class="section-title">{{bizRange === '30d' ? '近30日经营走势' : '近7日经营走势'}}</text><text class="section-caption">收入 · 毛利 · 客单价</text></view>
-    <view class="chart-card"><view class="chart-legend"><text class="revenue">收入</text><text class="profit">毛利</text><text class="aov">客单价</text></view><canvas type="2d" id="chartCanvas" class="business-chart"></canvas></view>
-    <view class="section-head"><text class="section-title">每日明细</text></view>
-    <view class="day-list" wx:if="{{bizSales && bizSales.length}}">
-      <view wx:for="{{bizSales}}" wx:key="date" wx:for-item="day" class="day-row"><text class="day-date">{{day.date}}</text><view class="day-money"><text>收 ¥{{day.revenue}}</text><text>支 ¥{{day.cost}}</text><text class="{{day.profit >= 0 ? 'green' : 'red'}}">利 ¥{{day.profit}}</text><text class="aov">客 ¥{{day.customer_price}}</text></view></view>
-    </view>
-  </view>
-
   <view wx:if="{{activeTab === 'risk'}}">
     <view class="section-head"><text class="section-title">风险雷达</text><text class="section-caption">越靠外风险越高</text></view>
     <view class="chart-card"><risk-gauge risks="{{riskGaugeData}}" /></view>

@@ -23,8 +23,8 @@
 
     <view class="demo-toggle">
       <view class="demo-toggle-info">
-        <text class="demo-toggle-label">演示模式</text>
-        <text class="demo-toggle-desc">真实识别未部署，使用模拟数据</text>
+        <text class="demo-toggle-label">识货公测中</text>
+        <text class="demo-toggle-desc">模型持续训练，结果仅供参考；识别不准可手动选择</text>
       </view>
       <switch class="demo-switch" checked="{{demoMode}}" bindchange="toggleDemoMode" color="#175c45"/>
     </view>

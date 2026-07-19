@@ -73,12 +73,13 @@
             </view>
           </view>
 
-          <!-- 快捷调整按钮 -->
+          <!-- 快捷调整按钮：负向为主（盘亏常见），保留 +1/+5 处理盘盈 -->
           <view class="quick-btns">
-            <view class="quick-btn" data-index="{{index}}" data-offset="0" bindtap="quickAdjust">+0</view>
-            <view class="quick-btn" data-index="{{index}}" data-offset="-1" bindtap="quickAdjust">-1</view>
-            <view class="quick-btn" data-index="{{index}}" data-offset="-5" bindtap="quickAdjust">-5</view>
             <view class="quick-btn" data-index="{{index}}" data-offset="-10" bindtap="quickAdjust">-10</view>
+            <view class="quick-btn" data-index="{{index}}" data-offset="-5" bindtap="quickAdjust">-5</view>
+            <view class="quick-btn" data-index="{{index}}" data-offset="-1" bindtap="quickAdjust">-1</view>
+            <view class="quick-btn gain" data-index="{{index}}" data-offset="1" bindtap="quickAdjust">+1</view>
+            <view class="quick-btn gain" data-index="{{index}}" data-offset="5" bindtap="quickAdjust">+5</view>
           </view>
 
           <!-- 差异显示区域 -->

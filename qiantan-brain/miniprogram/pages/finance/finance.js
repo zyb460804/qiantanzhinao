@@ -37,6 +37,11 @@ Page({
     this.loadTab();
   },
 
+  // 数据导出入口：跳到经营管理页执行（避免重复实现）
+  goExport: function () {
+    wx.navigateTo({ url: '/pages/ops/ops?tab=export' });
+  },
+
   // 按当前 Tab 加载数据(原 loadAll,改名避免误解为"加载全部")
   loadTab: function () {
     if (this.data.tab === 'expenses') this.loadExpenses();

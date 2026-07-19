@@ -44,12 +44,20 @@
       </view>
     </view>
 
-    <view class="section-head"><text class="section-title">常用工作</text><text class="section-caption">按一天的经营顺序排列</text></view>
+    <view class="section-head"><text class="section-title">常用工作</text><text class="section-caption">动作类入口 · 按一天的经营顺序</text></view>
     <view class="action-grid work-grid">
       <button class="action-card action-primary" bindtap="navigateToVoice"><icon name="mic" size="46" color="#fff"/><text class="action-title">记经营流水</text><text class="action-desc">进货、销售、损耗</text></button>
       <button class="action-card" bindtap="navigateToPos"><icon name="cart" size="46" color="var(--green-800)"/><text class="action-title">收银开单</text><text class="action-desc">商品、支付与日结</text></button>
       <button class="action-card" bindtap="navigateToPurchase"><icon name="box" size="46" color="var(--corn)"/><text class="action-title">采购清单</text><text class="action-desc">建议、编辑、确认入库</text></button>
       <button class="action-card" bindtap="navigateToStocktake"><icon name="scan" size="46" color="var(--blue)"/><text class="action-title">库存盘点</text><text class="action-desc">核对账面与实际数量</text></button>
+    </view>
+
+    <!-- 今日建议单列：高频动作，从“分析工具”上移避免被淹没 -->
+    <view class="section-head"><text class="section-title">今日建议</text><text class="section-link" bindtap="navigateToAdvisor">全部 ›</text></view>
+    <view class="today-advisor" bindtap="navigateToAdvisor">
+      <view class="ta-glyph"><icon name="bulb" size="40" color="var(--corn)"/></view>
+      <view class="ta-copy"><text class="ta-title">小智今天怎么卖更稳？</text><text class="ta-desc">基于天气、库存与经营偏好的判断</text></view>
+      <text class="ta-arrow">›</text>
     </view>
 
     <view class="section-head"><text class="section-title">库存状态</text><text class="section-link" bindtap="navigateToInventory">查看全部 ›</text></view>
@@ -64,12 +72,12 @@
     </view>
     <text class="data-note">不同商品单位不可直接相加，因此首页按品类和风险展示，不再汇总成“总斤数”。</text>
 
-    <view class="section-head"><text class="section-title">分析与工具</text><text class="section-caption">低频功能集中在这里</text></view>
+    <view class="section-head"><text class="section-title">分析与工具</text><text class="section-caption">查看类入口 · 低频功能</text></view>
     <view class="tool-row">
-      <view class="tool-chip" bindtap="navigateToAdvisor"><icon name="bulb" size="30" color="var(--corn)"/><text>今日建议</text></view>
       <view class="tool-chip" bindtap="navigateToDashboard"><icon name="mirror" size="30" color="var(--green-800)"/><text>经营镜像</text></view>
       <view class="tool-chip" bindtap="navigateToReport"><icon name="chart" size="30" color="var(--blue)"/><text>经营报告</text></view>
       <view class="tool-chip" bindtap="navigateToVision"><icon name="camera" size="30" color="var(--green-800)"/><text>拍照识货</text></view>
+      <view class="tool-chip" bindtap="navigateToSandbox"><icon name="spark" size="30" color="var(--corn)"/><text>决策沙盘</text></view>
     </view>
 
     <view class="section-head"><text class="section-title">最近记录</text><text class="section-link" bindtap="navigateToVoice">再记一笔 ›</text></view>

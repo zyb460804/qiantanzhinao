@@ -65,12 +65,18 @@
     </view>
   </view>
 
-  <!-- ④ 经营工具 -->
-  <view class="section-head"><text class="section-title">全部工具</text></view>
-  <view class="tool-grid">
-    <view wx:for="{{tools}}" wx:key="page" class="tool-chip" data-page="{{item.page}}" bindtap="goDeep">
-      <view class="tool-glyph {{item.tone}}">{{item.glyph}}</view>
-      <text class="tool-name">{{item.name}}</text>
+  <!-- ④ 经营工具 — 按职能分组，避免单屏宫格过密 -->
+  <view class="section-head"><text class="section-title">全部工具</text><text class="section-caption">按职能分组</text></view>
+  <view class="tool-group" wx:for="{{toolGroups}}" wx:key="title" wx:for-item="group">
+    <view class="tool-group-head">
+      <text class="tool-group-title">{{group.title}}</text>
+      <text class="tool-group-caption">{{group.caption}}</text>
+    </view>
+    <view class="tool-grid">
+      <view wx:for="{{group.items}}" wx:key="page" wx:for-item="tool" class="tool-chip" data-page="{{tool.page}}" bindtap="goDeep">
+        <view class="tool-glyph {{tool.tone}}">{{tool.glyph}}</view>
+        <text class="tool-name">{{tool.name}}</text>
+      </view>
     </view>
   </view>
 
