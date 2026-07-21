@@ -1,5 +1,6 @@
 /** 库存页 v3.0 — 下拉刷新 / 搜索 / 预警视觉 / 空状态引导 */
 var app = getApp();
+var invStatus = require('../../utils/inventory-status');
 
 Page({
   data: {
@@ -24,17 +25,17 @@ Page({
 
   _decorateItems: function (items) {
     return (items || []).map(function (item) {
-      var qty = Number(item.current_qty != null ? item.current_qty : item.total_qty) || 0;
+      var qty = invStatus.resolveQty(item);
       var name = item.product_name || ('商品' + item.product_id);
-      var status = qty <= 0 ? 'empty' : (qty <= 10 ? 'low' : 'healthy');
+      var status = invStatus.inventoryStatus(qty);
       var copy = {};
       Object.keys(item).forEach(function (key) { copy[key] = item[key]; });
       copy.display_name = name;
       copy.avatar_text = name.slice(0, 1);
       copy.qty_value = Math.round(qty * 10) / 10;
       copy.status = status;
-      copy.status_text = status === 'healthy' ? '有库存' : (status === 'low' ? '余量较少' : '已售罄');
-      copy.status_hint = status === 'healthy' ? '当前仍有库存' : (status === 'low' ? '仅按数量提示，请结合销量判断是否补货' : '如仍在售，请安排补货或校准库存');
+      copy.status_text = invStatus.statusText(status);
+      copy.status_hint = invStatus.statusHint(status);
       return copy;
     });
   },

@@ -51,7 +51,6 @@ Page({
 
     // ── 供应商关联表单 ──
     showSupProdForm: false, supProdForm: { supplier_id: '', last_price: '', min_order_qty: '' },
-    allSuppliers: [],
 
     // ── 全局：单位换算 ──
     showUnitPanel: false,

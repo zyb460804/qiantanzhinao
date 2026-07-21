@@ -55,6 +55,7 @@ App({
     theme: 'light',
     reduceMotion: false,
     reportDataVersion: 0,
+    purchaseDraft: null,   // 采购草稿缓存（advisor/calendar 写入，purchase 页消费）
   },
 
   _toastLock: false,

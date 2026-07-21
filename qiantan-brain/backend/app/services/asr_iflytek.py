@@ -25,12 +25,18 @@ logger = logging.getLogger(__name__)
 
 # Dialect → iFlytek `pd` (language) parameter.
 # `None` means普通话 uses default (no extra `pd` field needed).
+# 权威 key 与前端 miniprogram/pages/profile/profile.js 的 dialectValues 对齐；
+# 旧别名保留向后兼容（southwest/henan/sichuan）。
 DIALECT_MAP = {
+    # 前端 profile 使用的 4 个权威 key
     "mandarin": None,  # 普通话
-    "southwest": "mandarin",  # 西南官话 (uses mandarin model)
-    "henan": "mandarin",  # 河南话 (uses mandarin model)
+    "sichuanese": "sichuanese",  # 四川话
     "cantonese": "cantonese",  # 粤语
-    "sichuan": "sichuanese",  # 四川话
+    "shanghainese": None,  # 上海话（讯飞暂无独立模型，降级普通话并告警）
+    # 向后兼容的旧别名
+    "sichuan": "sichuanese",  # 旧: 四川话
+    "southwest": "mandarin",  # 旧: 西南官话（用普通话模型）
+    "henan": "mandarin",  # 旧: 河南话（用普通话模型）
 }
 
 # Each audio frame sent to iFlytek must be 1280 bytes (40ms @ 16kHz/16bit/mono).

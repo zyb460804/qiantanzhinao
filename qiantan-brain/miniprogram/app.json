@@ -22,7 +22,8 @@
     "pages/supplier/supplier",
     "pages/staff/staff",
     "pages/notices/notices",
-    "pages/tenant/tenant"
+    "pages/tenant/tenant",
+    "pages/styleguide/styleguide"
   ],
   "window": {
     "navigationBarBackgroundColor": "#123D30",

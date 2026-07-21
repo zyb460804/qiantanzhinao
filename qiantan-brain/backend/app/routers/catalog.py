@@ -550,6 +550,18 @@ async def list_suppliers(
         )
 
     total = (await db.execute(count_q)).scalar() or 0
+    # 全量黑名单数（不受 keyword/分页影响），供前端统计卡精确展示
+    blacklisted_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Supplier)
+            .where(
+                Supplier.merchant_id == merchant.id,
+                Supplier.is_active == True,  # noqa: E712
+                Supplier.is_blacklisted == True,  # noqa: E712
+            )
+        )
+    ).scalar() or 0
 
     suppliers = (
         (await db.execute(base.order_by(Supplier.name).offset(offset).limit(min(limit, 200))))
@@ -581,7 +593,16 @@ async def list_suppliers(
                 "current_balance": float(bal),
             }
         )
-    return {"code": 0, "data": {"items": result, "total": total, "offset": offset, "limit": limit}}
+    return {
+        "code": 0,
+        "data": {
+            "items": result,
+            "total": total,
+            "blacklisted_count": blacklisted_count,
+            "offset": offset,
+            "limit": limit,
+        },
+    }
 
 
 # ═══════════════════════════════════════════════════════════

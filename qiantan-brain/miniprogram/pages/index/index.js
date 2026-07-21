@@ -1,6 +1,7 @@
 /** 经营台 v3.2 */
 var app = getApp();
 var Theme = require('../../utils/theme');
+var invStatus = require('../../utils/inventory-status');
 var CACHE_KEY = 'homeCache';
 var CACHE_TTL = 300000; // 缓存有效期 5 分钟
 
@@ -168,9 +169,9 @@ Page({
     // 正常渲染
     var inStock = 0, low = 0;
     items.forEach(function (item) {
-      var qty = Number(item.current_qty != null ? item.current_qty : item.total_qty) || 0;
-      if (qty > 0) inStock += 1;
-      if (qty > 0 && qty <= 10) low += 1;
+      var qty = invStatus.resolveQty(item);
+      if (invStatus.isInStock(qty)) inStock += 1;
+      if (invStatus.isLowStock(qty)) low += 1;
     });
 
     var recent = [];
@@ -252,8 +253,7 @@ Page({
     }
     var lowCount = 0;
     (items || []).forEach(function (item) {
-      var qty = Number(item.current_qty != null ? item.current_qty : item.total_qty) || 0;
-      if (qty > 0 && qty <= 10) lowCount++;
+      if (invStatus.isLowStock(invStatus.resolveQty(item))) lowCount++;
     });
     if (lowCount > 0) {
       tasks.push({ id: 'low', tone: 'warn', glyph: '补', title: lowCount + ' 个品类余量较少', desc: '数量提示不等于必须补货，建议结合销量和明日客流判断。', action: '查看建议', route: 'advisor' });

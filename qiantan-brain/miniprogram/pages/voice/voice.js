@@ -3,6 +3,7 @@
  */
 var app = getApp();
 var streamText = require('../../utils/stream-text').streamText;
+var storage = require('../../utils/storage');
 
 Page({
   data: {
@@ -98,7 +99,7 @@ Page({
       filePath: filePath,
       name: 'audio',
       header: { 'Authorization': 'Bearer ' + app.globalData.accessToken },
-      formData: { dialect: 'mandarin' },
+      formData: { dialect: storage.getVoiceDialect() },
       success: function (res) {
         var body;
         try { body = JSON.parse(res.data); } catch (e) { self.setData({ state: 'error' }); return; }

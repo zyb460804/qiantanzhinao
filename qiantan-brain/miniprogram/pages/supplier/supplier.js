@@ -114,14 +114,12 @@ Page({
       });
       var merged = append ? self.data.suppliers.concat(list) : list;
       var totalCount = d.total || 0;
-      var blacklistedCount = 0;
-      // For stats, we need the full count - use total for now
+      // 黑名单数取后端全量统计，避免分页只数到部分
+      var blacklistedCount = d.blacklisted_count || 0;
       var scoredList = merged.filter(function (s) { return s.composite_score != null; });
       var avgScore = scoredList.length > 0
         ? Math.round(scoredList.reduce(function (sum, s) { return sum + s.composite_score; }, 0) / scoredList.length)
         : 0;
-      // Count blacklisted from current view (partial; fine for display)
-      for (var i = 0; i < merged.length; i++) { if (merged[i].is_blacklisted) blacklistedCount++; }
 
       self.setData({
         suppliers: merged, supplierTotal: totalCount,
