@@ -2,8 +2,8 @@
 <view class="page-shell vision-page {{skinClass}}">
 
   <!-- Hero -->
-  <view class="page-hero vision-hero page-hero--breathing">
-    <text class="eyebrow">VISION · 智能识货</text>
+  <view class="page-hero vision-hero ">
+    <text class="eyebrow">智能识货</text>
     <text class="hero-title">拍照识货</text>
     <text class="hero-desc">拍一张照片，智能识别商品</text>
   </view>
@@ -26,7 +26,7 @@
         <text class="demo-toggle-label">识货公测中</text>
         <text class="demo-toggle-desc">模型持续训练，结果仅供参考；识别不准可手动选择</text>
       </view>
-      <switch class="demo-switch" checked="{{demoMode}}" bindchange="toggleDemoMode" color="#00B578"/>
+      <switch class="demo-switch" checked="{{demoMode}}" bindchange="toggleDemoMode" color="#357d48"/>
     </view>
   </view>
 

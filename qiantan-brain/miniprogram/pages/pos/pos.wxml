@@ -1,7 +1,7 @@
 <view class="page-shell pos-page skin-{{skin}}">
   <view class="page-hero pos-hero">
-    <text class="eyebrow">SMART POS · 组合支付 · 挂单 · 退款</text>
-    <view class="pos-top"><view><text class="pos-label">本单应收</text><text class="pos-amount">¥{{payableAmount}}</text></view><mascot size="md" mood="{{submitting ? 'think' : 'idle'}}" /></view>
+    <text class="eyebrow">收银台</text>
+    <view class="pos-top"><view><text class="pos-label">本单应收</text><text class="pos-amount">¥{{payableAmount}}</text></view></view>
     <text class="pos-sub">选商品 → 称重 → 收款 → 自动扣批次库存</text>
   </view>
 

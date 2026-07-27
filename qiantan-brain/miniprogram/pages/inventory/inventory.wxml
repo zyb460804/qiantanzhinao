@@ -4,7 +4,7 @@
   <!-- Hero -->
   <view class="page-hero inv-hero">
     <view class="hero-top">
-      <view class="hero-kick">STOCK HEALTH · 库存健康</view>
+      <view class="hero-kick">库存健康</view>
       <view class="refresh-btn {{loading ? 'is-loading' : ''}}" bindtap="manualRefresh">
         <icon name="refresh" size="sm" color="#fff"></icon>
         <text>{{updatedAt}}</text>

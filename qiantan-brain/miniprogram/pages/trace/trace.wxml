@@ -14,7 +14,7 @@
   <!-- ═══ 消费者模式：扫码查看 ═══ -->
   <block wx:if="{{mode === 'consumer'}}">
     <view class="page-hero trace-hero-consumer">
-      <text class="eyebrow">FOOD SAFETY · 安全追溯</text>
+      <text class="eyebrow">安全追溯</text>
       <text class="hero-title">商品溯源</text>
     </view>
 
@@ -72,7 +72,7 @@
   <!-- ═══ 摊主模式：批次管理 ═══ -->
   <block wx:if="{{mode === 'owner'}}">
     <view class="page-hero trace-hero-owner">
-      <text class="eyebrow">FOOD SAFETY · 批次追溯</text>
+      <text class="eyebrow">批次追溯</text>
       <text class="hero-title">安全追溯</text>
       <text class="hero-desc">管理批次、生成追溯码、锁定/解锁不合格批次</text>
     </view>

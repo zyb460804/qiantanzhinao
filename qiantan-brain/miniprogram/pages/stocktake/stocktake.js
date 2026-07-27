@@ -100,7 +100,7 @@ Page({
         content: '当前盘点进度会保留，可随时切回继续。未提交的数据建议先保存。',
         confirmText: '暂停并切换',
         cancelText: '留在这里',
-        confirmColor: '#FA5151',
+        confirmColor: '#c8392b',
         success: function (res) {
           if (res.confirm) {
             self.setData({ activeTab: tab });

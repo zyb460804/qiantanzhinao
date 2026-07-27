@@ -4,7 +4,7 @@
 
   <!-- Hero -->
   <view class="page-hero supplier-hero">
-    <text class="eyebrow">SUPPLIER · 供应商档案</text>
+    <text class="eyebrow">供应商</text>
     <text class="hero-title">供应商管理</text>
     <text class="hero-desc">管理供应商档案、质量评分与商品关联</text>
   </view>

@@ -2,7 +2,7 @@
 <wxs src="/utils/format.wxs" module="fmt" />
 <view class="page-shell fin-page {{skin}}">
   <view class="page-hero fin-hero">
-    <text class="eyebrow">FINANCE · 财务</text><text class="hero-title">财务管理</text>
+    <text class="eyebrow">{{skinLabel}} · 财务</text><text class="hero-title">财务管理</text>
     <text class="hero-desc">费用、利润、票据与支付对账集中管理，让每笔钱都有去向。</text>
     <view class="fin-hero-metrics">
       <view><text class="fin-hero-num">{{expensesLoaded ? expenses.length : '—'}}</text><text class="fin-hero-label">费用记录</text></view>

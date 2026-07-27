@@ -3,7 +3,7 @@
   <view class="page-hero voice-hero">
     <view class="voice-hero-top">
       <view>
-        <text class="eyebrow">SMART LEDGER · 智能流水</text>
+        <text class="eyebrow">语音记账</text>
         <text class="hero-title">今天发生了什么？</text>
       </view>
       <mascot size="md" mood="{{state==='listening' ? 'think' : 'idle'}}" />

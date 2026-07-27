@@ -299,7 +299,7 @@ Page({
     wx.showModal({
       title: '退出登录',
       content: '确定要退出当前账号吗？退出后需要重新登录。',
-      confirmColor: '#FA5151',
+      confirmColor: '#c8392b',
       success: function (res) {
         if (!res.confirm) return;
         // 先调后端吊销 token（失败也继续清理本地）

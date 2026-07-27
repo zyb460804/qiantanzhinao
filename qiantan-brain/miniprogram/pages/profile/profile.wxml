@@ -3,7 +3,7 @@
 <view class="page-shell profile-page {{skinClass}}">
   <!-- ① 经营快照 -->
   <view class="page-hero snapshot-hero">
-    <text class="eyebrow">MY STALL · {{merchantName || '我的摊位'}}</text>
+    <text class="eyebrow">{{merchantName || '我的摊位'}}</text>
     <block wx:if="{{snapshotLoading}}">
       <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
     </block>

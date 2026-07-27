@@ -174,7 +174,7 @@ Page({
       Chart.drawBarChart(canvas.ctx, canvas.width, canvas.height, data, {
         valueKey: 'amount',
         labelKey: 'name',
-        colors: ['#00B578', '#FA5151', '#008556', '#FFA800', '#00B9A8'],
+        colors: ['#357d48', '#c8392b', '#1a4528', '#c8902a', '#357d48'],
         unitPrefix: '¥',
         recommendLabel: '最优',
       });

@@ -18,7 +18,7 @@
   <view class="page-hero cal-hero">
     <view class="cal-hero-head">
       <view class="cal-hero-copy">
-        <text class="eyebrow">SEASONAL CALENDAR · 时令经营</text>
+        <text class="eyebrow">时令经营</text>
         <text class="hero-title">今天卖什么，看节气</text>
         <text class="hero-desc">把节气、星期和天气，变成能直接执行的备货策略。</text>
       </view>

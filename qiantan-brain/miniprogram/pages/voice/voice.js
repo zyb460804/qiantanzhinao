@@ -388,7 +388,7 @@ Page({
     var logId = e.currentTarget.dataset.id;
     if (!logId) return;
     wx.showModal({
-      title: '撤销确认', content: '撤销后库存和批次将自动回滚，确定撤销吗？', confirmColor: '#FA5151',
+      title: '撤销确认', content: '撤销后库存和批次将自动回滚，确定撤销吗？', confirmColor: '#c8392b',
       success: function (res) {
         if (res.confirm) {
           app.request({ url: '/voice/' + logId + '/void', method: 'POST', data: { reason: '用户手动撤销' } })

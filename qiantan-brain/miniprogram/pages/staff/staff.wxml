@@ -39,7 +39,7 @@
 
   <!-- Hero -->
   <view class="page-hero staff-hero">
-    <text class="eyebrow">STAFF · 团队协作</text>
+    <text class="eyebrow">团队管理</text>
     <text class="hero-title">员工管理</text>
     <text class="hero-desc">管理店员角色与操作权限</text>
   </view>

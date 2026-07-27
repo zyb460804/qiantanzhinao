@@ -1,7 +1,7 @@
 <!-- 文档展示页 -->
 <view class="page-shell doc-page {{skinClass}}">
   <view class="page-hero doc-hero">
-    <text class="eyebrow">DOCUMENT</text>
+    <text class="eyebrow">文档手册</text>
     <text class="hero-title">{{docTitle}}</text>
   </view>
   <view class="doc-list">

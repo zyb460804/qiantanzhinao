@@ -3,7 +3,7 @@
 
   <!-- 顶部 hero -->
   <view class="page-hero report-hero">
-    <view class="hero-kick">BUSINESS REPORT · 经营报告</view>
+    <view class="hero-kick">经营报告</view>
     <text class="hero-title">经营报告</text>
     <text class="hero-desc">{{rangeLabel}} · 更新于 {{refreshTime}}</text>
 

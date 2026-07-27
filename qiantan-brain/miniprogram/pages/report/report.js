@@ -366,8 +366,8 @@ Page({
       self.setData({ canvasWidth: c.width, canvasHeight: c.height });
       Chart.drawLineChart(c.ctx, c.width, c.height, data, {
         series: [
-          { key: 'revenue', color: '#00A06A', axis: 'left' },
-          { key: 'profit', color: '#FFA800', axis: 'left' },
+          { key: 'revenue', color: '#2a6b3c', axis: 'left' },
+          { key: 'profit', color: '#c8902a', axis: 'left' },
           { key: 'customer_price', color: '#2E7DD1', axis: 'right' },
         ],
         fillArea: { key: 'revenue', gradientFrom: 'rgba(47,158,110,.22)', gradientTo: 'rgba(47,158,110,0)' },

@@ -35,7 +35,7 @@
 
   <!-- Hero -->
   <view class="page-hero tenant-hero">
-    <text class="eyebrow">TENANT · 租户中心</text>
+    <text class="eyebrow">租户管理</text>
     <text class="hero-title">我的租户</text>
     <text class="hero-desc">查看当前套餐、用量配额与账单记录</text>
   </view>

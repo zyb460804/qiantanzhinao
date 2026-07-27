@@ -247,7 +247,7 @@ Page({
     var self = this;
     var batchId = e.currentTarget.dataset.id;
     wx.showModal({
-      title: '确认锁定', content: '锁定后 POS 将立即停止销售此批次。', confirmColor: '#FA5151',
+      title: '确认锁定', content: '锁定后 POS 将立即停止销售此批次。', confirmColor: '#c8392b',
       success: function (res) {
         if (!res.confirm) return;
         app.request({ url: '/food-safety/batches/' + batchId + '/lock', method: 'POST', data: { reason: '食品安全检查' } })
@@ -296,7 +296,7 @@ Page({
     var batchId = e.currentTarget.dataset.id;
     wx.showModal({
       title: '确认召回', editable: true, placeholderText: '请输入召回原因（如：监管部门通知）',
-      confirmColor: '#FA5151',
+      confirmColor: '#c8392b',
       success: function (res) {
         if (!res.confirm) return;
         var reason = (res.content || '').trim() || '食品安全召回';
@@ -320,7 +320,7 @@ Page({
     var batchId = e.currentTarget.dataset.id;
     wx.showModal({
       title: '确认销毁', editable: true, placeholderText: '请输入销毁原因（如：变质销毁）',
-      confirmColor: '#FA5151',
+      confirmColor: '#c8392b',
       success: function (res) {
         if (!res.confirm) return;
         var reason = (res.content || '').trim() || '不合格销毁';

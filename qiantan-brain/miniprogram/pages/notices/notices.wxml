@@ -20,7 +20,7 @@
 
   <!-- Hero -->
   <view class="page-hero notices-hero">
-    <text class="eyebrow">NOTICES · 市场通知</text>
+    <text class="eyebrow">市场通知</text>
     <text class="hero-title">市场通知</text>
     <text class="hero-desc">查看市场发布的公告、警告与紧急通知</text>
   </view>

@@ -146,7 +146,7 @@ Page({
     if (!invData || !invData.lifecycle_heatmap) return [];
     var buckets = ['today', '1day', '2days', '3days+'];
     var severity = { red: 3, yellow: 2, green: 1, gray: 0 };
-    var colorHex = { red: '#FA5151', yellow: '#FFA800', green: '#00B578', gray: '#E8ECEA' };
+    var colorHex = { red: '#c8392b', yellow: '#c8902a', green: '#357d48', gray: '#e1e4e1' };
     var textColor = { red: '#FFFFFF', yellow: '#5A4500', green: '#FFFFFF', gray: '#8A938D' };
 
     var byProduct = {};

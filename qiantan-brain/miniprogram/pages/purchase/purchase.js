@@ -405,7 +405,7 @@ Page({
   cancelItem: function (e) {
     var itemId = e.currentTarget.dataset.id, self = this;
     if (this.data.submitting) return;
-    wx.showModal({ title: '取消采购', content: '确认取消该采购项？', confirmColor: '#FA5151', success: function (r) {
+    wx.showModal({ title: '取消采购', content: '确认取消该采购项？', confirmColor: '#c8392b', success: function (r) {
       if (!r.confirm) return;
       self.setData({ submitting: true });
       app.request({ url: '/purchase/item/' + itemId, method: 'DELETE' }).then(function () { self.setData({ submitting: false }); wx.showToast({ title: '已取消', icon: 'none' }); self.loadList(); }).catch(function (err) { self.setData({ submitting: false }); wx.showToast({ title: (err.body && err.body.detail) || '取消失败', icon: 'none' }); self.loadList(); });

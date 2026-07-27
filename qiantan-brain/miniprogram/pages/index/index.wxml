@@ -14,7 +14,7 @@
     <block wx:if="{{!loadError}}">
     <view class="page-hero home-hero">
       <view class="hero-topline">
-        <view><text class="eyebrow">QIANTAN · 今日经营台</text><text class="hero-title">{{greeting}}，{{merchantName}}</text></view>
+        <view><text class="eyebrow">今日经营台</text><text class="hero-title">{{greeting}}，{{merchantName}}</text></view>
         <view class="skin-seg">
           <view class="skin-opt {{skin==='morning'?'on':''}}" data-skin="morning" bindtap="onSkinChange">早市</view>
           <view class="skin-opt {{skin==='noon'?'on':''}}" data-skin="noon" bindtap="onSkinChange">午市</view>

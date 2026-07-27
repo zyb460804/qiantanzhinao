@@ -2,7 +2,7 @@
 <view class="page-shell stocktake-page {{skinClass}}">
 
   <view class="page-hero stocktake-hero" wx:if="{{activeTab === 'stocktake' && !completed}}">
-    <view><text class="eyebrow">STOCKTAKE · 库存校准</text><text class="hero-title">库存盘点</text><text class="hero-desc">核对账面与实物，完成后自动生成库存调整记录。</text></view>
+    <view><text class="eyebrow">库存校准</text><text class="hero-title">库存盘点</text><text class="hero-desc">核对账面与实物，完成后自动生成库存调整记录。</text></view>
     <view class="stocktake-hero-mark">盘</view>
   </view>
 
@@ -150,7 +150,7 @@
     <!-- ── 盘点完成结果 ── -->
     <block wx:if="{{completed && result}}">
       <view class="page-hero result-hero page-hero--breathing">
-        <text class="eyebrow">STOCKTAKE DONE · 盘点完成</text>
+        <text class="eyebrow">盘点完成</text>
         <text class="hero-title">盘点已完成</text>
         <text class="hero-desc">已根据盘点结果更新库存数字孪生</text>
       </view>
@@ -216,7 +216,7 @@
   <!-- ════════════════ 盘点历史 Tab ════════════════ -->
   <block wx:if="{{activeTab === 'history'}}">
       <view class="page-hero page-hero--breathing">
-        <text class="eyebrow">HISTORY · 盘点历史</text>
+        <text class="eyebrow">盘点历史</text>
       <text class="hero-title">盘点历史</text>
       <text class="hero-desc">查看历次盘点记录与损耗情况</text>
     </view>

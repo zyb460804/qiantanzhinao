@@ -2,7 +2,7 @@
 <!-- 经营管理 — 报损·临期·客户·导出 -->
 <view class="page-shell ops-page {{skin}}">
   <view class="page-hero ops-hero">
-    <text class="eyebrow">OPERATIONS · 日常经营</text><text class="hero-title">经营管理</text>
+    <text class="eyebrow">日常经营</text><text class="hero-title">经营管理</text>
     <text class="hero-desc">优先处理报损和临期，再维护客户往来与经营数据。</text>
     <view class="ops-pulse">
       <view><text class="ops-pulse-num">{{wasteRecords.length}}</text><text class="ops-pulse-label">报损记录</text></view>

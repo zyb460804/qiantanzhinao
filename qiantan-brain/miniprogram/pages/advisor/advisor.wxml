@@ -1,15 +1,14 @@
-<!-- AI参谋 v3.0 · 数据驱动推送 + 反馈机制 -->
+<!-- 今日参谋 v4.0 · 市井账本风（去 AI 化：删大号 mascot、AI 字样、emoji、沙盘话术） -->
 <wxs src="/utils/format.wxs" module="fmt" />
 <view class="page-shell advisor-page skin-{{skin}}">
   <view class="page-hero advisor-hero">
     <view class="advisor-hero-top">
       <view>
-        <text class="eyebrow">DAILY ADVISOR · 今日参谋</text>
+        <text class="eyebrow">{{skinLabel}} · 今日参谋</text>
         <text class="hero-title">今天怎么卖，更稳妥？</text>
       </view>
-      <mascot size="lg" mood="idle" />
     </view>
-    <text class="hero-desc">建议来自天气、星期、库存与经营偏好的综合判断。</text>
+    <text class="hero-desc">今天天气、库存、客流综合来看。</text>
     <view class="env-strip" wx:if="{{envSummary}}">
       <view><text class="env-num">{{envSummary.temp_high}}°</text><text class="env-label">最高温</text></view>
       <view><text class="env-num">{{envSummary.rainfall_prob}}%</text><text class="env-label">降雨概率</text></view>
@@ -20,18 +19,18 @@
     </view>
   </view>
 
-  <!-- 小智主动推送 — 数据驱动, 点击跳转而非假按钮 -->
-  <view class="section-head"><text class="section-title">小智主动推送</text><text class="section-caption">不等你问，先替你盯着</text></view>
+  <!-- 今日要紧事 — 数据驱动, 点击跳转 -->
+  <view class="section-head"><text class="section-title">今日要紧事</text><text class="section-caption">别漏掉</text></view>
   <view class="push-stack">
     <block wx:if="{{pushLoading}}">
       <view class="push-card skeleton"><view class="sk-line w80"></view><view class="sk-line w50"></view></view>
     </block>
     <view wx:elif="{{activePush.length === 0}}" class="empty-state mini">
-      <text>当前没有需要主动提醒的事项 👋</text>
+      <text>当前没有需要提醒的事项</text>
     </view>
     <block wx:else>
       <view wx:for="{{activePush}}" wx:key="id" class="push-card {{item.tone}}" data-route="{{item.route}}" bindtap="handlePushTap">
-        <view class="push-icon"><icon name="{{item.icon}}" size="38" color="{{item.tone==='warn' ? 'var(--corn)' : 'var(--green-800)'}}" /></view>
+        <view class="push-dot"></view>
         <view class="push-body">
           <text class="push-title">{{item.title}}</text>
           <text class="push-desc">{{item.desc}}</text>
@@ -41,10 +40,10 @@
     </block>
   </view>
 
-  <!-- AI 可执行动作 — 一键改价/采购/清货/锁定 -->
+  <!-- 待办 — 可立即处理 -->
   <view class="section-head" wx:if="{{aiActions.length > 0}}">
-    <text class="section-title">AI 待执行动作</text>
-    <text class="section-caption">{{aiActions.length}} 项可一键执行</text>
+    <text class="section-title">待办</text>
+    <text class="section-caption">{{aiActions.length}} 项可立即处理</text>
   </view>
   <view class="ai-action-stack" wx:if="{{aiActions.length > 0}}">
     <view wx:for="{{aiActions}}" wx:key="id" class="ai-action-card {{item.tone}}">
@@ -54,7 +53,7 @@
       </view>
       <text class="ai-action-desc">{{item.desc}}</text>
       <view class="ai-action-btns">
-        <button class="btn-primary ai-btn-execute" data-id="{{item.id}}" bindtap="executeAiAction">一键执行</button>
+        <button class="btn-primary ai-btn-execute" data-id="{{item.id}}" bindtap="executeAiAction">执行</button>
         <text class="ai-btn-reject" data-id="{{item.id}}" bindtap="rejectAiAction">忽略</text>
       </view>
     </view>
@@ -62,13 +61,13 @@
 
   <view class="section-head"><text class="section-caption">{{recommendations.length}} 条建议</text></view>
 
-  <!-- 打字中 + 流式口吻 -->
+  <!-- 小智开口说（保留，但视觉降权） -->
   <view class="mascot-says" wx:if="{{saysText}}">
     <mascot size="sm" mood="think" />
-    <text class="says-text">{{saysText}}<text class="caret">▍</text></text>
+    <text class="says-text">{{saysText}}</text>
   </view>
 
-  <view wx:if="{{recommendations.length === 0 && !pushLoading}}" class="empty-state surface"><mascot size="sm" mood="idle"/><text>暂无建议。记几笔经营流水后，小智就能帮你分析。</text></view>
+  <view wx:if="{{recommendations.length === 0 && !pushLoading}}" class="empty-state surface"><mascot size="sm" mood="idle"/><text>暂无建议。记几笔经营流水后就能帮你分析。</text></view>
 
   <view wx:for="{{recommendations}}" wx:key="product_id" class="advice-card">
     <view class="advice-index">0{{index + 1}}</view>
@@ -80,11 +79,11 @@
         <view wx:for="{{item.basis}}" wx:key="factor" wx:for-item="b" class="basis-line"><text class="basis-factor">{{b.factor}}</text><text class="basis-value {{b.impact === '+' ? 'green' : b.impact === '-' ? 'red' : ''}}">{{b.value}}</text></view>
       </view>
       <view class="risk-note" wx:if="{{item.risk_warning}}"><text class="risk-symbol">!</text><text>{{item.risk_warning}}</text></view>
-      <!-- 反馈按钮 -->
+      <!-- 反馈按钮：去 emoji，纯文字（v4.0） -->
       <view class="advice-feedback">
         <text class="fb-label">这条建议有用吗？</text>
-        <text class="fb-btn {{feedbackMap[item.recommendation_id] === 'helpful' ? 'active' : ''}}" data-id="{{item.recommendation_id || recommendationIds[index]}}" data-type="helpful" bindtap="onFeedback">👍 有用</text>
-        <text class="fb-btn {{feedbackMap[item.recommendation_id] === 'not_helpful' ? 'active' : ''}}" data-id="{{item.recommendation_id || recommendationIds[index]}}" data-type="not_helpful" bindtap="onFeedback">👎 没用</text>
+        <text class="fb-btn {{feedbackMap[item.recommendation_id] === 'helpful' ? 'active' : ''}}" data-id="{{item.recommendation_id || recommendationIds[index]}}" data-type="helpful" bindtap="onFeedback">有用</text>
+        <text class="fb-btn {{feedbackMap[item.recommendation_id] === 'not_helpful' ? 'active' : ''}}" data-id="{{item.recommendation_id || recommendationIds[index]}}" data-type="not_helpful" bindtap="onFeedback">没用</text>
       </view>
     </view>
   </view>
@@ -93,10 +92,10 @@
     <button class="btn-primary purchase-btn" bindtap="addToPurchase">把这些建议加入采购清单</button>
   </view>
 
-  <!-- 效果复盘 — 最近执行的 AI 动作 -->
+  <!-- 最近做过的事 -->
   <view class="section-head" wx:if="{{aiHistory.length > 0}}">
-    <text class="section-title">效果复盘</text>
-    <text class="section-caption">最近动作记录</text>
+    <text class="section-title">最近做过的事</text>
+    <text class="section-caption">动作记录</text>
   </view>
   <view class="ai-history-stack" wx:if="{{aiHistory.length > 0}}">
     <view wx:for="{{aiHistory}}" wx:key="id" class="ai-history-item {{item.statusClass}}">
@@ -110,10 +109,10 @@
     </view>
   </view>
 
-  <!-- 沙盘入口：试算体验统一到 sandbox 页，避免重复维护两套 -->
+  <!-- 试算入口（去"沙盘"话术） -->
   <view class="sandbox-banner" bindtap="goSandbox">
     <icon name="spark" size="40" color="var(--corn)" />
-    <view class="sandbox-copy"><text class="sandbox-title">进货前，先算一遍</text><text class="sandbox-desc">在决策沙盘模拟进货量、成本与售价对利润的影响</text></view>
-    <text class="sandbox-arrow">去试算 ›</text>
+    <view class="sandbox-copy"><text class="sandbox-title">进货前，先算一遍</text><text class="sandbox-desc">算算进货量、成本与售价对利润的影响</text></view>
+    <text class="sandbox-arrow">去算算 ›</text>
   </view>
 </view>

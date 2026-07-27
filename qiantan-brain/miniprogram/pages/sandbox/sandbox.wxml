@@ -1,8 +1,8 @@
 <!-- 决策沙盘 · 把复杂参数变成一步一步的经营试算 -->
 <wxs src="/utils/format.wxs" module="fmt" />
 <view class="page-shell sandbox-page {{skinClass}}">
-  <view class="page-hero sandbox-hero page-hero--breathing">
-    <text class="eyebrow">WHAT-IF LAB · 决策试算</text>
+  <view class="page-hero sandbox-hero ">
+    <text class="eyebrow">试算</text>
     <text class="hero-title">进货之前，先预演结果</text>
     <text class="hero-desc">调整进货量、成本与售价，对比销量、净利润和损耗。</text>
     <view class="lab-steps"><text class="active">1 设置参数</text><text>2 运行模拟</text><text>3 对比方案</text></view>
@@ -20,7 +20,7 @@
     </view>
     <view class="field-block">
       <view class="slider-head"><view><text class="field-label">计划进货量</text><text class="field-help">拖动滑块快速调整</text></view><text class="quantity-value">{{purchaseQty}}<text> 斤</text></text></view>
-      <slider min="1" max="300" value="{{purchaseQty}}" bindchange="onSliderChange" block-size="22" block-color="#00A06A" activeColor="#00A06A" backgroundColor="#E8ECEA"/>
+      <slider min="1" max="300" value="{{purchaseQty}}" bindchange="onSliderChange" block-size="22" block-color="#2a6b3c" activeColor="#2a6b3c" backgroundColor="#e1e4e1"/>
       <view class="range-label"><text>1斤</text><text>300斤</text></view>
     </view>
     <view class="price-grid">

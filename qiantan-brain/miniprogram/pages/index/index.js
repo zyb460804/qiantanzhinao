@@ -10,7 +10,7 @@ Page({
     merchantName: '', skin: 'noon', greeting: '你好',
     showSkeleton: false, loadError: false, staleData: false,
     todayRevenue: 0, todayCost: 0, todayProfit: 0, riskScore: 0,
-    riskLevel: '低风险', riskColor: '#00B578',
+    riskLevel: '低风险', riskColor: '#357d48',
     expiringCount: 0, inventoryCategoryCount: 0, inStockCount: 0, lowStockCount: 0,
     weather: null, recentRecords: [],
     todayTasks: [{ id: 'steady', tone: 'good', glyph: '稳',
@@ -240,9 +240,9 @@ Page({
   _updateRiskLevel: function () {
     var s = this.data.riskScore;
     var level = '', color = '';
-    if (s <= 30) { level = '低风险'; color = '#00B578'; }
-    else if (s <= 60) { level = '中等风险'; color = '#FFA800'; }
-    else { level = '高风险'; color = '#FA5151'; }
+    if (s <= 30) { level = '低风险'; color = '#357d48'; }
+    else if (s <= 60) { level = '中等风险'; color = '#c8902a'; }
+    else { level = '高风险'; color = '#c8392b'; }
     this.setData({ riskLevel: level, riskColor: color });
   },
 

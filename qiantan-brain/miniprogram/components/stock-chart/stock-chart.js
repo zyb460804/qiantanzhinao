@@ -103,7 +103,7 @@ Component({
       var barH = Math.max(6, Math.min(9, rowH * 0.22));
       var barX = 30;
       var barW = w - barX - padX;
-      var palette = ['#007950', '#009161', '#00A06A', '#16C48A', '#4ED9A6', '#7DE4BD', '#AEEFD4', '#D8F7E9'];
+      var palette = ['#007950', '#009161', '#2a6b3c', '#16C48A', '#4ED9A6', '#7DE4BD', '#AEEFD4', '#D8F7E9'];
 
       for (var i = 0; i < items.length; i++) {
         var item = items[i] || {};
@@ -113,12 +113,12 @@ Component({
         var trackY = rowTop + trackYGap;
         var fillW = qty > 0 ? Math.max(barH, qty / maxVal * barW) : 0;
         var isLow = item.status === 'low' || item.status === 'empty';
-        var color = item.color || (isLow ? '#FFA800' : palette[i % palette.length]);
+        var color = item.color || (isLow ? '#c8902a' : palette[i % palette.length]);
 
         ctx.textBaseline = 'middle';
         ctx.font = '600 11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = i < 3 ? '#008556' : '#98A29D';
+        ctx.fillStyle = i < 3 ? '#1a4528' : '#98A29D';
         ctx.fillText((i < 9 ? '0' : '') + (i + 1), 14, textY);
 
         ctx.font = '600 12px sans-serif';

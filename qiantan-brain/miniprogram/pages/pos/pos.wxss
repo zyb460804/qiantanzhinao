@@ -2,7 +2,7 @@
 .pos-hero { padding-bottom: 34rpx; }
 .pos-top { display:flex; align-items:center; justify-content:space-between; }
 .pos-label,.pos-sub { display:block; color:rgba(255,255,255,.78); font-size:24rpx; }
-.pos-amount { display:block; margin-top:8rpx; color:#fff; font-family:var(--font-num); font-size:64rpx; font-weight:800; }
+.pos-amount { display:block; margin-top:8rpx; color:#fff; font-family:var(--font-num); font-size:62rpx; font-weight:800; letter-spacing:-2rpx; line-height:1; font-variant-numeric:tabular-nums; }
 .status-strip { display:flex; justify-content:space-between; margin:20rpx 0; padding:20rpx 24rpx; color:#8f5a00; background:#fff1d6; border-radius:18rpx; font-size:24rpx; }
 .link { color:var(--green-800); font-weight:700; }
 .product-scroll { width:100%; white-space:nowrap; }

@@ -179,7 +179,7 @@
 .tag-blue { color:#1a6fb5; background:#e6f2fa; }
 .tag-red { color:#c93a30; background:rgba(201,67,51,.08); }
 .tag-amber { color:#8f5a00; background:var(--amber-soft); }
-.tag-green { color:#008556; background:rgba(0,133,86,.10); }
+.tag-green { color:#1a4528; background:rgba(0,133,86,.10); }
 
 @keyframes shimmer { 0% { background-position:100% 0; } 100% { background-position:-100% 0; } }
 @keyframes card-rise { from { opacity:0; transform:translateY(12rpx); } to { opacity:1; transform:translateY(0); } }

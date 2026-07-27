@@ -2,7 +2,7 @@
   <view class="skin-ambient-layer"></view>
 
   <!-- 头部 -->
-  <view class="sg-hero page-hero page-hero--breathing">
+  <view class="sg-hero page-hero ">
     <view class="row" style="gap:20rpx;position:relative;z-index:2;">
       <mascot size="md" mood="idle" />
       <view>

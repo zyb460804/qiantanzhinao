@@ -227,7 +227,7 @@ Page({
     wx.showModal({
       title: '确认停用',
       content: '停用后 ' + name + ' 将无法进行任何操作。可在"已停用"列表恢复。确定吗？',
-      confirmColor: '#FA5151',
+      confirmColor: '#c8392b',
       success: function (res) {
         if (!res.confirm) return;
         app.request({ url: '/staff/' + sid, method: 'DELETE' })

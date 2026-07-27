@@ -4,7 +4,7 @@
 
   <!-- Hero -->
   <view class="page-hero purchase-hero">
-    <text class="eyebrow">PROCURE · 采购验收</text>
+    <text class="eyebrow">采购验收</text>
     <text class="hero-title">采购清单</text>
     <text class="hero-desc">下单→到货验收→批次入库→供应商付款</text>
   </view>

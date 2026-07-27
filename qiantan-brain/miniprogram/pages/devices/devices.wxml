@@ -1,7 +1,7 @@
 <!-- 设备管理 -->
 <view class="page-shell dev-page {{skin}}">
   <view class="page-hero dev-hero">
-    <view><text class="eyebrow">HARDWARE · 硬件管理</text><text class="hero-title">设备管理</text><text class="hero-desc">统一查看智能秤、摄像头、价签和顾客价目屏状态。</text></view>
+    <view><text class="eyebrow">设备管理</text><text class="hero-title">设备管理</text><text class="hero-desc">统一查看智能秤、摄像头、价签和顾客价目屏状态。</text></view>
     <view class="hero-device-count"><text class="hero-device-num">{{devices.length}}</text><text>台设备</text></view>
   </view>
   <view class="dev-overview">

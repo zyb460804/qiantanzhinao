@@ -7,16 +7,16 @@
     <view class="setting-row"><text class="setting-label">所在城市</text><picker range="{{cityOptions}}" value="{{cityIndex}}" bindchange="onCityChange"><text class="setting-val">{{cityOptions[cityIndex]}} ›</text></picker></view>
     <view class="setting-row"><text class="setting-label">常用方言</text><picker range="{{dialects}}" value="{{dialectIndex}}" bindchange="onDialectChange"><text class="setting-val">{{dialects[dialectIndex]}} ›</text></picker></view>
     <view class="setting-row"><text class="setting-label">营业时段</text><picker range="{{hoursOptions}}" value="{{hoursIndex}}" bindchange="onBusinessHoursChange"><text class="setting-val">{{hoursOptions[hoursIndex]}} ›</text></picker></view>
-    <view class="setting-row"><text class="setting-label">经营提醒</text><switch checked="{{notificationEnabled}}" bindchange="onNotificationToggle" color="#00B578" /></view>
+    <view class="setting-row"><text class="setting-label">经营提醒</text><switch checked="{{notificationEnabled}}" bindchange="onNotificationToggle" color="#357d48" /></view>
   </view>
 
   <!-- ② 建议偏好 -->
   <view class="section-head"><text class="section-title">建议偏好</text><text class="section-caption">影响 AI 参谋给的建议风格</text></view>
   <view class="setting-group">
     <radio-group class="risk-group" bindchange="onRiskChange">
-      <label class="risk-opt"><radio value="conservative" checked="{{riskProfile === 'conservative'}}" color="#00A06A"/> 稳健经营 · 少压货、优先控制损耗</label>
-      <label class="risk-opt"><radio value="neutral" checked="{{riskProfile === 'neutral'}}" color="#00A06A"/> 平衡经营 · 兼顾销量、利润与风险</label>
-      <label class="risk-opt"><radio value="aggressive" checked="{{riskProfile === 'aggressive'}}" color="#00A06A"/> 进取经营 · 接受波动，争取更多销量</label>
+      <label class="risk-opt"><radio value="conservative" checked="{{riskProfile === 'conservative'}}" color="#2a6b3c"/> 稳健经营 · 少压货、优先控制损耗</label>
+      <label class="risk-opt"><radio value="neutral" checked="{{riskProfile === 'neutral'}}" color="#2a6b3c"/> 平衡经营 · 兼顾销量、利润与风险</label>
+      <label class="risk-opt"><radio value="aggressive" checked="{{riskProfile === 'aggressive'}}" color="#2a6b3c"/> 进取经营 · 接受波动，争取更多销量</label>
     </radio-group>
   </view>
 
@@ -24,9 +24,9 @@
   <view class="section-head"><text class="section-title">皮肤主题</text><text class="section-caption">切换早市/夜市视觉</text></view>
   <view class="setting-group">
     <radio-group class="skin-group" bindchange="onSkinChange">
-      <label class="risk-opt"><radio value="auto" checked="{{skinManual === 'auto' || !skinManual}}" color="#00A06A"/> 跟随时段（自动）</label>
-      <label class="risk-opt"><radio value="morning" checked="{{skinManual === 'morning'}}" color="#00A06A"/> 早市（明亮）</label>
-      <label class="risk-opt"><radio value="evening" checked="{{skinManual === 'evening'}}" color="#00A06A"/> 夜市（暗色）</label>
+      <label class="risk-opt"><radio value="auto" checked="{{skinManual === 'auto' || !skinManual}}" color="#2a6b3c"/> 跟随时段（自动）</label>
+      <label class="risk-opt"><radio value="morning" checked="{{skinManual === 'morning'}}" color="#2a6b3c"/> 早市（明亮）</label>
+      <label class="risk-opt"><radio value="evening" checked="{{skinManual === 'evening'}}" color="#2a6b3c"/> 夜市（暗色）</label>
     </radio-group>
   </view>
 

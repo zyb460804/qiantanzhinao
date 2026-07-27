@@ -8,7 +8,7 @@
     <!-- 紧凑页头：把屏幕空间留给商品列表 -->
     <view class="page-hero cat-hero">
       <view class="hero-copy">
-        <text class="eyebrow">CATALOG</text>
+        <text class="eyebrow">商品目录</text>
         <text class="hero-title">商品管理</text>
         <text class="hero-desc">统一维护售价、单位、保质期与供货关系</text>
       </view>
