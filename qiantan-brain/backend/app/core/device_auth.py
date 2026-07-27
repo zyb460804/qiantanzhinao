@@ -80,7 +80,14 @@ async def _claim_nonce(namespace: str, nonce: str) -> bool:
         if _redis_client is None:
             import redis.asyncio as redis
 
-            _redis_client = redis.from_url(NONCE_REDIS_URL, decode_responses=True)
+            # 显式超时固化行为（与 rate_limiter 同理）：nonce 声明在设备请求路径上，
+            # 不依赖 redis-py 大版本间漂移的默认超时/重试值。
+            _redis_client = redis.from_url(
+                NONCE_REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            )
         claimed = await _redis_client.set(
             cache_key,
             "1",

@@ -44,7 +44,7 @@
   height: 80rpx; padding: 0 28rpx;
   background: var(--green-800); color: #fff;
   border-radius: var(--r-pill); font-size: 26rpx; font-weight: 700;
-  box-shadow: 0 8rpx 18rpx rgba(23, 92, 69, 0.22);
+  box-shadow: 0 8rpx 18rpx rgba(0, 160, 106, 0.22);
   white-space: nowrap;
 }
 .search-add-btn:active { opacity: .85; }
@@ -65,7 +65,7 @@
   overflow: hidden; transition: all var(--dur) var(--ease-out);
 }
 .supplier-card.expanded { border-color: var(--green-200); }
-.supplier-card.blacklisted { background: rgba(226, 80, 62, 0.03); border-color: rgba(226, 80, 62, 0.15); }
+.supplier-card.blacklisted { background: rgba(250, 81, 81, 0.03); border-color: rgba(250, 81, 81, 0.15); }
 
 /* 卡片头部 */
 .sup-card-head {

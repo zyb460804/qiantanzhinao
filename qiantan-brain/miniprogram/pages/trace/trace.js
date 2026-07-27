@@ -130,9 +130,12 @@ Page({
       title: '反馈问题', editable: true, placeholderText: '描述商品或溯源信息的问题...', content: '',
       success: function (res) {
         if (res.confirm && res.content && res.content.trim()) {
+          // 消费者扫码场景无商户 token，原 /feedback 会被 ensureLogin 卡住。
+          // 改用 /food-safety/trace/{code}/feedback 公开通道，由后端反查批次归属商户。
           app.request({
-            url: '/feedback', method: 'POST',
-            data: { content: '追溯码 ' + self.data.traceCode + ': ' + res.content.trim(), page: 'pages/trace/trace' }
+            url: '/food-safety/trace/' + encodeURIComponent(self.data.traceCode) + '/feedback',
+            method: 'POST', auth: false,
+            data: { content: res.content.trim(), page: 'pages/trace/trace' }
           }).then(function () { wx.showToast({ title: '感谢反馈！', icon: 'success' }); })
             .catch(function () { wx.showToast({ title: '提交失败', icon: 'none' }); });
         }
@@ -178,13 +181,15 @@ Page({
       .then(function (res) {
         wx.hideLoading();
         var code = res && res.trace_code;
+        // 后端响应 data 顶层为 batch_id/trace_code/qr_payload，batch_label 在 qr_payload 内。
+        var payload = (res && res.qr_payload) || {};
         if (code) {
           // 后端二维码图片地址
           var qrImgUrl = app.globalData.apiBase + '/food-safety/trace/' + encodeURIComponent(code) + '/qr-image';
           self.setData({
             showQR: true,
             qrCode: code,
-            qrBatchLabel: res.batch_label || '',
+            qrBatchLabel: payload.batch_label || '',
             qrImageUrl: qrImgUrl
           });
         }
@@ -242,7 +247,7 @@ Page({
     var self = this;
     var batchId = e.currentTarget.dataset.id;
     wx.showModal({
-      title: '确认锁定', content: '锁定后 POS 将立即停止销售此批次。', confirmColor: '#e2503e',
+      title: '确认锁定', content: '锁定后 POS 将立即停止销售此批次。', confirmColor: '#FA5151',
       success: function (res) {
         if (!res.confirm) return;
         app.request({ url: '/food-safety/batches/' + batchId + '/lock', method: 'POST', data: { reason: '食品安全检查' } })
@@ -259,6 +264,111 @@ Page({
     app.request({ url: '/food-safety/batches/' + batchId + '/unlock', method: 'POST', data: {} })
       .then(function () { wx.showToast({ title: '已解锁', icon: 'success' }); self.loadBatches(); })
       .catch(function (err) { wx.showToast({ title: (err && err.body && err.body.detail) || '操作失败', icon: 'none' }); });
+  },
+
+  /** 录入快检结果（pass/fail） */
+  inspectBatch: function (e) {
+    var self = this;
+    var batchId = e.currentTarget.dataset.id;
+    wx.showActionSheet({
+      itemList: ['✓ 合格', '✗ 不合格'],
+      success: function (res) {
+        // tapIndex 0 → pass, 1 → fail
+        var result = res.tapIndex === 0 ? 'pass' : (res.tapIndex === 1 ? 'fail' : null);
+        if (!result) return;
+        app.request({
+          url: '/food-safety/batches/' + batchId + '/inspect', method: 'POST',
+          data: { result: result }
+        }).then(function () {
+          wx.showToast({ title: '快检已记录', icon: 'success' });
+          self.loadBatches();
+          self.loadChecklist();
+        }).catch(function (err) {
+          wx.showToast({ title: (err && err.body && err.body.detail) || '提交失败', icon: 'none' });
+        });
+      }
+    });
+  },
+
+  /** 召回批次 */
+  recallBatch: function (e) {
+    var self = this;
+    var batchId = e.currentTarget.dataset.id;
+    wx.showModal({
+      title: '确认召回', editable: true, placeholderText: '请输入召回原因（如：监管部门通知）',
+      confirmColor: '#FA5151',
+      success: function (res) {
+        if (!res.confirm) return;
+        var reason = (res.content || '').trim() || '食品安全召回';
+        app.request({
+          url: '/food-safety/batches/' + batchId + '/recall', method: 'POST',
+          data: { reason: reason }
+        }).then(function () {
+          wx.showToast({ title: '已召回', icon: 'success' });
+          self.loadBatches();
+          self.loadChecklist();
+        }).catch(function (err) {
+          wx.showToast({ title: (err && err.body && err.body.detail) || '操作失败', icon: 'none' });
+        });
+      }
+    });
+  },
+
+  /** 销毁批次 */
+  destroyBatch: function (e) {
+    var self = this;
+    var batchId = e.currentTarget.dataset.id;
+    wx.showModal({
+      title: '确认销毁', editable: true, placeholderText: '请输入销毁原因（如：变质销毁）',
+      confirmColor: '#FA5151',
+      success: function (res) {
+        if (!res.confirm) return;
+        var reason = (res.content || '').trim() || '不合格销毁';
+        app.request({
+          url: '/food-safety/batches/' + batchId + '/destroy', method: 'POST',
+          data: { reason: reason }
+        }).then(function () {
+          wx.showToast({ title: '已销毁', icon: 'success' });
+          self.loadBatches();
+          self.loadChecklist();
+        }).catch(function (err) {
+          wx.showToast({ title: (err && err.body && err.body.detail) || '操作失败', icon: 'none' });
+        });
+      }
+    });
+  },
+
+  /** 查看受影响订单（召回通知范围） */
+  viewAffectedOrders: function (e) {
+    var self = this;
+    var batchId = e.currentTarget.dataset.id;
+    wx.showLoading({ title: '查询中...' });
+    app.request({ url: '/food-safety/batches/' + batchId + '/affected-orders' })
+      .then(function (data) {
+        wx.hideLoading();
+        var records = (data && data.affected_records) || [];
+        var remaining = (data && data.remaining_qty) || 0;
+        if (records.length === 0) {
+          wx.showModal({
+            title: '受影响订单',
+            content: '该批次未关联到销售/退款订单；剩余库存 ' + remaining + '。',
+            showCancel: false
+          });
+        } else {
+          var lines = records.map(function (r) {
+            return '• ' + (r.time ? r.time.slice(0, 10) + ' ' : '') + r.qty + (r.notes || '');
+          });
+          wx.showModal({
+            title: '受影响订单 ' + records.length + ' 笔',
+            content: '剩余 ' + remaining + '。涉及订单：\n' + lines.join('\n'),
+            showCancel: false
+          });
+        }
+      })
+      .catch(function (err) {
+        wx.hideLoading();
+        wx.showToast({ title: (err && err.body && err.body.detail) || '查询失败', icon: 'none' });
+      });
   },
 
   getStatusLabel: function (s) { return STATUS_LABELS[s] || s; },

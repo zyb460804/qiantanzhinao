@@ -263,7 +263,7 @@ export default function Dashboard() {
                       <stop offset="100%" stopColor={BLUE} stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#E6EBE8" />
+                  <CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#E8ECEA" />
                   <XAxis dataKey="date" tickFormatter={(value) => value.slice(5)} />
                   <YAxis yAxisId="usage" tickFormatter={compact} width={48} />
                   <YAxis yAxisId="tenant" orientation="right" allowDecimals={false} width={28} />

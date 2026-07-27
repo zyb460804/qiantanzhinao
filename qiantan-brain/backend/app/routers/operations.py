@@ -808,6 +808,16 @@ async def check_customer_credit(
 # ═══════════════════════════════════════════════════════════
 
 
+def _rows_to_csv(headers: list[str], rows: list[list]) -> str:
+    """生成 UTF-8 BOM CSV 字符串，供前端直接写文件分享。"""
+    output = io.StringIO()
+    w = csv.writer(output)
+    w.writerow(headers)
+    for row in rows:
+        w.writerow(row)
+    return "﻿" + output.getvalue()
+
+
 @router.get("/export/sales")
 async def export_sales(
     start_date: date,
@@ -815,7 +825,12 @@ async def export_sales(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Export sales orders as CSV."""
+    """Export sales orders as JSON envelope {code:0, data:{rows, csv, filename}}.
+
+    P0 修复：原返回 StreamingResponse CSV，前端 app.request 期待 {code:0} JSON
+    信封，CSV 字符串落入 business_error 分支永远失败。改为 JSON 信封后前端
+    可直接读 data.csv 落盘分享。
+    """
     from datetime import time as dt_time
 
     day_start = datetime.combine(start_date, dt_time.min)
@@ -837,28 +852,27 @@ async def export_sales(
         .all()
     )
 
-    output = io.StringIO()
-    w = csv.writer(output)
-    w.writerow(["订单号", "状态", "金额", "实付", "退款", "客户", "时间"])
-    for o in orders:
-        w.writerow(
-            [
-                o.order_no,
-                o.status,
-                float(o.total_amount),
-                float(o.paid_amount or 0),
-                float(o.refunded_amount or 0),
-                o.customer_name or "",
-                o.created_at.isoformat() if o.created_at else "",
-            ]
-        )
-
-    output.seek(0)
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=sales_{start_date}_{end_date}.csv"},
-    )
+    headers = ["订单号", "状态", "金额", "实付", "退款", "客户", "时间"]
+    rows = [
+        {
+            "订单号": o.order_no,
+            "状态": o.status,
+            "金额": float(o.total_amount),
+            "实付": float(o.paid_amount or 0),
+            "退款": float(o.refunded_amount or 0),
+            "客户": o.customer_name or "",
+            "时间": o.created_at.isoformat() if o.created_at else "",
+        }
+        for o in orders
+    ]
+    return {
+        "code": 0,
+        "data": {
+            "rows": rows,
+            "csv": _rows_to_csv(headers, [[r[h] for h in headers] for r in rows]),
+            "filename": f"sales_{start_date}_{end_date}.csv",
+        },
+    }
 
 
 @router.get("/export/inventory")
@@ -889,24 +903,23 @@ async def export_inventory(
         )
         product_names = {c.id: c.name for c in cats}
 
-    output = io.StringIO()
-    w = csv.writer(output)
-    w.writerow(["商品", "当前库存", "平均成本"])
-    for r in rows:
-        w.writerow(
-            [
-                product_names.get(r.product_id, f"商品{r.product_id}"),
-                float(r.current_qty),
-                float(r.avg_cost) if r.avg_cost else "",
-            ]
-        )
-
-    output.seek(0)
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=inventory.csv"},
-    )
+    headers = ["商品", "当前库存", "平均成本"]
+    inv_rows = [
+        {
+            "商品": product_names.get(r.product_id, f"商品{r.product_id}"),
+            "当前库存": float(r.current_qty),
+            "平均成本": float(r.avg_cost) if r.avg_cost else "",
+        }
+        for r in rows
+    ]
+    return {
+        "code": 0,
+        "data": {
+            "rows": inv_rows,
+            "csv": _rows_to_csv(headers, [[r[h] for h in headers] for r in inv_rows]),
+            "filename": "inventory.csv",
+        },
+    }
 
 
 @router.get("/export/waste")
@@ -949,27 +962,26 @@ async def export_waste(
         )
         product_names = {c.id: c.name for c in cats}
 
-    output = io.StringIO()
-    w = csv.writer(output)
-    w.writerow(["商品", "数量", "单位", "成本", "原因", "时间"])
-    for r in rows:
-        w.writerow(
-            [
-                product_names.get(r.product_id, f"商品{r.product_id}"),
-                float(abs(r.quantity)),
-                r.unit,
-                float(r.total_amount) if r.total_amount else "",
-                r.notes,
-                r.event_time.isoformat() if r.event_time else "",
-            ]
-        )
-
-    output.seek(0)
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=waste_{start_date}_{end_date}.csv"},
-    )
+    headers = ["商品", "数量", "单位", "成本", "原因", "时间"]
+    waste_rows = [
+        {
+            "商品": product_names.get(r.product_id, f"商品{r.product_id}"),
+            "数量": float(abs(r.quantity)),
+            "单位": r.unit,
+            "成本": float(r.total_amount) if r.total_amount else "",
+            "原因": r.notes,
+            "时间": r.event_time.isoformat() if r.event_time else "",
+        }
+        for r in rows
+    ]
+    return {
+        "code": 0,
+        "data": {
+            "rows": waste_rows,
+            "csv": _rows_to_csv(headers, [[r[h] for h in headers] for r in waste_rows]),
+            "filename": f"waste_{start_date}_{end_date}.csv",
+        },
+    }
 
 
 @router.get("/export/accounts")

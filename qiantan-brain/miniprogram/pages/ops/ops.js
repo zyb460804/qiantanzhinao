@@ -27,15 +27,27 @@ Page({
 
   onShow: function () {
     this.setData({ skin: 'skin-' + app.resolveSkin() });
-    this.loadAll();
+    // onShow 在页面间来回切换时会被频繁触发；若距上次加载不足 30s，跳过重复请求，
+    // 避免弱网下切 tab 反复拉数据。下拉刷新/主动操作不受此限制。
+    var now = Date.now();
+    if (!this._lastFullLoadAt || now - this._lastFullLoadAt > 30000) {
+      this._lastFullLoadAt = now;
+      this.loadAll();
+    }
   },
 
   switchTab: function (e) {
     var t = e.currentTarget.dataset.tab;
     this.setData({ tab: t });
-    if (t === 'waste') { this.loadWasteReasons(); this.loadWasteRecords(); this.loadProducts(); }
-    else if (t === 'clearance') this.loadClearance();
-    else if (t === 'customers') this.loadCustomers();
+    // 切 tab 时只在距上次加载该模块超过 30s 才重新拉，避免每次切换都全量并发。
+    var now = Date.now();
+    this._tabLoadAt = this._tabLoadAt || {};
+    if (now - (this._tabLoadAt[t] || 0) > 30000) {
+      this._tabLoadAt[t] = now;
+      if (t === 'waste') { this.loadWasteReasons(); this.loadWasteRecords(); this.loadProducts(); }
+      else if (t === 'clearance') this.loadClearance();
+      else if (t === 'customers') this.loadCustomers();
+    }
   },
 
   loadAll: function () {
@@ -44,6 +56,19 @@ Page({
     this.loadProducts();
     this.loadClearance();
     this.loadCustomers();
+    var now = Date.now();
+    this._tabLoadAt = this._tabLoadAt || {};
+    this._tabLoadAt.waste = now;
+    this._tabLoadAt.clearance = now;
+    this._tabLoadAt.customers = now;
+  },
+
+  onPullDownRefresh: function () {
+    // 下拉刷新强制清空时间戳并重新加载全部模块。
+    this._lastFullLoadAt = 0;
+    this._tabLoadAt = {};
+    this.loadAll();
+    wx.stopPullDownRefresh();
   },
 
   // ── 报损 ──
@@ -51,7 +76,11 @@ Page({
     var self = this;
     app.request({ url: '/ops/waste-reasons' }).then(function (data) {
       self.setData({ wasteReasons: data || [] });
-    }).catch(function () { self.setData({ wasteReasons: ['腐烂', '过期', '破损', '其他'] }); });
+    }).catch(function () {
+      // fallback 必须与后端 WASTE_REASONS 字典保持一致，否则用户选了
+      // 不在白名单的原因（如"过期"/"破损"），后端会以 400 拒绝。
+      self.setData({ wasteReasons: ['腐烂', '碰伤', '脱水', '过熟', '顾客挑拣损坏', '试吃', '赠送', '称重误差', '盘点差异', '供应商质量问题', '冷柜故障', '临期未售完', '其他'] });
+    });
   },
   loadProducts: function () {
     var self = this;
@@ -204,7 +233,27 @@ Page({
   // ── 导出 ──
   onExportDate: function (e) { var f = e.currentTarget.dataset.field; var v = e.detail.value; var d = {}; d[f] = v; this.setData(d); },
 
-  // 统一 CSV 生成与分享
+  // 把 CSV 字符串写到用户目录并拉起分享。后端导出端点统一返回
+  // {code:0, data:{rows:[...], csv:'...', filename:'...'}}，前端不再二次拼 CSV，
+  // 避免"前端拼一次 + 后端拼一次"的双重生成问题。
+  _shareCsv: function (type, csv, filename, rowCount) {
+    if (!csv) { wx.showToast({ title: '暂无数据可导出', icon: 'none' }); return; }
+    var fs = wx.getFileSystemManager();
+    var filePath = wx.env.USER_DATA_PATH + '/export_' + type + '_' + Date.now() + '.csv';
+    fs.writeFile({
+      filePath: filePath, data: csv, encoding: 'utf8',
+      success: function () {
+        wx.shareFileMessage({
+          filePath: filePath, fileName: filename || (type + '.csv'),
+          success: function () { wx.showToast({ title: '已导出 ' + (rowCount != null ? rowCount : '') + ' 行', icon: 'success' }); },
+          fail: function (err) { if (!(err && err.errMsg && err.errMsg.indexOf('cancel') >= 0)) wx.showToast({ title: '文件分享失败', icon: 'none' }); },
+        });
+      },
+      fail: function () { wx.showToast({ title: '文件写入失败', icon: 'none' }); },
+    });
+  },
+
+  // 本地兜底：当后端导出端点异常、或需要用页面内已加载的数据导出时使用。
   _exportCSV: function (type, rows) {
     if (!rows || rows.length === 0) { wx.showToast({ title: '暂无数据可导出', icon: 'none' }); return; }
     var headers = Object.keys(rows[0]);
@@ -215,19 +264,7 @@ Page({
         return v != null ? '"' + String(v).replace(/"/g, '""') + '"' : '';
       }).join(',') + '\n';
     });
-    var fs = wx.getFileSystemManager();
-    var filePath = wx.env.USER_DATA_PATH + '/export_' + type + '_' + Date.now() + '.csv';
-    fs.writeFile({
-      filePath: filePath, data: csv, encoding: 'utf8',
-      success: function () {
-        wx.shareFileMessage({
-          filePath: filePath, fileName: type + '.csv',
-          success: function () { wx.showToast({ title: '已导出 ' + rows.length + ' 行', icon: 'success' }); },
-          fail: function (err) { if (!(err && err.errMsg && err.errMsg.indexOf('cancel') >= 0)) wx.showToast({ title: '文件分享失败', icon: 'none' }); },
-        });
-      },
-      fail: function () { wx.showToast({ title: '文件写入失败', icon: 'none' }); },
-    });
+    this._shareCsv(type, csv, type + '.csv', rows.length);
   },
 
   doExport: function (e) {
@@ -244,29 +281,16 @@ Page({
     if (start > end) { wx.showToast({ title: '开始日期不能晚于结束日期', icon: 'none' }); return; }
     var url;
 
-    // 往来账导出:用本地已加载的客户赊账数据生成 CSV(后端无独立端点)
-    if (type === 'accounts') {
-      var customers = this.data.customers;
-      if (!customers.length) { wx.showToast({ title: '暂无客户数据', icon: 'none' }); return; }
-      var rows = customers.map(function (c) {
-        return {
-          customer_name: c.customer_name || '',
-          balance: c.balance || 0,
-          is_overdue: c.is_overdue ? '是' : '否',
-          overdue_days: c.overdue_days || 0,
-          last_transaction: c.last_transaction || '',
-        };
-      });
-      self._exportCSV(type, rows);
-      return;
-    }
-
+    // 往来账：后端 /ops/export/accounts 同时返回供应商应付 + 客户应收，比只导出
+    // 页面本地 customers 数据更完整（修正此前"后端无独立端点"的错误注释）。
     if (type === 'sales') {
       url = '/ops/export/sales?start_date=' + start + '&end_date=' + end;
     } else if (type === 'waste') {
       url = '/ops/export/waste?start_date=' + start + '&end_date=' + end;
     } else if (type === 'inventory') {
       url = '/ops/export/inventory';
+    } else if (type === 'accounts') {
+      url = '/ops/export/accounts';
     } else {
       wx.showToast({ title: '不支持的导出类型', icon: 'none' }); return;
     }
@@ -276,8 +300,16 @@ Page({
     app.request({ url: url }).then(function (data) {
       wx.hideLoading();
       self.setData({ exporting: false });
-      var rows = Array.isArray(data) ? data : (data && data.rows ? data.rows : []);
-      self._exportCSV(type, rows);
+      // 后端返回 {rows, csv, filename}，优先用后端生成的 csv 直接落盘分享。
+      if (data && data.csv) {
+        var rowCount = Array.isArray(data.rows) ? data.rows.length : 0;
+        if (rowCount === 0) { wx.showToast({ title: '暂无数据可导出', icon: 'none' }); return; }
+        self._shareCsv(type, data.csv, data.filename || (type + '.csv'), rowCount);
+      } else {
+        // 兜底：后端若只给了 rows，前端再拼 CSV。
+        var rows = Array.isArray(data) ? data : (data && data.rows ? data.rows : []);
+        self._exportCSV(type, rows);
+      }
     }).catch(function (err) {
       wx.hideLoading();
       self.setData({ exporting: false });

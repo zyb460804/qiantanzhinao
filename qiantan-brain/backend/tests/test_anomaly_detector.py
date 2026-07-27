@@ -20,7 +20,8 @@ class TestDetectionConfig:
         config = DetectionConfig()
         assert config.zscore_threshold == 3.0
         assert config.min_data_points == 5
-        assert config.ensemble_vote_threshold == 2
+        # 修复后默认阈值 1（原 2 会静默丢弃单检测器类型的信号）
+        assert config.ensemble_vote_threshold == 1
 
 
 class TestAnomalyDetector:

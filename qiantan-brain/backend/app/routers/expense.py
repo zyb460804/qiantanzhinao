@@ -18,7 +18,7 @@ from app.database import get_db
 from app.models.accounts import SupplierPayable
 from app.models.expense import Expense, Invoice
 from app.models.merchant import Merchant
-from app.models.pos import DailySettlement
+from app.models.pos import SaleOrder
 from app.schemas.common import AnyResponse
 
 
@@ -142,16 +142,32 @@ async def monthly_report(
     else:
         end = date(y, m + 1, 1)
 
-    # Revenue
-    revenue_row = (
+    # Revenue — 直接从 SaleOrder 聚合（total - refund），不再依赖 DailySettlement。
+    # 原口径只在手动日结后有收入数据，摊主不日结时月报收入恒为 0；改用订单源数据
+    # 保证语音/POS 记账即可反映收入。status='cancelled' 的订单不计入。
+    month_start = dt.combine(start, dt.min.time())
+    month_end = dt.combine(end, dt.min.time())
+    gross_row = (
         await db.execute(
-            select(func.coalesce(func.sum(DailySettlement.total_sales), Decimal("0"))).where(
-                DailySettlement.merchant_id == merchant.id,
-                DailySettlement.date >= start,
-                DailySettlement.date < end,
+            select(func.coalesce(func.sum(SaleOrder.total_amount), Decimal("0"))).where(
+                SaleOrder.merchant_id == merchant.id,
+                SaleOrder.status != "cancelled",
+                SaleOrder.created_at >= month_start,
+                SaleOrder.created_at < month_end,
             )
         )
     ).scalar() or Decimal("0")
+    refund_row = (
+        await db.execute(
+            select(func.coalesce(func.sum(SaleOrder.refunded_amount), Decimal("0"))).where(
+                SaleOrder.merchant_id == merchant.id,
+                SaleOrder.status != "cancelled",
+                SaleOrder.created_at >= month_start,
+                SaleOrder.created_at < month_end,
+            )
+        )
+    ).scalar() or Decimal("0")
+    revenue_row = gross_row - refund_row
 
     # Purchase cost
     purchase_row = (

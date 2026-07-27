@@ -101,7 +101,7 @@ export default function AiOps() {
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={8}>
           <Card style={{ borderRadius: 10 }}>
-            <Statistic title="AI 动作总数" value={data.length} prefix={<BulbOutlined style={{ color: '#167A5A' }} />} />
+            <Statistic title="AI 动作总数" value={data.length} prefix={<BulbOutlined style={{ color: '#00A06A' }} />} />
           </Card>
         </Col>
         <Col xs={12} sm={8}>
@@ -109,7 +109,7 @@ export default function AiOps() {
             <Statistic
               title="已自动执行"
               value={executedCount}
-              prefix={<CheckCircleOutlined style={{ color: '#16803C' }} />}
+              prefix={<CheckCircleOutlined style={{ color: '#00B578' }} />}
             />
           </Card>
         </Col>
@@ -119,7 +119,7 @@ export default function AiOps() {
               title="成功率"
               value={executedCount > 0 ? Math.round((successCount / executedCount) * 100) : 100}
               suffix="%"
-              prefix={<CheckCircleOutlined style={{ color: '#2563EB' }} />}
+              prefix={<CheckCircleOutlined style={{ color: '#3478F6' }} />}
             />
           </Card>
         </Col>

@@ -49,10 +49,10 @@
 .expiry-copy { flex: 1; display: flex; flex-direction: column; gap: 6rpx; }
 .expiry-title-line { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
 .expiry-name { font-size: 28rpx; font-weight: 700; color: var(--ink); }
-.expiry-qty { font-size: 22rpx; color: var(--corn-deep, #9a6b00); font-family: var(--font-num); }
+.expiry-qty { font-size: 22rpx; color: var(--corn-deep, #8f5a00); font-family: var(--font-num); }
 .expiry-message { font-size: 24rpx; color: var(--ink-2); }
 .expiry-meta { display: flex; gap: 16rpx; font-size: 20rpx; color: var(--muted); }
-.meta-disc { color: var(--corn-deep, #9a6b00); font-weight: 700; }
+.meta-disc { color: var(--corn-deep, #8f5a00); font-weight: 700; }
 
 /* ── 健康概览 ─────────────────────────── */
 .health-grid { display: flex; gap: 16rpx; }
@@ -81,7 +81,7 @@
 .search-clear { font-size: 38rpx; color: var(--muted); padding: 0 8rpx; line-height: 1; }
 .filter-scroll { width: 100%; white-space: nowrap; }
 .filter-list { display: inline-flex; gap: 12rpx; padding: 4rpx 0; }
-.chip.active.warn { background: var(--corn-soft); color: var(--corn-deep, #9a6b00); border-color: var(--corn-soft); }
+.chip.active.warn { background: var(--corn-soft); color: var(--corn-deep, #8f5a00); border-color: var(--corn-soft); }
 .chip.active.danger { background: var(--red-soft); color: var(--red); border-color: var(--red-soft); }
 .sort-tabs { display: flex; gap: 12rpx; padding: 8rpx; background: var(--paper-2); border-radius: 20rpx; }
 .sort-tab { flex: 1; text-align: center; font-size: 24rpx; color: var(--muted); padding: 14rpx; border-radius: 16rpx; }
@@ -100,7 +100,7 @@
 .inv-card.low { border-color: var(--corn-soft); }
 .inv-card.empty { border-color: var(--red-soft); background: var(--red-soft); }
 .product-avatar { width: 80rpx; height: 80rpx; border-radius: 20rpx; background: var(--green-100); color: var(--green-800); font-size: 36rpx; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
-.inv-card.low .product-avatar { background: var(--corn-soft); color: var(--corn-deep, #9a6b00); }
+.inv-card.low .product-avatar { background: var(--corn-soft); color: var(--corn-deep, #8f5a00); }
 .inv-card.empty .product-avatar { background: var(--red-soft); color: var(--red); }
 .product-content { flex: 1; display: flex; flex-direction: column; gap: 12rpx; min-width: 0; }
 .product-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12rpx; }
@@ -109,13 +109,13 @@
 .product-name { font-size: 30rpx; font-weight: 700; color: var(--ink); }
 .status-pill { font-size: 20rpx; font-weight: 700; padding: 4rpx 12rpx; border-radius: 99rpx; flex: none; }
 .status-pill.healthy { background: var(--green-100); color: var(--green-800); }
-.status-pill.low { background: var(--corn-soft); color: var(--corn-deep, #9a6b00); }
+.status-pill.low { background: var(--corn-soft); color: var(--corn-deep, #8f5a00); }
 .status-pill.empty { background: var(--red-soft); color: var(--red); }
 .product-meta { font-size: 22rpx; color: var(--muted); }
 .qty-block { display: flex; align-items: baseline; gap: 4rpx; flex: none; }
 .qty-num { font-family: var(--font-num); font-size: 48rpx; font-weight: 800; line-height: 1; }
 .qty-num.green { color: var(--green-700); }
-.qty-num.amber { color: var(--corn-deep, #9a6b00); }
+.qty-num.amber { color: var(--corn-deep, #8f5a00); }
 .qty-unit { font-size: 22rpx; color: var(--muted); }
 .stock-track { height: 12rpx; border-radius: 99rpx; background: var(--paper-2); overflow: hidden; }
 .stock-fill { height: 100%; border-radius: 99rpx; background: var(--green-500); transition: width .6s var(--ease-expo); }
@@ -130,8 +130,8 @@
 
 /* 商品卡快捷动作 + 智能引导（v3.1） */
 .card-action-row { display:flex; gap:14rpx; margin-top:14rpx; }
-.card-action-btn { font-size:22rpx; padding:8rpx 20rpx; border-radius:99rpx; color:var(--green-800); background:var(--green-50, rgba(23,92,69,.08)); }
-.card-action-btn.warn { color:var(--corn-deep, #9a6b00); background:rgba(243,168,59,.14); }
+.card-action-btn { font-size:22rpx; padding:8rpx 20rpx; border-radius:99rpx; color:var(--green-800); background:var(--green-50, rgba(0, 160, 106,.08)); }
+.card-action-btn.warn { color:var(--corn-deep, #8f5a00); background:rgba(243,168,59,.14); }
 
 .quick-action-row { display:flex; flex-direction:column; gap:16rpx; }
 .quick-action-card { display:flex; align-items:center; gap:20rpx; padding:24rpx 28rpx; background:var(--surface); border:1rpx solid var(--line); border-radius:var(--r-lg, 20rpx); }
@@ -140,5 +140,5 @@
 .qa-glyph.warn { background:var(--corn); }
 .qa-glyph.danger { background:var(--red); }
 .qa-copy { display:flex; flex-direction:column; gap:4rpx; }
-.qa-title { font-size:28rpx; font-weight:600; color:var(--text, #1f2a24); }
+.qa-title { font-size:28rpx; font-weight:600; color:var(--ink); }
 .qa-desc { font-size:22rpx; color:var(--green-700); }

@@ -1,7 +1,7 @@
 {
   "navigationBarTitleText": "决策沙盘",
   "usingComponents": {},
-  "navigationBarBackgroundColor": "#123D30",
-  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#FFFFFF",
+  "navigationBarTextStyle": "black",
   "enablePullDownRefresh": true
 }

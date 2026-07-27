@@ -140,7 +140,7 @@ export default function Plans() {
           </PermissionGate>
           <PermissionGate permission={PERMISSIONS.PLAN_DELETE}>
             <Popconfirm title="确认停用此套餐？" onConfirm={() => onDelete(record.id)}>
-              <a style={{ color: '#DC2626' }}>停用</a>
+              <a style={{ color: '#FA5151' }}>停用</a>
             </Popconfirm>
           </PermissionGate>
         </Space>

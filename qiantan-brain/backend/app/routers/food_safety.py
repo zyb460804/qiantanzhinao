@@ -176,9 +176,23 @@ async def lookup_trace(
 
     Only exposes public-safe fields: product name, supplier, origin,
     inspection result, certificates, and recall status. Never exposes cost/profit.
+
+    安全（审计 P1-9）：trace_code 来自路径参数，进入 LIKE 查询前必须转义通配符，
+    否则 `?trace_code=%25`（URL 编码的 %）即可匹配任意含 qr_data 的批次，
+    无鉴权枚举全平台批次与供应商信息。现用 autoescape=True 并校验格式。
     """
-    # Search all batches for this trace_code in qr_data JSON
-    query = select(BatchLifecycle).where(BatchLifecycle.qr_data.contains(trace_code)).limit(1)
+    # 格式白名单：仅允许 32 位 hex 或 UUID（与 generate_trace_code 的输出格式一致）
+    import re
+
+    if not re.fullmatch(r"[A-Za-z0-9\-]{8,64}", trace_code):
+        raise HTTPException(status_code=400, detail="追溯码格式无效")
+
+    # Search all batches for this trace_code in qr_data JSON（autoescape 转义 LIKE 通配符）
+    query = (
+        select(BatchLifecycle)
+        .where(BatchLifecycle.qr_data.contains(trace_code, autoescape=True))
+        .limit(1)
+    )
     result = await db.execute(query)
     batch = result.scalar_one_or_none()
 
@@ -226,9 +240,13 @@ async def trace_qr_image(
     if not batch:
         raise HTTPException(status_code=404, detail="追溯码无效")
 
-    # 小程序 trace 页面路径（微信扫码直接跳到追溯页）
-    # 微信小程序 URL Scheme: 需要在微信公众平台配置
-    trace_url = f"https://mp.weixin.qq.com/trace/{trace_code}"
+    # 微信扫普通二维码打开小程序：二维码内容必须是已备案的 HTTPS URL，
+    # 在 mp.weixin.qq.com「普通链接二维码」规则里指向本小程序 pages/trace/trace。
+    # trace.js onLoad 已支持 options.q 解析 ?code=<trace_code>，故 URL 用查询串承载。
+    # 占位域名 qiantan.example.com 仅作 default；部署时必须替换为商户备案的 H5 域名
+    # 并通过环境变量 TRACE_QR_BASE_URL 覆盖（暂未抽出 settings，留作 TODO）。
+    trace_qr_base = "https://qiantan.example.com/t"
+    trace_url = f"{trace_qr_base}?code={trace_code}"
 
     qr = qrcode.QRCode(
         version=2,
@@ -244,6 +262,63 @@ async def trace_qr_image(
     img.save(buf, format="PNG")
     buf.seek(0)
     return StreamingResponse(buf, media_type="image/png")
+
+
+@router.post("/trace/{trace_code}/feedback", response_model=AnyResponse)
+async def submit_consumer_trace_feedback(
+    trace_code: str,
+    body: dict = Body(default={}),
+    db: AsyncSession = Depends(get_db),
+):
+    """消费者扫码后的公开反馈通道 — 无需商户 token。
+
+    消费者扫码场景下，调用 /feedback（依赖 get_merchant_id）会强制走 ensureLogin，
+    把匿名消费者错绑为商户账号。这里改由后端根据 trace_code 反查批次归属商户，
+    将反馈写入同一张 merchant_feedback，从而避开身份冲突。
+
+    body: { content: str, page?: str }
+    """
+    content = (body.get("content") or "").strip()
+    if len(content) < 2 or len(content) > 2000:
+        raise HTTPException(status_code=400, detail="反馈内容长度需在 2-2000 字之间")
+
+    # 反查批次 → 拿到批次归属商户
+    query = select(BatchLifecycle).where(BatchLifecycle.qr_data.contains(trace_code)).limit(1)
+    result = await db.execute(query)
+    batch = result.scalar_one_or_none()
+    if not batch:
+        raise HTTPException(status_code=404, detail="追溯码无效，无法提交反馈")
+
+    # 写入与商户反馈同一张表，便于商户在「我的-意见反馈」里统一查看。
+    # 延迟导入避免循环依赖。
+    from app.models.feedback import MerchantFeedback
+
+    feedback = MerchantFeedback(
+        id=uuid.uuid4(),
+        merchant_id=batch.merchant_id,
+        content="[消费者追溯反馈] " + content,
+        page=body.get("page") or f"pages/trace/trace?code={trace_code}",
+        app_version=None,
+        created_at=utc_now().date(),
+    )
+    db.add(feedback)
+    # 留痕：消费者反馈也记一条 AuditLog，便于商户后台追溯。
+    db.add(
+        AuditLog(
+            merchant_id=batch.merchant_id,
+            action="consumer_trace_feedback",
+            target_table="merchant_feedback",
+            target_id=str(feedback.id),
+            after_data={"trace_code": trace_code, "content_preview": content[:80]},
+            operator="consumer",
+        )
+    )
+    await db.commit()
+    return {
+        "code": 0,
+        "message": "反馈已提交，感谢你的反馈！",
+        "data": {"feedback_id": str(feedback.id)},
+    }
 
 
 @router.post("/batches/{batch_id}/inspect", response_model=AnyResponse)

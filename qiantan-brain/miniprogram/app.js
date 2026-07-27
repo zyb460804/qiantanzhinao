@@ -45,6 +45,8 @@ App({
     apiConfigured: false,
     envVersion: 'develop',
     accessToken: '',
+    staffToken: '',        // 员工身份 token（切换员工时存在，优先于 accessToken）
+    currentStaff: null,    // {staff_id, name, role, permissions} 当前员工身份
     merchantId: '',
     merchantName: '',
     networkOnline: true,
@@ -57,6 +59,9 @@ App({
     reportDataVersion: 0,
     purchaseDraft: null,   // 采购草稿缓存（advisor/calendar 写入，purchase 页消费）
   },
+
+  /** 持久化键名常量（与 utils/storage.js 保持一致，避免散落字符串字面量）。 */
+  _storageKeys: require('./utils/storage').KEYS,
 
   _toastLock: false,
   _loginPromise: null,
@@ -71,6 +76,7 @@ App({
   },
 
   onLaunch: function () {
+    var KEYS = this._storageKeys;
     var apiConfig = require('./config/api').resolveApiBase();
     this.globalData.apiBase = apiConfig.apiBase;
     this.globalData.apiConfigured = apiConfig.ok;
@@ -80,9 +86,21 @@ App({
       this._showApiConfigurationError(apiConfig.error);
     }
 
-    this.globalData.accessToken = wx.getStorageSync('accessToken') || '';
-    this.globalData.merchantId = wx.getStorageSync('merchantId') || '';
-    this.globalData.merchantName = wx.getStorageSync('merchantName') || '';
+    this.globalData.accessToken = wx.getStorageSync(KEYS.ACCESS_TOKEN) || '';
+    this.globalData.staffToken = wx.getStorageSync(KEYS.STAFF_TOKEN) || '';
+    this.globalData.currentStaff = wx.getStorageSync(KEYS.CURRENT_STAFF) || null;
+    this.globalData.merchantId = wx.getStorageSync(KEYS.MERCHANT_ID) || '';
+    this.globalData.merchantName = wx.getStorageSync(KEYS.MERCHANT_NAME) || '';
+    // 恢复全局偏好：皮肤/主题/减少动效（任何入口的设置都跨页面生效）
+    var savedSkin = wx.getStorageSync(KEYS.SKIN_MANUAL);
+    if (savedSkin === 'morning' || savedSkin === 'noon' || savedSkin === 'evening') {
+      this.globalData.skinManual = savedSkin;
+    }
+    var savedTheme = wx.getStorageSync(KEYS.THEME);
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      this.globalData.theme = savedTheme;
+    }
+    this.globalData.reduceMotion = wx.getStorageSync(KEYS.REDUCE_MOTION) === true;
     this.globalData.skin = this.getSkinByHour(new Date().getHours());
 
     // 同步减少动效到 stream-text 模块
@@ -154,22 +172,74 @@ App({
   },
 
   _persistLogin: function (data) {
+    var KEYS = this._storageKeys;
     var merchant = data.merchant || {};
     this.globalData.accessToken = data.token;
     this.globalData.merchantId = merchant.id || '';
     this.globalData.merchantName = merchant.name || '';
-    wx.setStorageSync('accessToken', data.token);
-    wx.setStorageSync('merchantId', this.globalData.merchantId);
-    wx.setStorageSync('merchantName', this.globalData.merchantName);
+    wx.setStorageSync(KEYS.ACCESS_TOKEN, data.token);
+    wx.setStorageSync(KEYS.MERCHANT_ID, this.globalData.merchantId);
+    wx.setStorageSync(KEYS.MERCHANT_NAME, this.globalData.merchantName);
   },
 
   clearLogin: function () {
+    var KEYS = this._storageKeys;
     this.globalData.accessToken = '';
     this.globalData.merchantId = '';
     this.globalData.merchantName = '';
-    wx.removeStorageSync('accessToken');
-    wx.removeStorageSync('merchantId');
-    wx.removeStorageSync('merchantName');
+    // 退出登录时一并清除员工身份
+    this.globalData.staffToken = '';
+    this.globalData.currentStaff = null;
+    wx.removeStorageSync(KEYS.ACCESS_TOKEN);
+    wx.removeStorageSync(KEYS.MERCHANT_ID);
+    wx.removeStorageSync(KEYS.MERCHANT_NAME);
+    wx.removeStorageSync(KEYS.STAFF_TOKEN);
+    wx.removeStorageSync(KEYS.CURRENT_STAFF);
+  },
+
+  // ── 员工身份切换（权限体系）─────────────────────────────
+  // owner 登录后可切换到员工身份：调 POST /staff/login 验证 PIN，
+  // 拿到 staff token 后替换请求 token，require_permission 即按员工角色拦截。
+  switchToStaff: function (staffId, pinCode) {
+    var self = this;
+    return this.request({
+      url: '/staff/login',
+      method: 'POST',
+      data: { staff_id: staffId, pin_code: pinCode },
+    }).then(function (data) {
+      self.globalData.staffToken = data.token;
+      self.globalData.currentStaff = {
+        staff_id: data.staff_id,
+        name: data.name,
+        role: data.role,
+        permissions: data.permissions,
+      };
+      var KEYS = self._storageKeys;
+      wx.setStorageSync(KEYS.STAFF_TOKEN, data.token);
+      wx.setStorageSync(KEYS.CURRENT_STAFF, self.globalData.currentStaff);
+      return data;
+    });
+  },
+
+  // 退出员工身份，恢复 owner
+  exitStaff: function () {
+    var KEYS = this._storageKeys;
+    this.globalData.staffToken = '';
+    this.globalData.currentStaff = null;
+    wx.removeStorageSync(KEYS.STAFF_TOKEN);
+    wx.removeStorageSync(KEYS.CURRENT_STAFF);
+  },
+
+  // 当前是否处于员工身份
+  isStaffMode: function () {
+    return !!this.globalData.staffToken;
+  },
+
+  // 检查当前身份是否有某权限（员工身份查 currentStaff.permissions，owner 全权）
+  hasPermission: function (permission) {
+    if (!this.isStaffMode()) return true;  // owner 全权
+    var perms = (this.globalData.currentStaff && this.globalData.currentStaff.permissions) || [];
+    return perms.indexOf(permission) >= 0;
   },
 
   _wechatCode: function () {
@@ -227,7 +297,8 @@ App({
     var self = this;
     attempt = attempt || 1;
     var authRequired = options.auth !== false;
-    var token = this.globalData.accessToken;
+    // 员工身份切换时优先用 staffToken；否则用 owner accessToken
+    var token = this.globalData.staffToken || this.globalData.accessToken;
     var maxRetries = options.maxRetries != null ? options.maxRetries : 2;
     var method = String(options.method || 'GET').toUpperCase();
     // 写请求（POST/PUT/PATCH/DELETE）默认禁止自动重试，
@@ -253,6 +324,13 @@ App({
             if (isWriteMethod) self.markReportDirty();
             resolve(body.data);
           } else if (res.statusCode === 401 && authRequired && !retried) {
+            if (self.globalData.staffToken) {
+              // 员工身份 token 过期 → 清除员工身份并提示，不静默回退 owner（安全）
+              self.exitStaff();
+              self.showToast('员工身份已过期，请重新切换');
+              reject({ type: 'staff_auth_expired', statusCode: 401, body: body });
+              return;
+            }
             self.ensureLogin(true).then(function () {
               return self._requestOnce(options, true, attempt);
             }).then(resolve).catch(reject);
@@ -327,7 +405,9 @@ App({
     var self = this;
     return new Promise(function (resolve, reject) {
       var header = Object.assign({}, options.header || {});
-      if (self.globalData.accessToken) header.Authorization = 'Bearer ' + self.globalData.accessToken;
+      // 员工身份切换时优先用 staffToken
+      var uploadToken = self.globalData.staffToken || self.globalData.accessToken;
+      if (uploadToken) header.Authorization = 'Bearer ' + uploadToken;
       wx.uploadFile({
         url: self.globalData.apiBase + options.url,
         filePath: options.filePath,
@@ -365,6 +445,47 @@ App({
   getMerchantId: function () { return this.globalData.merchantId; },
   getSkinByHour: function (h) { return h < 11 ? 'morning' : h < 17 ? 'noon' : 'evening'; },
   resolveSkin: function () { return this.globalData.skinManual || this.getSkinByHour(new Date().getHours()); },
+
+  /**
+   * 设置手动皮肤（早市/午市/晚市），同时持久化与写入 globalData，
+   * 保证 styleguide / index / profile 任何入口切换后全局一致。
+   * @param {string} skin - 'morning' | 'noon' | 'evening'
+   */
+  setSkinManual: function (skin) {
+    if (skin !== 'morning' && skin !== 'noon' && skin !== 'evening') return;
+    this.globalData.skinManual = skin;
+    wx.setStorageSync(this._storageKeys.SKIN_MANUAL, skin);
+  },
+
+  /**
+   * 清除手动皮肤，恢复按时段自动切换。
+   */
+  clearSkinManual: function () {
+    this.globalData.skinManual = null;
+    wx.removeStorageSync(this._storageKeys.SKIN_MANUAL);
+  },
+
+  /**
+   * 设置全局主题（light/dark），同时持久化。
+   * @param {string} theme - 'light' | 'dark'
+   */
+  setTheme: function (theme) {
+    if (theme !== 'light' && theme !== 'dark') return;
+    this.globalData.theme = theme;
+    wx.setStorageSync(this._storageKeys.THEME, theme);
+  },
+
+  /**
+   * 设置减少动效开关：同步 globalData、持久化、并通知 stream-text 模块。
+   * 任何页面（styleguide/设置页）都应通过此方法修改，避免出现死开关。
+   * @param {boolean} value
+   */
+  setReduceMotion: function (value) {
+    var v = !!value;
+    this.globalData.reduceMotion = v;
+    wx.setStorageSync(this._storageKeys.REDUCE_MOTION, v);
+    try { require('./utils/stream-text').setReduceMotion(v); } catch (e) {}
+  },
 
   /** 获取商户所在城市（优先 storage，默认上海） */
   getCity: function () {

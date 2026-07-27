@@ -11,15 +11,15 @@
 | 后端 API | `http://127.0.0.1:8000` |
 | API 文档 | `http://127.0.0.1:8000/docs` |
 | Web 管理后台 | `http://localhost:5174` |
-| 管理后台登录 | `admin@qiantan.com` / `Admin123!` |
+| 管理后台登录 | 由 `seed_saas.py` 创建（开发默认口令见脚本，生产须环境变量设置） |
 
 ## 技术栈
 
-- **小程序**：微信小程序原生 · 23 个页面
+- **小程序**：微信小程序原生 · 24 个页面
 - **管理后台**：React 18 + Vite + Ant Design 5
-- **后端**：FastAPI + Python 3.11 + SQLAlchemy 2.0
+- **后端**：FastAPI + Python 3.13 + SQLAlchemy 2.0 · 250+ 端点
 - **数据库**：PostgreSQL 16（生产）/ SQLite（本地开发）
-- **测试**：404 个测试通过
+- **测试**：549 个测试全部通过
 
 ## 快速启动
 

@@ -11,7 +11,7 @@
 .cat-actions { display:flex; gap:8rpx; flex:0 0 auto; }
 .act-btn { padding:6rpx 14rpx; color:var(--green-800); background:var(--green-50); border-radius:99rpx; font-size:20rpx; }
 .act-btn:active { opacity:.7; }
-.act-btn.del { color:#c0493d; background:rgba(201,67,51,.08); }
+.act-btn.del { color:#c93a30; background:rgba(201,67,51,.08); }
 .type-row { display:flex; gap:10rpx; margin-bottom:14rpx; }
 .type-chip { padding:10rpx 18rpx; color:var(--muted); background:var(--paper); border:2rpx solid var(--line); border-radius:14rpx; font-size:21rpx; }
 .type-chip.active { color:#fff; background:var(--green-700); border-color:var(--green-700); }
@@ -28,7 +28,7 @@
 .status-badge.active { color:var(--green-800); background:var(--green-50); }
 .status-badge.off { color:var(--muted); background:rgba(127,127,127,.12); }
 .cat-item.inactive { opacity:.68; }
-.load-warning { margin:12rpx 0; padding:16rpx 20rpx; color:#9a5b00; background:#fff5dc; border-radius:16rpx; font-size:22rpx; text-align:center; }
+.load-warning { margin:12rpx 0; padding:16rpx 20rpx; color:#8f5a00; background:#fff5dc; border-radius:16rpx; font-size:22rpx; text-align:center; }
 .link-btn { margin:0; padding:0 12rpx; min-height:52rpx; line-height:52rpx; color:var(--green-800); background:transparent; border:none; font-size:24rpx; font-weight:700; }
 .link-btn::after { border:none; }
 

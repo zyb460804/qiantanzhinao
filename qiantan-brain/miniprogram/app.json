@@ -23,19 +23,20 @@
     "pages/staff/staff",
     "pages/notices/notices",
     "pages/tenant/tenant",
+    "pages/stall-settings/stall-settings",
     "pages/styleguide/styleguide"
   ],
   "window": {
-    "navigationBarBackgroundColor": "#123D30",
+    "navigationBarBackgroundColor": "#FFFFFF",
     "navigationBarTitleText": "千摊智脑",
-    "navigationBarTextStyle": "white",
-    "backgroundColor": "#F5F1E6",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#F4F6F5",
     "backgroundTextStyle": "dark"
   },
   "tabBar": {
-    "color": "#7D8881",
-    "selectedColor": "#175C45",
-    "backgroundColor": "#FFFEFA",
+    "color": "#98A29D",
+    "selectedColor": "#00A06A",
+    "backgroundColor": "#FFFFFF",
     "borderStyle": "white",
     "list": [
       { "pagePath": "pages/index/index", "text": "经营台", "iconPath": "images/tabbar/tab-home.png", "selectedIconPath": "images/tabbar/tab-home-active.png" },

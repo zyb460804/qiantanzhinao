@@ -26,8 +26,10 @@ Page({
   _decorateItems: function (items) {
     return (items || []).map(function (item) {
       var qty = invStatus.resolveQty(item);
+      // P2 修复：使用后端按单位下发的 low_stock_threshold，不再全局写死=10。
+      var threshold = invStatus.resolveThreshold(item);
       var name = item.product_name || ('商品' + item.product_id);
-      var status = invStatus.inventoryStatus(qty);
+      var status = invStatus.inventoryStatus(qty, threshold);
       var copy = {};
       Object.keys(item).forEach(function (key) { copy[key] = item[key]; });
       copy.display_name = name;

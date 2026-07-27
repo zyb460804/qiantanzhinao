@@ -9,7 +9,7 @@ P0 新增（2026-07-12）:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import TypedDict
 
@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant
 from app.core.tenant_context import QuotaCheck
-from app.core.timezone import utc_now
+from app.core.timezone import local_now, utc_now
 from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.catalog import ProductSKU
@@ -751,7 +751,10 @@ async def _refund_single_item(
         event_time=utc_now(),
         source="pos",
         notes=f"退款退货 订单 {order.order_no}: {reason}",
-        idempotency_key=f"refund:{order.id}:{item.id}",
+        # P1 修复：同一商品行多次退款会撞唯一约束（merchant_id+idempotency_key）。
+        # item.refund_quantity 在本函数开头（737 行）已更新为本次退款后的累计值，
+        # 加入幂等键可区分多次退款（单调递增），同时保留同一退款重试的幂等保护。
+        idempotency_key=f"refund:{order.id}:{item.id}:{item.refund_quantity}",
         client_id=order.client_id,
         client_reference=order.order_no,
     )
@@ -925,7 +928,9 @@ async def refund_order(
                     direction="repay",
                     sale_order_id=order.id,
                     note=f"退款 订单 {order.order_no}: {body.reason}",
-                    idempotency_key=f"sale-refund:{order.id}:{method}",
+                    # P1 修复：加入 order.refunded_amount（883 行已更新为含本次退款的累计值），
+                    # 区分同一订单同渠道的多次退款，保留重试幂等。
+                    idempotency_key=f"sale-refund:{order.id}:{method}:{order.refunded_amount}",
                 )
             total_refund -= amt
 
@@ -1235,7 +1240,7 @@ async def _auto_reconcile_after_payment(
         )
 
         unique_channels = set(payments)
-        today = utc_now().date()
+        today = local_now().date()
         fee_rate = Decimal("0.006")
 
         for channel in unique_channels:
@@ -1254,8 +1259,13 @@ async def _check_settlement_locked(
     merchant_id: uuid.UUID,
     action_date: date | None = None,
 ) -> None:
-    """如果当天日结已关闭，禁止业务操作（section 4.10 日结锁定）。"""
-    target_date = action_date or utc_now().date()
+    """如果当天日结已关闭，禁止业务操作（section 4.10 日结锁定）。
+
+    日界按本地时区（CST UTC+8）判定——摊贩凌晨出摊时 utc_now() 仍是前一天 UTC
+    日期，会误锁到前一天的日结导致新单一律 409。改用 local_now() 保证"今天"
+    与摊贩认知一致。
+    """
+    target_date = action_date or local_now().date()
     settlement = await db.scalar(
         select(DailySettlement).where(
             DailySettlement.merchant_id == merchant_id,
@@ -1342,8 +1352,12 @@ async def _estimate_daily_cogs(
 async def _settlement_numbers(
     db: AsyncSession, merchant_id: uuid.UUID, settle_date: date
 ) -> SettlementNumbers:
-    day_start = datetime.combine(settle_date, time.min, tzinfo=UTC)
-    day_end = datetime.combine(settle_date, time.max, tzinfo=UTC)
+    # 日结窗口按本地日界（CST UTC+8）切——SaleOrder.created_at 以 UTC 存储，
+    # 把本地 settle_date 的 00:00~23:59 转成 UTC 去比对，避免凌晨 0-8 点的
+    # 订单被归入前一日报表。
+    cst = timezone(timedelta(hours=8))
+    day_start = datetime.combine(settle_date, time.min, tzinfo=cst).astimezone(UTC)
+    day_end = datetime.combine(settle_date, time.max, tzinfo=cst).astimezone(UTC)
     order_filters = (
         SaleOrder.merchant_id == merchant_id,
         SaleOrder.created_at >= day_start,

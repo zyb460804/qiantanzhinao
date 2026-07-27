@@ -14,9 +14,13 @@
       <view class="field-copy"><text class="field-label">选择商品</text><text class="field-help">使用当前库存商品</text></view>
       <picker mode="selector" range="{{products}}" value="{{productIndex}}" bindchange="onProductChange"><view class="picker-value">{{products[productIndex] || '请选择'}}<text>⌄</text></view></picker>
     </view>
+    <view wx:if="{{productsEmpty}}" class="empty-state mini">
+      <text class="empty-title">商品目录为空</text>
+      <text class="empty-desc">请先在商品管理添加品类，或下拉刷新重试</text>
+    </view>
     <view class="field-block">
       <view class="slider-head"><view><text class="field-label">计划进货量</text><text class="field-help">拖动滑块快速调整</text></view><text class="quantity-value">{{purchaseQty}}<text> 斤</text></text></view>
-      <slider min="1" max="300" value="{{purchaseQty}}" bindchange="onSliderChange" block-size="22" block-color="#175C45" activeColor="#175C45" backgroundColor="#E4E7E1"/>
+      <slider min="1" max="300" value="{{purchaseQty}}" bindchange="onSliderChange" block-size="22" block-color="#00A06A" activeColor="#00A06A" backgroundColor="#E8ECEA"/>
       <view class="range-label"><text>1斤</text><text>300斤</text></view>
     </view>
     <view class="price-grid">

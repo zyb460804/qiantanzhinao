@@ -2,7 +2,7 @@ const app = getApp();
 
 Page({
   data: {
-    skin: app.globalData.skin,          // 初始按时段
+    skin: app.resolveSkin(),            // 初始：手动 > 按时段
     dark: app.globalData.theme === 'dark',
     reduce: app.globalData.reduceMotion,
     skinList: ['morning', 'noon', 'evening'],
@@ -11,13 +11,22 @@ Page({
     neutrals: ['paper', 'canvas', 'ink', 'ink-2', 'muted', 'line'],
   },
 
+  // 时段皮肤：写入 globalData + 持久化，所有页面 onShow 时通过 Theme.apply 拾取
   setSkin(e) {
-    this.setData({ skin: e.currentTarget.dataset.s });
+    var skin = e.currentTarget.dataset.s;
+    app.setSkinManual(skin);
+    this.setData({ skin: skin });
   },
+  // 深色模式：写入 globalData.theme + 持久化，避免「演示开关」误导
   toggleDark() {
-    this.setData({ dark: !this.data.dark });
+    var next = !this.data.dark;
+    app.setTheme(next ? 'dark' : 'light');
+    this.setData({ dark: next });
   },
+  // 减少动效：通过 app.setReduceMotion 同步 globalData + 持久化 + stream-text
   toggleReduce() {
-    this.setData({ reduce: !this.data.reduce });
+    var next = !this.data.reduce;
+    app.setReduceMotion(next);
+    this.setData({ reduce: next });
   },
 });

@@ -28,6 +28,13 @@ Page({
     this.loadAdvice();
   },
 
+  // advisor.json 已开启 enablePullDownRefresh，必须实现 handler，
+  // 否则下拉加载动画悬挂且不刷新数据
+  onPullDownRefresh: function () {
+    this.loadAdvice();
+    wx.stopPullDownRefresh();
+  },
+
   onHide: function () { this._clearSaysTimer(); },
 
   _clearSaysTimer: function () {
@@ -36,7 +43,6 @@ Page({
       this._saysTimerId.cancel();
     }
     this._saysTimerId = null;
-    if (this._saysDoneTimerId) { clearTimeout(this._saysDoneTimerId); this._saysDoneTimerId = null; }
   },
 
   applySkin: function (skin) {
@@ -262,13 +268,16 @@ Page({
           url: '/ai-actions/' + actionId + '/execute',
           method: 'POST',
           data: { status: 'executed' },
-        }).then(function (res) {
+        }).then(function () {
           wx.hideLoading();
           // 从列表中移除已执行的动作
           var remaining = self.data.aiActions.filter(function (a) { return a.id !== actionId; });
           self.setData({ aiActions: remaining });
-          wx.showToast({ title: res.message || '已执行', icon: 'success' });
-        }).catch(function (err) {
+          // app.request 只 resolve 信封 data 层，message 在信封层取不到，统一兜底
+          wx.showToast({ title: '已执行', icon: 'success' });
+          // 刷新效果复盘列表，让摊主立即看到执行结果
+          self.loadAiHistory();
+        }).catch(function () {
           wx.hideLoading();
           wx.showToast({ title: '执行失败', icon: 'none' });
           app.logError('advisor/executeAiAction', '执行AI动作失败', { silent: true });
@@ -283,16 +292,26 @@ Page({
     var actionId = e.currentTarget.dataset.id;
     if (!actionId) return;
 
-    app.request({
-      url: '/ai-actions/' + actionId + '/execute',
-      method: 'POST',
-      data: { status: 'rejected' },
-    }).then(function () {
-      var remaining = self.data.aiActions.filter(function (a) { return a.id !== actionId; });
-      self.setData({ aiActions: remaining });
-      wx.showToast({ title: '已忽略', icon: 'none' });
-    }).catch(function () {
-      wx.showToast({ title: '操作失败', icon: 'none' });
+    // 二次确认：『忽略』是不可逆操作，紧邻『一键执行』，戴手套/手湿误触率高
+    wx.showModal({
+      title: '确认忽略',
+      content: '忽略后无法撤销，确定吗？',
+      confirmText: '忽略',
+      cancelText: '取消',
+      success: function (r) {
+        if (!r.confirm) return;
+        app.request({
+          url: '/ai-actions/' + actionId + '/execute',
+          method: 'POST',
+          data: { status: 'rejected' },
+        }).then(function () {
+          var remaining = self.data.aiActions.filter(function (a) { return a.id !== actionId; });
+          self.setData({ aiActions: remaining });
+          wx.showToast({ title: '已忽略', icon: 'none' });
+        }).catch(function () {
+          wx.showToast({ title: '操作失败', icon: 'none' });
+        });
+      },
     });
   },
 
@@ -339,23 +358,15 @@ Page({
 
   // ── 加入采购清单 ───────────────────────────
   addToPurchase: function () {
-    var self = this;
     var recIds = this.data.recommendationIds;
 
     if (!recIds || recIds.length === 0) { wx.showToast({ title: '暂无可用的建议', icon: 'none' }); return; }
 
     app.request({ url: '/purchase/from-advice', method: 'POST', data: { recommendation_ids: recIds } })
       .then(function (res) {
-        var draft = app.globalData.purchaseDraft || [];
-        (res.items || []).forEach(function (it) {
-          // 默认采购量从建议中推断，而非硬编码 10
-          var qty = it.suggested_qty || it.recommended_qty || (it.qty ? it.qty * 0.8 : 5);
-          qty = Math.round(qty);
-          draft.push({ name: it.name || it.product_name, qty: qty, unit: '斤', from: '参谋建议' });
-        });
-        app.globalData.purchaseDraft = draft;
-        wx.setStorageSync('purchaseDraft', draft);
-
+        // 服务端已建/扩 draft 采购单（响应 data 只含 list_id/item_count/added_count/unmatched_items，
+        // 不含 items）。早期版本试图读 res.items 构建 purchaseDraft 是永不执行的死代码，
+        // 已移除——以服务端建单结果为准。
         wx.showModal({
           title: '采购清单已生成', content: '共' + res.item_count + '项建议。是否前往采购清单？',
           confirmText: '去查看', cancelText: '稍后',

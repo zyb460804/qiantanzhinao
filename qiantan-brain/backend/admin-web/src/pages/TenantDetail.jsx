@@ -150,7 +150,7 @@ function OverviewTab({ subscriptions, invoices, usage }) {
           {overdueInvoices.length > 0 && (
             <div style={{ marginTop: 8 }}>
               <Tag color="red">{overdueInvoices.length} 张逾期</Tag>
-              <span style={{ fontSize: 13, color: '#DC2626' }}>
+              <span style={{ fontSize: 13, color: '#FA5151' }}>
                 合计 ¥{overdueInvoices.reduce((sum, i) => sum + Number(i.amount || 0), 0).toFixed(2)}
               </span>
             </div>
@@ -457,7 +457,7 @@ function DevicesTab({ tenantId: _tenantId }) {
         </Col>
         <Col xs={12} sm={8}>
           <Card size="small" style={{ borderRadius: 8 }}>
-            <Statistic title="在线设备" value={onlineCount} valueStyle={{ color: '#3f8600' }} />
+            <Statistic title="在线设备" value={onlineCount} valueStyle={{ color: '#00B578' }} />
           </Card>
         </Col>
         <Col xs={12} sm={8}>
@@ -465,7 +465,7 @@ function DevicesTab({ tenantId: _tenantId }) {
             <Statistic
               title="离线设备"
               value={data.total - onlineCount}
-              valueStyle={{ color: data.total - onlineCount > 0 ? '#cf1322' : undefined }}
+              valueStyle={{ color: data.total - onlineCount > 0 ? '#FA5151' : undefined }}
             />
           </Card>
         </Col>
@@ -623,7 +623,7 @@ function RiskAuditTab({ tenantId: _tenantId }) {
             <Statistic
               title="审计事件 (30天)"
               value={data?.total_audit_events_last_30d || 0}
-              valueStyle={{ color: highAudit ? '#cf1322' : undefined }}
+              valueStyle={{ color: highAudit ? '#FA5151' : undefined }}
             />
           </Card>
         </Col>
@@ -632,7 +632,7 @@ function RiskAuditTab({ tenantId: _tenantId }) {
             <Statistic
               title="异常模式"
               value={data?.abnormal_patterns?.length || 0}
-              valueStyle={{ color: hasAbnormal ? '#cf1322' : '#3f8600' }}
+              valueStyle={{ color: hasAbnormal ? '#FA5151' : '#00B578' }}
               suffix="项"
             />
           </Card>

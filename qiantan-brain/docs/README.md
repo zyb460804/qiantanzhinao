@@ -21,7 +21,7 @@
 | 文档 | 内容 | 状态 |
 |---|---|---|
 | [大创立项申请书](大创立项申请书.md) | 创新训练立项全套材料（研究背景/创新点/技术路线/进度/预算） | ✅ 骨架完成 |
-| [用户调研问卷](用户调研问卷.md) | 22 题问卷模板 + 数据分析指引 | ✅ 可发放 |
+| [用户调研问卷](用户调研问卷.md) | 22 题问卷模板 + 数据分析指引 | 📋 模板就绪，待发放回收 |
 | [每日报告推送 PRD](prd-daily-report-push.md) | 功能产品需求文档 | ✅ |
 | [每日报告 PRD 总览](overview-daily-report-prd.md) | 功能产品需求文档 | ✅ |
 
@@ -55,10 +55,15 @@
 
 | 文档 | 内容 |
 |---|---|
-| [测试报告](test-report.md) | 系统测试结果 |
-| [实验报告](experiment-report.md) | 算法与性能实验 |
+| [全面体检报告 2026-07-26](full-project-audit-2026-07-26.md) | 12 智能体并行审计 + 对抗复核，549 测试全绿 |
+| [参赛提升方案 2026-07-27](competition-readiness-2026-07-27.md) | 大创/计设/iCAN 三赛差距分析与行动表 |
+| [测试报告](test-report.md) | 系统测试结果（549 passed） |
+| [实验报告](experiment-report.md) | 算法与性能实验（状态：待实地采集） |
 | [代码评审记录](code-review-2026-07-12.md) | 历次代码评审 |
 | [用户手册](user-manual.md) | 终端用户使用说明 |
+| [摊主故事包](摊主故事包.md) | 答辩叙事素材（⚠️ 合成人物，非真实用户证据） |
+| [支付对账说明](payment-reconciliation.md) | 微信/支付宝渠道账单对账 |
+| [GitHub 对标学习报告](github-learning-report.md) | 三轮开源项目对标分析 |
 
 ---
 
@@ -67,13 +72,13 @@
 | 模块 | 路径 | 说明 |
 |---|---|---|
 | 小程序前端 | [`miniprogram/`](../miniprogram/) | 24 页面，微信原生 |
-| 后端服务 | [`backend/app/`](../backend/app/) | FastAPI，34 路由模块 |
+| 后端服务 | [`backend/app/`](../backend/app/) | FastAPI，30 路由模块，250+ 端点 |
 | 管理后台 | [`backend/admin-web/`](../backend/admin-web/) | React + Ant Design |
 | 边缘端 | [`edge/`](../edge/) | 视觉推理 + 称重 + OTA |
 | ML 训练 | [`ml/`](../ml/) | YOLO / Prophet / 数据集 |
-| 数据集 | [`datasets/`](../datasets/) | 2500+ 张商品标注图 |
-| 迁移脚本 | [`backend/migrations/`](../backend/migrations/) | Alembic 数据库迁移 |
-| 后端测试 | [`backend/tests/`](../backend/tests/) | 30+ 测试文件 |
+| 数据集 | [`datasets/`](../datasets/) | 600 张合成占位图（非真实照片，详见 `datasets/products/README.md`） |
+| 迁移脚本 | [`backend/migrations/`](../backend/migrations/) | Alembic 数据库迁移（22 个版本） |
+| 后端测试 | [`backend/tests/`](../backend/tests/) | 44 个测试文件，549 个用例全绿 |
 
 ---
 

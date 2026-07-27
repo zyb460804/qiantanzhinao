@@ -6,7 +6,7 @@
 
 .mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8rpx; margin-top: 22rpx; padding: 8rpx; background: var(--paper-2); border-radius: 22rpx; }
 .mode-option { display: flex; align-items: center; justify-content: center; gap: 12rpx; min-height: 78rpx; color: var(--muted); border-radius: 17rpx; font-size: 25rpx; font-weight: 650; }
-.mode-option.active { color: var(--green-950); background: var(--paper); box-shadow: 0 6rpx 16rpx rgba(18,61,48,.08); }
+.mode-option.active { color: var(--green-950); background: var(--paper); box-shadow: 0 6rpx 16rpx rgba(16, 32, 24,.08); }
 
 .voice-stage { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 480rpx; }
 
@@ -41,9 +41,9 @@
 .error-panel { display: flex; align-items: center; gap: 18rpx; margin-top: 20rpx; padding: 22rpx; background: var(--red-soft); border-radius: var(--radius-lg); }
 .error-copy { flex: 1; }
 .error-title, .error-desc { display: block; }
-.error-title { color: #943b35; font-weight: 700; }
+.error-title { color: #c93a30; font-weight: 700; }
 .error-desc { margin-top: 3rpx; color: #a86661; font-size: 21rpx; }
-.retry-btn { padding: 14rpx 20rpx; color: #943b35; background: rgba(255,255,255,.58); border-radius: 14rpx; font-size: 23rpx; font-weight: 700; }
+.retry-btn { padding: 14rpx 20rpx; color: #c93a30; background: rgba(255,255,255,.58); border-radius: 14rpx; font-size: 23rpx; font-weight: 700; }
 
 .recent-list { overflow: hidden; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .recent-item { display: flex; align-items: center; gap: 18rpx; padding: 22rpx 24rpx; border-bottom: 1rpx solid var(--line); }
@@ -56,3 +56,17 @@
 
 .reduce-motion .wave-bar,
 .reduce-motion .caret { animation: none !important; }
+
+/* 上传进度条（弱网反馈） */
+.upload-progress { width: 580rpx; max-width: 80%; height: 8rpx; margin-top: 18rpx; background: var(--paper-2); border-radius: 999rpx; overflow: hidden; }
+.upload-progress-bar { height: 100%; background: linear-gradient(90deg, var(--green-600), var(--corn)); border-radius: 999rpx; transition: width var(--dur-fast); }
+
+/* 方言切换入口 */
+.dialect-chip { margin-top: 18rpx; padding: 10rpx 22rpx; color: var(--green-700); background: var(--green-50); border: 2rpx solid var(--green-200); border-radius: 999rpx; font-size: 22rpx; font-weight: 650; }
+.dialect-chip:active { opacity: .7; }
+
+/* 暂存重传面板（沿用 error-panel 视觉，但用警示色） */
+.pending-panel { background: #fff7e6; }
+.pending-panel .error-title { color: #b87b1a; }
+.pending-panel .error-desc { color: #977043; }
+.pending-panel .retry-btn { color: #b87b1a; }

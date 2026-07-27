@@ -21,7 +21,7 @@
 .trace-banner.muted { background:var(--line); }
 .banner-icon { font-size:52rpx; font-weight:900; margin-bottom:8rpx; }
 .banner-label { font-size:36rpx; font-weight:800; color:var(--ink); }
-.banner-warn { margin-top:8rpx; font-size:24rpx; color:#c0493d; font-weight:700; }
+.banner-warn { margin-top:8rpx; font-size:24rpx; color:#c93a30; font-weight:700; }
 
 /* Info card */
 .trace-card { margin:20rpx 28rpx; padding:24rpx 28rpx; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
@@ -31,7 +31,7 @@
 .trace-key { font-size:24rpx; color:var(--muted); flex:0 0 140rpx; }
 .trace-val { font-size:24rpx; color:var(--ink); text-align:right; flex:1; word-break:break-all; }
 .text-green { color:var(--green-700); font-weight:700; }
-.text-red { color:#c0493d; font-weight:700; }
+.text-red { color:#c93a30; font-weight:700; }
 .certs { display:flex; flex-wrap:wrap; gap:8rpx; justify-content:flex-end; }
 .cert-tag { padding:4rpx 14rpx; font-size:20rpx; color:var(--green-800); background:var(--green-50); border-radius:8rpx; }
 

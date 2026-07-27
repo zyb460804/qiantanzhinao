@@ -1,9 +1,16 @@
-"""Inventory management API router."""
+"""Inventory management API router.
+
+TODO(schema): app/schemas/inventory.py 中的响应模型字段（diff / total_book /
+total_diff / waste_amount 等）与本路由实际返回的字段（variance / total_book_qty /
+total_variance / total_loss_amount 等）不一致。因路由使用 response_model=AnyResponse
+绕过 Pydantic 校验，运行无影响，但建议后续对齐 schema 文件（超出本次修复文件边界）。
+"""
 
 import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +33,42 @@ from app.services.offline_sync import upsert_offline_items
 
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
+
+
+# 本路由内部使用的批量提交请求模型（避免跨文件改 schema）。
+class _StocktakeBatchSubmitItem(BaseModel):
+    """批量提交的单条盘点项。"""
+
+    product_id: int
+    actual_qty: float = Field(ge=0)
+    variance_reason: str | None = None
+
+
+class _StocktakeBatchSubmitRequest(BaseModel):
+    """批量提交盘点项的请求体。"""
+
+    items: list[_StocktakeBatchSubmitItem]
+
+
+def _low_stock_threshold_for_unit(unit: str | None) -> float:
+    """按单位给出经验性"余量较少"阈值。
+
+    不同单位/业态的"余量较少"含义不同：卖菜按斤、卖水果按箱、卖调料按瓶。
+    写死阈值=10 对所有商品都不合适，此处按单位给出默认值。
+
+    TODO 迁移：建议在 product_categories 表新增 low_stock_threshold 字段，
+    由摊主自定义；catalog 路由可承载按商品维度的下发。
+    """
+    u = (unit or "").strip()
+    if u in ("两",):
+        return 50.0
+    if u in ("斤", "公斤", "kg", "千克"):
+        return 5.0
+    if u in ("箱", "件", "包", "袋", "盒"):
+        return 2.0
+    if u in ("个", "瓶", "只", "本", "份"):
+        return 3.0
+    return 10.0  # 默认阈值
 
 
 @router.get("/current", response_model=AnyResponse)
@@ -148,6 +191,8 @@ async def get_current_inventory(
                 or (sku_prices.get(row.sku_id) if row.sku_id else None)
             ),
             "unit": row.unit or "斤",
+            # 按单位下发的低库存阈值，修复 P2：原前端写死=10 跨业态误报严重。
+            "low_stock_threshold": _low_stock_threshold_for_unit(row.unit),
         }
         for row in rows
     ]
@@ -318,7 +363,7 @@ async def void_inventory_record(
 # ============================================================
 
 
-def _stocktake_item_data(item: StocktakeItem, product_name: str) -> dict:
+def _stocktake_item_data(item: StocktakeItem, product_name: str, avg_cost: float = 0.0) -> dict:
     """Serialize one persisted stocktake snapshot line."""
     actual_qty = float(item.actual_qty) if item.actual_qty is not None else None
     variance = float(item.variance) if item.variance is not None else None
@@ -332,6 +377,8 @@ def _stocktake_item_data(item: StocktakeItem, product_name: str) -> dict:
         "variance": variance,
         "variance_reason": item.variance_reason,
         "submitted": actual_qty is not None,
+        # 返回加权均价，供前端实时预估损耗金额（修复 P1：原缺失导致预估损耗恒为 0）。
+        "avg_cost": round(float(avg_cost or 0), 2),
     }
 
 
@@ -344,11 +391,50 @@ async def _stocktake_session_data(db: AsyncSession, session: StocktakeSession) -
     items = item_result.scalars().all()
     product_ids = {item.product_id for item in items}
     product_names: dict[int, str] = {}
+    avg_costs: dict[int, float] = {}
     if product_ids:
         product_result = await db.execute(
             select(ProductCategory).where(ProductCategory.id.in_(product_ids))
         )
         product_names = {p.id: p.name for p in product_result.scalars().all()}
+
+        # 计算每个商品的加权均价（与 /current 接口同口径），用于盘点过程中预估损耗金额。
+        cost_result = await db.execute(
+            select(
+                InventoryRecord.product_id,
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                InventoryRecord.quantity > 0,
+                                InventoryRecord.unit_cost * InventoryRecord.quantity,
+                            ),
+                            else_=0,
+                        )
+                    )
+                    / func.nullif(
+                        func.sum(
+                            case(
+                                (
+                                    InventoryRecord.quantity > 0,
+                                    InventoryRecord.quantity,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    0,
+                ).label("avg_cost"),
+            )
+            .where(
+                InventoryRecord.product_id.in_(product_ids),
+                InventoryRecord.is_voided == False,  # noqa: E712
+            )
+            .group_by(InventoryRecord.product_id)
+        )
+        for row in cost_result:
+            avg_costs[row.product_id] = round(float(row.avg_cost), 2)
 
     return {
         "session_id": str(session.id),
@@ -356,7 +442,11 @@ async def _stocktake_session_data(db: AsyncSession, session: StocktakeSession) -
         "started_at": session.started_at.isoformat() if session.started_at else None,
         "notes": session.notes or "",
         "items": [
-            _stocktake_item_data(item, product_names.get(item.product_id, f"商品{item.product_id}"))
+            _stocktake_item_data(
+                item,
+                product_names.get(item.product_id, f"商品{item.product_id}"),
+                avg_costs.get(item.product_id, 0.0),
+            )
             for item in items
         ],
     }
@@ -504,6 +594,68 @@ async def submit_stocktake_item(
             "variance": variance,
             "unit": item.unit,
         },
+    }
+
+
+@router.post("/stocktake/{session_id}/submit-batch", response_model=AnyResponse)
+async def submit_stocktake_batch(
+    session_id: uuid.UUID,
+    req: _StocktakeBatchSubmitRequest,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量提交盘点项，弱网场景下用一次请求替代逐项串行提交。
+
+    返回每个 product_id 的处理结果（ok / error），调用方按结果更新本地状态。
+    """
+    session_result = await db.execute(
+        select(StocktakeSession).where(StocktakeSession.id == session_id)
+    )
+    session = session_result.scalar_one_or_none()
+    if not session or session.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="盘点会话不存在")
+    if session.status != "in_progress":
+        raise HTTPException(status_code=400, detail="该盘点已结束")
+    if not req.items:
+        raise HTTPException(status_code=400, detail="未提供盘点数据")
+
+    # 预加载本会话所有 items，避免逐条查询造成 N+1
+    item_result = await db.execute(
+        select(StocktakeItem).where(StocktakeItem.session_id == session_id)
+    )
+    items_by_pid = {it.product_id: it for it in item_result.scalars().all()}
+
+    results = []
+    for entry in req.items:
+        pid = entry.product_id
+        item = items_by_pid.get(pid)
+        if item is None:
+            results.append({"product_id": pid, "status": "error", "message": "不在快照中"})
+            continue
+        actual_qty = float(entry.actual_qty)
+        book_qty = float(item.book_qty)
+        variance = round(actual_qty - book_qty, 2)
+        item.actual_qty = actual_qty
+        item.variance = variance
+        item.variance_reason = entry.variance_reason or ""
+        results.append(
+            {
+                "product_id": pid,
+                "status": "ok",
+                "item_id": str(item.id),
+                "book_qty": round(book_qty, 2),
+                "actual_qty": actual_qty,
+                "variance": variance,
+                "unit": item.unit,
+            }
+        )
+    await db.commit()
+
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+    return {
+        "code": 0,
+        "message": f"批量保存完成：成功 {ok_count} 项，失败 {len(results) - ok_count} 项",
+        "data": {"results": results},
     }
 
 
@@ -729,6 +881,23 @@ async def stocktake_history(
         ],
         "meta": {"page": page, "limit": limit},
     }
+
+
+@router.get("/stocktake/history/{session_id}", response_model=AnyResponse)
+async def stocktake_history_detail(
+    session_id: uuid.UUID,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """查看某次盘点记录的逐项明细，供历史卡片展开使用。"""
+    session_result = await db.execute(
+        select(StocktakeSession).where(StocktakeSession.id == session_id)
+    )
+    session = session_result.scalar_one_or_none()
+    if not session or session.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="盘点记录不存在")
+    data = await _stocktake_session_data(db, session)
+    return {"code": 0, "data": data}
 
 
 # =====================================================================

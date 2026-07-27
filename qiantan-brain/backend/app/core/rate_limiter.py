@@ -160,7 +160,19 @@ class RedisBackend(RateLimitBackend):
             raise ImportError(
                 "Redis 限流后端需要 redis 包。安装: pip install redis[hiredis]"
             ) from exc
-        self._client = redis.from_url(redis_url, decode_responses=True)
+        # 显式超时固化行为：限流在登录请求路径上，Redis 挂起时必须快速失败，
+        # 不依赖 redis-py 各大版本漂移的默认值（6.0 起默认重试 3 次指数退避，
+        # 配合 2s 超时可把最坏延迟约束在秒级）。
+        # Any 注解：redis-py 7.x 的方法签名统一写成 Union[Awaitable[Any], Any]
+        # （sync/async 共享同一泛型类），mypy 无法区分同步调用，导致下游 float/
+        # 比较报假阳性。标注为 Any 让类型检查放行，运行时语义由 decode_responses
+        # =True 保证（pytest 549 passed 已验证）。
+        self._client: Any = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
 
     def check(self, key: str, max_attempts: int, window: int, lock: int) -> None:
         lock_key = f"ratelimit:lock:{key}"

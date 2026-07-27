@@ -1,5 +1,6 @@
 /**
- * 「我的」页面 v3.0 — 经营快照 + 快捷操作 + 设备同步 + 工具网格 + 设置 + 帮助
+ * 「我的」页面 v3.1 — 经营快照 + 快捷操作 + 设备同步 + 工具网格 + 设置入口 + 帮助
+ * 摊位设置已拆为独立页面 /pages/stall-settings/stall-settings
  */
 var app = getApp();
 var Theme = require('../../utils/theme');
@@ -17,6 +18,10 @@ Page({
     // ② 快捷操作
     voiceLabel: '今天还没记',
     purchasePending: 0,
+
+    // 员工身份切换（权限体系）
+    staffMode: false,
+    currentStaff: null,
 
     // ③ 设备与同步
     devices: [], offlineQueueCount: 0, deviceError: false,
@@ -62,19 +67,8 @@ Page({
       },
     ],
 
-    // ⑤ 摊位设置
-    merchantName: '', riskProfile: 'neutral',
-    voiceDialect: 'mandarin', businessHours: 'morning',
-    notificationEnabled: true,
-    dialects: ['普通话', '四川话', '粤语', '上海话'],
-    dialectValues: ['mandarin', 'sichuanese', 'cantonese', 'shanghainese'],
-    dialectIndex: 0,
-    hoursOptions: ['早市 (6:00-12:00)', '午市 (12:00-18:00)', '晚市 (18:00-24:00)', '全天'],
-    hoursValues: ['morning', 'noon', 'evening', 'all'],
-    hoursIndex: 0,
-    cityOptions: ['上海', '北京', '广州', '深圳', '杭州', '南京', '成都', '武汉', '重庆', '西安'],
-    cityIndex: 0,
-    merchantCity: '上海',
+    // ⑤ 摊位设置入口（详情页：/pages/stall-settings/stall-settings）
+    merchantName: '',
 
     // ⑦ 关于
     appVersion: '1.0.0',
@@ -82,11 +76,89 @@ Page({
 
   onShow: function () {
     this.applySkin();
+    this._syncStaffMode();
+    this._loadMerchantName();
     this.loadSnapshot();
     this.loadDevices();
-    this.loadSettings();
     this.refreshVoiceLabel();
     this.refreshPurchasePending();
+  },
+
+  // ── 员工身份切换（权限体系）──────────────────────────────
+  _ROLE_LABELS: { owner: '老板', manager: '店长', cashier: '收银员', market_admin: '市场管理员' },
+
+  _syncStaffMode: function () {
+    var staff = app.globalData.currentStaff;
+    if (staff) {
+      staff.roleLabel = this._ROLE_LABELS[staff.role] || staff.role;
+    }
+    this.setData({ staffMode: app.isStaffMode(), currentStaff: staff });
+  },
+
+  onIdentityTap: function () {
+    if (app.isStaffMode()) {
+      // 当前是员工身份 → 确认退出
+      wx.showModal({
+        title: '退出员工身份',
+        content: '退出后恢复为老板（全部权限），确定？',
+        confirmText: '退出',
+        success: function (res) {
+          if (res.confirm) {
+            app.exitStaff();
+            wx.showToast({ title: '已恢复老板身份', icon: 'success' });
+          }
+        },
+      });
+    } else {
+      // 老板身份 → 选员工 + 输 PIN 切换
+      this._switchStaff();
+    }
+  },
+
+  _switchStaff: function () {
+    var self = this;
+    app.request({ url: '/staff' }).then(function (list) {
+      list = list || [];
+      var active = list.filter(function (s) { return s.is_active; });
+      if (!active.length) {
+        wx.showToast({ title: '暂无员工，请先在员工管理添加', icon: 'none' });
+        return;
+      }
+      // 1. 选员工
+      wx.showActionSheet({
+        itemList: active.map(function (s) {
+          return s.name + '（' + (self._ROLE_LABELS[s.role] || s.role) + '）';
+        }),
+        success: function (res) {
+          var chosen = active[res.tapIndex];
+          // 2. 输 PIN
+          wx.showModal({
+            title: '验证 ' + chosen.name + ' 的 PIN',
+            editable: true,
+            placeholderText: '请输入 4-6 位 PIN 码',
+            confirmText: '切换',
+            success: function (r) {
+              if (!r.confirm) return;
+              var pin = (r.content || '').trim();
+              if (!pin) {
+                wx.showToast({ title: 'PIN 不能为空', icon: 'none' });
+                return;
+              }
+              // 3. 调登录
+              app.switchToStaff(chosen.staff_id, pin).then(function () {
+                self._syncStaffMode();
+                wx.showToast({ title: '已切换为 ' + chosen.name, icon: 'success' });
+              }).catch(function (err) {
+                var msg = (err && err.body && (err.body.detail || err.body.message)) || 'PIN 错误或网络异常';
+                wx.showToast({ title: String(msg), icon: 'none' });
+              });
+            },
+          });
+        },
+      });
+    }).catch(function () {
+      wx.showToast({ title: '员工列表加载失败', icon: 'none' });
+    });
   },
 
   onPullDownRefresh: function () {
@@ -98,6 +170,7 @@ Page({
 
   applySkin: function () {
     // 用 Theme.apply 尊重手动皮肤设置(skinManual),而非强制按小时
+    // 皮肤切换 UI 已迁至摊位设置页，此处仅负责让本页跟随当前皮肤
     Theme.apply(this);
   },
 
@@ -109,9 +182,12 @@ Page({
     Promise.all([
       app.request({ url: '/twin/dashboard' }).catch(function () { return null; }),
       app.request({ url: '/reports/daily' }).catch(function () { return null; }),
+      // /reports/daily 不返回 week_total_revenue，改从 /reports/weekly 取 week_revenue
+      app.request({ url: '/reports/weekly' }).catch(function () { return null; }),
     ]).then(function (results) {
       var dash = results[0];
       var daily = results[1];
+      var weekly = results[2];
 
       if (!dash && !daily) {
         self.setData({ snapshotLoading: false, snapshotError: true });
@@ -120,7 +196,8 @@ Page({
       }
 
       var rev = dash ? (Number(dash.today_revenue) || 0) : 0;
-      // sale_qty 是销售件数而非订单笔数;优先用 order_count 算客单价
+      // 后端 /reports/daily 不返回 order_count（详见 app/routers/reports.py:268-292），
+      // 只能用 sale_qty（销售件数）兜底，导致客单价被低估；TODO 后端补充 order_count 字段。
       var saleQty = daily ? (Number(daily.sale_qty) || 0) : 0;
       var orderCount = daily ? (Number(daily.order_count) || 0) : 0;
       var txnCount = orderCount > 0 ? orderCount : saleQty;
@@ -132,7 +209,8 @@ Page({
         var pct = Number(daily.revenue_change_pct);
         trendLabel = pct > 0 ? '↗ 向好' : (pct < 0 ? '↘ 走弱' : '▸ 持平');
       }
-      var weekRev = daily ? (Number(daily.week_total_revenue || 0)) : 0;
+      // 本周累计：/reports/daily 不返回该字段，改从 /reports/weekly.week_revenue 读取。
+      var weekRev = weekly ? (Number(weekly.week_revenue) || 0) : 0;
 
       self.setData({
         snapshotLoading: false, snapshotError: false,
@@ -182,9 +260,13 @@ Page({
         var lastBeat = d.last_heartbeat ? new Date(d.last_heartbeat) : null;
         var minsAgo = lastBeat ? Math.floor((Date.now() - lastBeat.getTime()) / 60000) : null;
         var status = !lastBeat ? 'offline' : (minsAgo < 5 ? 'online' : (minsAgo < 30 ? 'unstable' : 'offline'));
+        // 后端 /devices 返回字段为 device_name / device_type (app/routers/device.py:42-43)，
+        // 同时兼容旧字段 name / type 以防历史调用方破坏。
+        var typeLabelMap = { scale: '智能秤', camera: '摄像头', esl: '价签', printer: '打印机' };
+        var rawType = d.device_type || d.type || 'device';
         return {
-          name: d.name || d.type || '设备',
-          type: d.type || 'device',
+          name: d.device_name || d.name || rawType || '设备',
+          type: typeLabelMap[rawType] || rawType,
           status: status,
           heartbeat: minsAgo !== null ? (minsAgo < 1 ? '刚刚' : minsAgo + ' 分钟前') : '—',
         };
@@ -194,92 +276,43 @@ Page({
   },
 
   triggerSync: function () {
-    try { require('../../utils/offline-sync').getQueue().sync().then(function () { wx.showToast({ title: '同步成功', icon: 'success' }); }); } catch (e) {}
+    // 同步是 Promise，必须链式 catch；try/catch 只能捕获 sync() 同步抛错。
+    try {
+      require('../../utils/offline-sync').getQueue().sync()
+        .then(function () { wx.showToast({ title: '同步成功', icon: 'success' }); })
+        .catch(function () { wx.showToast({ title: '同步失败，请稍后重试', icon: 'none' }); });
+    } catch (e) {
+      wx.showToast({ title: '同步组件加载失败', icon: 'none' });
+    }
   },
 
-  // ── ⑤ 摊位设置 ──────────────────────────────
-  loadSettings: function () {
-    var storedDialect = wx.getStorageSync('voiceDialect') || 'mandarin';
-    var storedRisk = wx.getStorageSync('riskProfile') || 'neutral';
-    var storedHours = wx.getStorageSync('businessHours') || 'morning';
-    var storedNotify = wx.getStorageSync('notificationEnabled');
-    if (storedNotify === '') storedNotify = true;
-    else storedNotify = storedNotify !== false;
-    var di = this.data.dialectValues.indexOf(storedDialect);
-    var hi = this.data.hoursValues.indexOf(storedHours);
+  // ── ⑤ 摊位设置入口 ──────────────────────────
+  /** 仅读取摊位名称用于入口卡片展示；完整设置在独立页面 */
+  _loadMerchantName: function () {
     this.setData({
-      merchantName: app.globalData.merchantName || '',
-      voiceDialect: storedDialect, riskProfile: storedRisk,
-      businessHours: storedHours, notificationEnabled: storedNotify,
-      dialectIndex: di >= 0 ? di : 0, hoursIndex: hi >= 0 ? hi : 0,
-      merchantCity: app.getCity(),
-      cityIndex: Math.max(0, this.data.cityOptions.indexOf(app.getCity())),
+      merchantName: app.globalData.merchantName || wx.getStorageSync('merchantName') || '',
     });
-    // 从后端同步偏好设置（跨设备同步）
-    var self = this;
-    app.request({ url: '/auth/me/preferences', auth: true }).then(function (prefs) {
-      if (!prefs) return;
-      var dialect = prefs.voice_dialect || storedDialect;
-      var risk = prefs.risk_profile || storedRisk;
-      var hours = prefs.business_hours || storedHours;
-      var notify = prefs.notification_enabled !== undefined ? prefs.notification_enabled : storedNotify;
-      var city = prefs.merchant_city || app.getCity();
-      var di2 = self.data.dialectValues.indexOf(dialect);
-      var hi2 = self.data.hoursValues.indexOf(hours);
-      var ci2 = Math.max(0, self.data.cityOptions.indexOf(city));
-      self.setData({
-        voiceDialect: dialect, riskProfile: risk,
-        businessHours: hours, notificationEnabled: notify,
-        dialectIndex: di2 >= 0 ? di2 : 0, hoursIndex: hi2 >= 0 ? hi2 : 0,
-        merchantCity: city, cityIndex: ci2,
-      });
-      // 同步到本地缓存
-      wx.setStorageSync('voiceDialect', dialect);
-      wx.setStorageSync('riskProfile', risk);
-      wx.setStorageSync('businessHours', hours);
-      wx.setStorageSync('notificationEnabled', notify);
-      app.setCity(city);
-    }).catch(function () { /* 后端同步失败时使用本地设置，静默处理 */ });
   },
 
-  onNameChange: function (e) { this.setData({ merchantName: e.detail.value }); },
-  onRiskChange: function (e) { this.setData({ riskProfile: e.detail.value }); },
-  onDialectChange: function (e) {
-    var index = Number(e.detail.value) || 0;
-    this.setData({ dialectIndex: index, voiceDialect: this.data.dialectValues[index] });
-  },
-  onBusinessHoursChange: function (e) {
-    var index = Number(e.detail.value) || 0;
-    this.setData({ hoursIndex: index, businessHours: this.data.hoursValues[index] });
-  },
-  onCityChange: function (e) {
-    var index = Number(e.detail.value) || 0;
-    this.setData({ cityIndex: index, merchantCity: this.data.cityOptions[index] });
-  },
-  onNotificationToggle: function () {
-    this.setData({ notificationEnabled: !this.data.notificationEnabled });
-  },
-
-  saveProfile: function () {
-    wx.setStorageSync('merchantName', this.data.merchantName);
-    wx.setStorageSync('voiceDialect', this.data.voiceDialect);
-    wx.setStorageSync('riskProfile', this.data.riskProfile);
-    wx.setStorageSync('businessHours', this.data.businessHours);
-    wx.setStorageSync('notificationEnabled', this.data.notificationEnabled);
-    app.setCity(this.data.merchantCity);
-    app.globalData.merchantName = this.data.merchantName;
-    // 推送偏好到后端（跨设备同步）
-    app.request({
-      url: '/auth/me/preferences', method: 'PUT',
-      data: {
-        voice_dialect: this.data.voiceDialect,
-        risk_profile: this.data.riskProfile,
-        business_hours: this.data.businessHours,
-        notification_enabled: this.data.notificationEnabled,
-        merchant_city: this.data.merchantCity,
+  /** 退出登录 — 调用后端 logout 吊销 token + 清理本地状态 */
+  logout: function () {
+    wx.showModal({
+      title: '退出登录',
+      content: '确定要退出当前账号吗？退出后需要重新登录。',
+      confirmColor: '#FA5151',
+      success: function (res) {
+        if (!res.confirm) return;
+        // 先调后端吊销 token（失败也继续清理本地）
+        app.request({ url: '/auth/logout', method: 'POST' })
+          .catch(function () { /* token 已无效或网络错误，仍继续清理本地状态 */ })
+          .then(function () {
+            app.clearLogin();
+            wx.showToast({ title: '已退出登录', icon: 'success' });
+            // 重启到首页，触发 ensureLogin 重新登录
+            wx.reLaunch({ url: '/pages/index/index' });
+          });
       },
-    }).then(function () {}).catch(function () {});
-    wx.showToast({ title: '偏好已保存', icon: 'success' });
+    });
   },
 
   // ── 导航 ─────────────────────────────────────
@@ -303,6 +336,7 @@ Page({
 
   goDevices: function () { wx.navigateTo({ url: '/pages/devices/devices' }); },
   goDashboard: function () { wx.navigateTo({ url: '/pages/dashboard/dashboard' }); },
+  goStallSettings: function () { wx.navigateTo({ url: '/pages/stall-settings/stall-settings' }); },
 
   // ── ⑥ 帮助与反馈 ─────────────────────────────
   showFeedback: function () {

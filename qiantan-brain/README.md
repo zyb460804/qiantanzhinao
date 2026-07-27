@@ -12,7 +12,7 @@
 |----|------|------|------|
 | **微信小程序** | 摊主 / 员工 | 原生 WXML/WXSS/JS | 微信开发者工具 |
 | **Web 管理后台** | 平台管理员 | React 18 + Vite + Ant Design 5 | `http://localhost:5174` |
-| **FastAPI 后端** | 为以上两者提供 API | Python 3.11 + SQLAlchemy 2.0 | `http://127.0.0.1:8000` |
+| **FastAPI 后端** | 为以上两者提供 API | Python 3.13 + SQLAlchemy 2.0 | `http://127.0.0.1:8000` |
 
 ---
 
@@ -22,7 +22,7 @@
 |------|------|
 | 前端（小程序） | 微信小程序原生 · 24 个页面 · Canvas 自绘图表 |
 | 前端（管理后台） | React 18 · Vite · Ant Design 5 · Recharts · Axios |
-| 后端 | FastAPI · Python 3.11 · SQLAlchemy 2.0 async · Alembic |
+| 后端 | FastAPI · Python 3.13 · SQLAlchemy 2.0 async · Alembic |
 | 数据库 | PostgreSQL 16（生产） / SQLite（本地开发） |
 | 鉴权 | 微信 OAuth + JWT（小程序） · 邮箱+bcrypt+HttpOnly Cookie（管理后台） |
 | 语音识别 | 讯飞 ASR（支持方言；无凭证时走 Mock 演示模式） |
@@ -120,7 +120,7 @@ PlatformAdmin（平台管理员角色）
 
 ```
 qiantan-brain/
-├── miniprogram/                 # 微信小程序 (23 页)
+├── miniprogram/                 # 微信小程序 (24 页)
 │   ├── pages/                   # 页面：经营台/记账/库存/参谋/我的 …
 │   ├── components/              # 通用组件：语音按钮/库存图表/风险仪表 …
 │   ├── utils/                   # 工具：离线同步/录音/AI流/图表/主题 …
@@ -143,7 +143,7 @@ qiantan-brain/
 │   │   │   ├── batch.py         # 批次生命周期 FIFO
 │   │   │   └── …                # 更多模型
 │   │   ├── schemas/             # Pydantic 请求/响应模型
-│   │   ├── routers/             # 37 个路由模块
+│   │   ├── routers/             # 30 个路由模块（含 admin 子目录 11 个）
 │   │   │   ├── voice.py         # 语音解析/确认/纠错/作废
 │   │   │   ├── inventory.py     # 库存/盘点
 │   │   │   ├── pos.py           # POS 收银
@@ -165,7 +165,7 @@ qiantan-brain/
 │   │   │   │   └── export.py    # CSV 导出
 │   │   │   └── tenant/
 │   │   │       └── portal.py    # 租户自助（订阅/用量/发票）
-│   │   ├── services/            # 31 个业务服务
+│   │   ├── services/            # 32 个业务服务
 │   │   │   ├── voice_parser.py  # NLU 文本→结构化
 │   │   │   ├── advisor.py       # 建议生成引擎
 │   │   │   ├── env_engine.py    # 环境系数引擎
@@ -206,7 +206,7 @@ qiantan-brain/
 │   └── prophet_predict.py
 │
 ├── datasets/                    # 训练数据集
-├── docs/                        # 21 篇文档
+├── docs/                        # 27 篇文档
 └── reference/                   # 参考实现（离线同步）
 ```
 
@@ -240,7 +240,7 @@ npm install
 npx vite
 ```
 
-打开 `http://localhost:5174`，使用 `admin@qiantan.com` / `Admin123!` 登录。
+打开 `http://localhost:5174`，使用 `seed_saas.py` 创建的管理员账号登录（开发环境默认口令见 `scripts/seed_saas.py`，生产环境须通过 `PLATFORM_ADMIN_PASSWORD` 环境变量设置）。
 
 ### 4. 微信小程序
 
@@ -320,7 +320,7 @@ pre-commit install
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | 微信小程序 | ✅ | 24 个页面，覆盖经营全流程 |
-| FastAPI 后端 | ✅ | 37 个路由，549 个测试通过 |
+| FastAPI 后端 | ✅ | 30 个路由模块，250+ 端点，549 个测试通过 |
 | Web 管理后台 | ✅ | React + Ant Design，14 个页面 |
 | SaaS 多租户 | ✅ | 租户/套餐/订阅/发票/用量/门禁链 |
 | 员工权限系统 | ✅ | 6 种角色 × 14 项权限 |

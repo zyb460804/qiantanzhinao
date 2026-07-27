@@ -29,8 +29,12 @@ ALGO = settings.jwt_algorithm
 _oauth2_scheme = HTTPBearer(auto_error=False)
 
 
-def create_access_token(merchant_id: uuid.UUID, role: str | None = None) -> str:
-    """签发 JWT：sub=商户ID，role=角色，iat/exp 用 UTC。"""
+def create_access_token(
+    merchant_id: uuid.UUID,
+    role: str | None = None,
+    staff_id: uuid.UUID | None = None,
+) -> str:
+    """签发 JWT：sub=商户ID，role=角色，staff_id=员工ID（员工身份时），iat/exp 用 UTC。"""
     now = datetime.now(UTC)
     payload = {
         "sub": str(merchant_id),
@@ -40,17 +44,20 @@ def create_access_token(merchant_id: uuid.UUID, role: str | None = None) -> str:
         "exp": now + timedelta(minutes=settings.jwt_expire_minutes),
         "iss": "qiantan-brain",
     }
+    if staff_id is not None:
+        payload["staff_id"] = str(staff_id)
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGO)
 
 
 def decode_access_token(token: str) -> dict:
-    """校验签名与过期，返回 payload；失败抛 401。"""
+    """校验签名、过期与签发方，返回 payload；失败抛 401。"""
     try:
         payload = jwt.decode(
             token,
             settings.jwt_secret,
             algorithms=[ALGO],
-            options={"require": ["exp", "sub"]},
+            issuer="qiantan-brain",
+            options={"require": ["exp", "sub", "iss"]},
         )
     except jwt.ExpiredSignatureError as err:
         raise HTTPException(
@@ -75,13 +82,18 @@ async def wechat_code2session(code: str) -> str:
     使前端小程序开发环境无需真实 AppID/Secret 即可正常登录。
     """
     # 无微信凭证时的策略：
-    #  - debug=True（dev）：生成确定性 mock openid，允许本地开发跑通完整登录流程
-    #  - debug=False（生产）：直接 503，绝不降级（fail-closed）
+    #  - dev/test 且 debug=True：生成 mock openid，允许本地开发跑通完整登录流程
+    #  - 生产：直接 503，绝不降级（fail-closed）
+    # 修复（审计 P1-5）：原仅判 settings.debug，与 debug 默认 True 叠加构成生产认证绕过。
+    #  现改为按 app_env 判定，且 mock openid 加入进程级随机盐避免客户端可预测。
     if not settings.wechat_appid or not settings.wechat_secret:
-        if settings.debug:
+        if settings.app_env in ("development", "test") and settings.debug:
             import hashlib
+            import secrets
 
-            mock = hashlib.sha256(f"qiantan-dev:{code}".encode()).hexdigest()
+            # 修复 P1-5：mock openid 加入随机盐，避免攻击者凭 code 确定性重算他人 openid
+            salt = secrets.token_hex(8)
+            mock = hashlib.sha256(f"qiantan-dev:{salt}:{code}".encode()).hexdigest()
             return f"dev_openid_{mock[:24]}"
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -120,11 +132,12 @@ async def get_current_merchant(
     """
     merchant_id: uuid.UUID | None = None
     jti: str | None = None
+    token_payload: dict | None = None
 
     if creds and creds.credentials:
-        payload = decode_access_token(creds.credentials)
-        merchant_id = uuid.UUID(payload["sub"])
-        jti = payload.get("jti")
+        token_payload = decode_access_token(creds.credentials)
+        merchant_id = uuid.UUID(token_payload["sub"])
+        jti = token_payload.get("jti")
     elif settings.auth_allow_fallback:
         # ⚠️ 仅 dev/测试过渡：无 token 时从 query/header 取 merchant_id。
         raw = request.query_params.get("merchant_id") or request.headers.get("X-Merchant-Id")
@@ -153,6 +166,16 @@ async def get_current_merchant(
     if merchant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="商户不存在")
 
+    # 注入 token 信息（仅本次请求内存，不持久化）—— 供 require_permission 等下游使用
+    # 修复（审计 P1-7）：让下游从 token 取 role，而非硬编码 "owner"，
+    # 避免员工通过省略 X-Staff-Id 头冒充 owner 执行高风险操作。
+    if token_payload is not None:
+        object.__setattr__(merchant, "_token_role", token_payload.get("role", "owner"))
+        object.__setattr__(merchant, "_token_staff_id", token_payload.get("staff_id"))
+    else:
+        object.__setattr__(merchant, "_token_role", "owner")
+        object.__setattr__(merchant, "_token_staff_id", None)
+
     # ── 注入租户上下文（SaaS 多租户门禁链的入口）──
     # 过渡期：tenant_id 可为空（旧商户未回填），跳过但不阻断
     # 迁移完成后：改为 if merchant.tenant_id is None → 403 FORBIDDEN
@@ -180,11 +203,19 @@ async def _is_token_revoked(db: AsyncSession, jti: str) -> bool:
 
 
 async def revoke_token(db: AsyncSession, jti: str, expires_at=None) -> None:
-    """吊销（注销）一个令牌，使其后续请求失效。"""
+    """吊销（注销）一个令牌，使其后续请求失效。
+
+    修复（审计 P1-8）：原实现把 tz-aware datetime 直接写入 AuthRevokedToken.expires_at
+    （naive TIMESTAMP 列），asyncpg/PostgreSQL 会抛 DataError，导致 logout 500、
+    jti 未入吊销表 → 令牌在剩余有效期内继续可用。现与 admin_security.revoke_admin_token
+    对齐，归一化为 naive UTC datetime。
+    """
     from app.models.auth import AuthRevokedToken
 
     if isinstance(expires_at, (int, float)):
         expires_at = datetime.fromtimestamp(expires_at, tz=UTC)
+    if isinstance(expires_at, datetime) and expires_at.tzinfo is not None:
+        expires_at = expires_at.astimezone(UTC).replace(tzinfo=None)
     db.add(AuthRevokedToken(jti=jti, expires_at=expires_at))
     await db.commit()
 

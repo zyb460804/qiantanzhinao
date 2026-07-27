@@ -23,7 +23,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { hasPermission, PERMISSIONS } from '../permissions'
-import { antdTokens } from '../theme/tokens'
+import { antdTokens, antdLightTokens } from '../theme/tokens'
 
 const { Header, Sider, Content } = Layout
 const DARK_MODE_KEY = 'qiantan_admin_dark_mode'
@@ -144,7 +144,7 @@ export default function AdminLayout() {
     <ConfigProvider
       theme={{
         algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        token: brandTokens,
+        token: darkMode ? brandTokens : { ...brandTokens, ...antdLightTokens },
       }}
     >
       <Layout className="admin-shell">

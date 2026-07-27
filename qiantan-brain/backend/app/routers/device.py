@@ -121,6 +121,27 @@ async def deactivate_device(
     return {"code": 0, "message": "设备已停用"}
 
 
+@router.post("/{device_id}/activate", response_model=AnyResponse)
+async def activate_device(
+    device_id: uuid.UUID,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """重新启用已停用的设备，保留历史心跳/固件信息。
+
+    与 DELETE /{device_id} 配对，避免误停后只能重新注册、丢失设备历史。
+    """
+    d = await db.get(Device, device_id)
+    if not d or d.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="设备不存在")
+    if d.is_active:
+        # 幂等：已经是激活态直接返回成功，避免重复调用报错。
+        return {"code": 0, "message": "设备已处于启用状态"}
+    d.is_active = True
+    await db.commit()
+    return {"code": 0, "message": "设备已启用"}
+
+
 # ═══ 价目屏 (section 4.16) ═══
 
 

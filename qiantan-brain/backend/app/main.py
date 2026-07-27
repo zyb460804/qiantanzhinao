@@ -17,6 +17,7 @@ from app.routers import (
     accounts,
     advice,
     ai_actions,
+    anomalies,
     auth,
     behavior,
     catalog,
@@ -149,6 +150,7 @@ app.include_router(expense.router)
 app.include_router(market_admin.router)
 app.include_router(feedback.router)
 app.include_router(media.router)
+app.include_router(anomalies.router)
 
 # Admin panel routers (SaaS management)
 app.include_router(admin_auth.router)

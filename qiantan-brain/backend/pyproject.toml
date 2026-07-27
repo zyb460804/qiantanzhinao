@@ -44,7 +44,8 @@ ignore = [
     # （前者 str(member) == "X.member"，StrEnum == member.value），项目大量枚举被
     # 序列化/比较，盲改会改变运行时行为，故整体忽略。
     "UP042",
-    # Pinned mypy 1.11 requires conventional Generic[T] syntax.
+    # 保留常规 Generic[T] 写法：历史代码统一用旧语法，迁移 PEP 695 新语法
+    # （class X[T]）属批量改动，如需推进另开专项（mypy 2.x 已支持，不再是阻碍）。
     "UP046",
 ]
 

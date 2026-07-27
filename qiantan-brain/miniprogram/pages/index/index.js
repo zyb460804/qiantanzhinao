@@ -10,7 +10,7 @@ Page({
     merchantName: '', skin: 'noon', greeting: '你好',
     showSkeleton: false, loadError: false, staleData: false,
     todayRevenue: 0, todayCost: 0, todayProfit: 0, riskScore: 0,
-    riskLevel: '低风险', riskColor: '#2BA24C',
+    riskLevel: '低风险', riskColor: '#00B578',
     expiringCount: 0, inventoryCategoryCount: 0, inStockCount: 0, lowStockCount: 0,
     weather: null, recentRecords: [],
     todayTasks: [{ id: 'steady', tone: 'good', glyph: '稳',
@@ -26,7 +26,12 @@ Page({
 
   onShow: function () {
     try {
-      this.setData({ merchantName: app.globalData.merchantName || '老板' });
+      // Theme.apply 只设置 skin/skinClass, 不设置 greeting;
+      // 这里一并补上时段问候语, 让"早上好/下午好/晚上好"在页面进入时即生效
+      this.setData({
+        merchantName: app.globalData.merchantName || '老板',
+        greeting: Theme.getGreeting(),
+      });
       Theme.apply(this);
     } catch (e) {
       app.logError('index/onShow', e, { silent: true });
@@ -145,7 +150,7 @@ Page({
     var items = results.inventory || [];
     var logs = results.logs;
 
-    // 全部失败 → 尝试缓存降级, 或显示空状态
+    // 全部失败 → 尝试缓存降级, 或显示错误状态
     var allFailed = !db && !items.length && !logs;
     if (allFailed || timedOut) {
       var cached = wx.getStorageSync(CACHE_KEY);
@@ -153,17 +158,17 @@ Page({
         this._applyCache(cached); // 用缓存填充, 标记可能过期
         return;
       }
-      // 彻底没数据 → 显示零值空状态 (不再卡骨架屏)
+      // 彻底没数据 → 显式标记加载失败，不再用零值伪装"一切正常"
+      // (菜市场弱网环境下三接口全挂并不罕见，零值伪装会让摊主误判经营状态)
       this.setData({
-        showSkeleton: false, loadError: false, staleData: false,
-        todayRevenue: 0, todayCost: 0, todayProfit: 0,
-        riskScore: 0, expiringCount: 0,
-        inventoryCategoryCount: 0, inStockCount: 0, lowStockCount: 0,
-        recentRecords: [], todayTasks: [{ id: 'steady', tone: 'good', glyph: '稳',
-          title: '当前没有紧急待办', desc: '经营状态平稳，可以查看今日建议安排下一轮进货。',
-          action: '看建议', route: 'advisor' }],
-      }, function () { self._updateRiskLevel(); });
+        showSkeleton: false, loadError: true, staleData: false,
+      });
       return;
+    }
+
+    // 至少有一项数据成功 → 正常渲染 (清掉之前的错误标记)
+    if (this.data.loadError) {
+      this.setData({ loadError: false });
     }
 
     // 正常渲染
@@ -235,9 +240,9 @@ Page({
   _updateRiskLevel: function () {
     var s = this.data.riskScore;
     var level = '', color = '';
-    if (s <= 30) { level = '低风险'; color = '#2BA24C'; }
-    else if (s <= 60) { level = '中等风险'; color = '#F3A83B'; }
-    else { level = '高风险'; color = '#E5484D'; }
+    if (s <= 30) { level = '低风险'; color = '#00B578'; }
+    else if (s <= 60) { level = '中等风险'; color = '#FFA800'; }
+    else { level = '高风险'; color = '#FA5151'; }
     this.setData({ riskLevel: level, riskColor: color });
   },
 

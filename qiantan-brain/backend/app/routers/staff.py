@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_merchant
+from app.core.security import create_access_token, get_current_merchant
 from app.database import get_db
 from app.models.merchant import Merchant
 from app.models.staff import ROLE_PERMISSIONS, StaffMember
@@ -39,12 +39,25 @@ class PermissionContext:
         self.permissions = permissions
 
 
+# 高风险权限：即使 owner 默认全权，这些操作仍建议显式记录审计日志
+# 修复（审计 P1-7）：原实现 role 硬编码 "owner"，员工通过省略 X-Staff-Id 头即可冒充 owner。
+HIGH_RISK_PERMISSIONS: set[str] = {
+    "order_refund",
+    "daily_settle",
+    "void_record",
+    "record_waste",
+}
+
+
 def require_permission(permission: str):
     """路由级权限依赖工厂。用法: Depends(require_permission("void_record")).
 
     在路由层直接拦截无权限用户, 返回 403。
-    当前通过 X-Staff-Id header 区分员工（过渡方案），
-    未来应改为员工 JWT token。
+
+    修复（审计 P1-7）：role 从 token 注入（get_current_merchant 已将 token 的
+    role/staff_id 写到 merchant._token_role / _token_staff_id），不再硬编码 "owner"。
+    兼容保留 X-Staff-Id 头作为补充来源，但优先取 token claim。
+    未来员工有自己的 JWT 时，token role 即员工角色，此检查自动生效。
     """
 
     async def _check(
@@ -52,19 +65,34 @@ def require_permission(permission: str):
         merchant: Merchant = Depends(get_current_merchant),
         db: AsyncSession = Depends(get_db),
     ) -> PermissionContext:
-        role = "owner"
+        # 优先从 token 取 role（审计 P1-7：不再硬编码 "owner"）
+        role = getattr(merchant, "_token_role", None) or "owner"
         staff_id: uuid.UUID | None = None
 
-        staff_header = request.headers.get("X-Staff-Id")
-        if staff_header:
+        # 优先从 token 的 staff_id claim 取员工身份
+        token_staff_id = getattr(merchant, "_token_staff_id", None)
+        if token_staff_id:
             try:
-                sid = uuid.UUID(staff_header)
+                sid = uuid.UUID(str(token_staff_id))
                 staff = await db.get(StaffMember, sid)
                 if staff and staff.merchant_id == merchant.id and staff.is_active:
                     role = staff.role
                     staff_id = sid
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
+
+        # 兼容：X-Staff-Id 头（过渡方案，优先级低于 token claim）
+        if staff_id is None:
+            staff_header = request.headers.get("X-Staff-Id")
+            if staff_header:
+                try:
+                    sid = uuid.UUID(staff_header)
+                    staff = await db.get(StaffMember, sid)
+                    if staff and staff.merchant_id == merchant.id and staff.is_active:
+                        role = staff.role
+                        staff_id = sid
+                except ValueError:
+                    pass
 
         perms = ROLE_PERMISSIONS.get(role, set())
         if permission not in perms:
@@ -98,22 +126,61 @@ async def list_roles():
     }
 
 
-@router.get("", response_model=AnyResponse)
-async def list_staff(
+@router.post("/login", response_model=AnyResponse)
+async def staff_login(
+    body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = (
-        (
-            await db.execute(
-                select(StaffMember).where(
-                    StaffMember.merchant_id == merchant.id, StaffMember.is_active.is_(True)
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    """员工 PIN 登录：验证员工身份后签发带 staff_id claim 的 JWT。
+
+    商户（owner）已登录状态下，员工输入 PIN 切换身份。前端拿到 staff token
+    后替换 owner token，后续请求的 require_permission 会从 token 读
+    role/staff_id 执行权限拦截。
+    """
+    staff_id = body.get("staff_id")
+    pin_code = body.get("pin_code")
+    if not staff_id or not pin_code:
+        raise HTTPException(status_code=400, detail="需要 staff_id 和 pin_code")
+    try:
+        sid = uuid.UUID(str(staff_id))
+    except (ValueError, TypeError) as err:
+        raise HTTPException(status_code=400, detail="staff_id 格式无效") from err
+    staff = await db.get(StaffMember, sid)
+    if not staff or staff.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="员工不存在")
+    if not staff.is_active:
+        raise HTTPException(status_code=403, detail="员工已停用")
+    if not staff.pin_code or staff.pin_code != str(pin_code):
+        raise HTTPException(status_code=401, detail="PIN 码错误")
+    token = create_access_token(merchant.id, role=staff.role, staff_id=staff.id)
+    return {
+        "code": 0,
+        "data": {
+            "token": token,
+            "staff_id": str(staff.id),
+            "name": staff.name,
+            "role": staff.role,
+            "permissions": sorted(ROLE_PERMISSIONS.get(staff.role, set())),
+        },
+    }
+
+
+@router.get("", response_model=AnyResponse)
+async def list_staff(
+    include_inactive: bool = False,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取员工列表。
+
+    - 默认仅返回 is_active=True 的员工（向后兼容）。
+    - include_inactive=true 时返回全部员工（含已停用），用于"已停用员工"恢复入口。
+    """
+    stmt = select(StaffMember).where(StaffMember.merchant_id == merchant.id)
+    if not include_inactive:
+        stmt = stmt.where(StaffMember.is_active.is_(True))
+    rows = (await db.execute(stmt)).scalars().all()
     return {
         "code": 0,
         "data": [
@@ -122,6 +189,7 @@ async def list_staff(
                 "name": s.name,
                 "phone": s.phone,
                 "role": s.role,
+                "is_active": s.is_active,
                 "permissions": sorted(ROLE_PERMISSIONS.get(s.role, set())),
             }
             for s in rows
@@ -162,12 +230,24 @@ async def update_staff(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    """更新员工字段。
+
+    支持 name / phone / pin_code / role / is_active 字段更新。
+    pin_code 字段：
+      - 不传：保持原值（默认）
+      - 传 ''（空字符串）：显式清空已有 PIN（区别于"不修改"）
+      - 传非空字符串：更新为新 PIN
+    """
     s = await db.get(StaffMember, staff_id)
     if not s or s.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="员工不存在")
     for f in ("name", "phone", "pin_code"):
         if f in body:
-            setattr(s, f, body[f])
+            # pin_code 允许显式清空（空字符串）；其余字段空值跳过更新
+            value = body[f]
+            if value == "" and f != "pin_code":
+                continue
+            setattr(s, f, value if value != "" else None)
     if "role" in body:
         if body["role"] not in ROLE_PERMISSIONS:
             raise HTTPException(status_code=400, detail="无效角色")

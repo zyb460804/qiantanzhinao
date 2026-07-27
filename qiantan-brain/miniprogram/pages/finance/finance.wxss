@@ -3,9 +3,9 @@
 /* 数据导出入口（v3.1：财务页为统一入口，执行在经营管理页） */
 .export-portal { margin-top: 16rpx; }
 .export-portal-card { display:flex; align-items:center; gap:24rpx; padding:32rpx 28rpx; background:var(--paper); border:1rpx solid var(--line); border-radius:var(--radius-lg, 20rpx); box-shadow:var(--shadow-sm); }
-.export-portal-glyph { width:88rpx; height:88rpx; flex:0 0 88rpx; border-radius:22rpx; display:flex; align-items:center; justify-content:center; font-size:40rpx; font-weight:800; color:var(--green-800); background:var(--green-50, rgba(23,92,69,.08)); }
+.export-portal-glyph { width:88rpx; height:88rpx; flex:0 0 88rpx; border-radius:22rpx; display:flex; align-items:center; justify-content:center; font-size:40rpx; font-weight:800; color:var(--green-800); background:var(--green-50, rgba(0, 160, 106,.08)); }
 .export-portal-copy { flex:1; display:flex; flex-direction:column; gap:6rpx; }
-.export-portal-title { font-size:28rpx; font-weight:700; color:var(--ink-1, #1f2a24); }
+.export-portal-title { font-size:28rpx; font-weight:700; color:var(--ink); }
 .export-portal-desc { font-size:22rpx; color:var(--muted); line-height:1.5; }
 .tab-row { display:flex; gap:12rpx; margin:16rpx 0; overflow-x:auto; }
 .tab-chip { padding:14rpx 24rpx; color:var(--muted); background:var(--paper); border:2rpx solid var(--line); border-radius:99rpx; font-size:24rpx; font-weight:700; white-space:nowrap; flex:0 0 auto; }
@@ -17,7 +17,7 @@
 .cat-name { display:block; color:var(--ink); font-size:27rpx; font-weight:750; }
 .cat-meta { display:block; margin-top:4rpx; color:var(--muted); font-size:20rpx; }
 .cat-amount { color:var(--ink); font-family:var(--font-num); font-size:25rpx; font-weight:800; flex:0 0 auto; }
-.act-btn.del { padding:6rpx 14rpx; color:#c0493d; background:rgba(201,67,51,.08); border-radius:99rpx; font-size:20rpx; }
+.act-btn.del { padding:6rpx 14rpx; color:#c93a30; background:rgba(201,67,51,.08); border-radius:99rpx; font-size:20rpx; }
 .report-card { padding:24rpx; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
 .report-row { display:flex; justify-content:space-between; padding:14rpx 0; border-bottom:1rpx solid var(--line); font-size:26rpx; color:var(--ink); }
 .report-row.sm { font-size:22rpx; padding:8rpx 0; }
@@ -71,7 +71,7 @@
 .recon-summary view { padding: 18rpx; background: var(--paper); }
 .recon-summary-label { display: block; color: var(--muted); font-size: 19rpx; }
 .recon-summary-value { display: block; margin-top: 5rpx; color: var(--ink); font-family: var(--font-num); font-size: 28rpx; font-weight: 850; }
-.recon-summary.status-exception .recon-summary-value { color: #b54135; }
+.recon-summary.status-exception .recon-summary-value { color: #c93a30; }
 .recon-list { display: flex; flex-direction: column; gap: 12rpx; }
 .recon-item { padding: 20rpx; background: var(--paper); border: 1.5rpx solid var(--ring); border-radius: 20rpx; box-shadow: var(--shadow-sm); }
 .recon-item.selected { border-color: var(--green-600); }
@@ -79,8 +79,8 @@
 .recon-item-title { color: var(--ink); font-size: 25rpx; font-weight: 800; }
 .recon-status { padding: 5rpx 12rpx; color: var(--muted); background: var(--paper-2); border-radius: 10rpx; font-size: 18rpx; font-weight: 750; }
 .recon-status.balanced { color: var(--green-800); background: var(--green-50); }
-.recon-status.exception { color: #b54135; background: rgba(201,67,51,.08); }
-.recon-status.resolved { color: #7a5a16; background: rgba(243,168,59,.14); }
+.recon-status.exception { color: #c93a30; background: rgba(201,67,51,.08); }
+.recon-status.resolved { color: #8f5a00; background: rgba(243,168,59,.14); }
 .recon-item-money { display: flex; flex-wrap: wrap; gap: 8rpx 18rpx; margin: 13rpx 0; color: var(--ink-2); font-family: var(--font-num); font-size: 21rpx; }
 .recon-item-foot { color: var(--muted); font-size: 18rpx; }
 .recon-rerun { flex: 0 0 auto; color: var(--green-800); font-weight: 750; }

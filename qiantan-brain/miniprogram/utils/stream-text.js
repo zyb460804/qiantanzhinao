@@ -26,28 +26,45 @@ var DEFAULT_PAUSE = 2600; // 打完后停留 ms (0 = 不自动隐藏)
  * @param {number}   opts.speed    - 每字符间隔 ms (默认 42)
  * @param {number}   opts.pause    - 打完后显示停留 ms, 超时后 onUpdate('') 并触发 onDone (默认 2600, 传 0 不隐藏)
  * @param {boolean}  opts.noPause  - 不自动隐藏/清除文本, onDone 在打字完成后立即触发
- * @returns {Object}  { cancel: function } — 用于中止打印
+ * @returns {Object}  { cancel: function } — 用于中止打印（同时清理打字定时器和停留定时器）
  */
 function streamText(text, onUpdate, onDone, opts) {
   opts = opts || {};
   var speed = opts.speed || DEFAULT_SPEED;
   var pause = opts.noPause ? 0 : (opts.pause !== undefined ? opts.pause : DEFAULT_PAUSE);
 
+  // 修复：把打字 interval 句柄和停留 setTimeout 句柄都暴露给 cancel，
+  // 避免用户在停留期内切模式/离开页面后定时器仍触发 onUpdate('')+onDone，
+  // 在已放弃的上下文里继续 parseText / setData。
+  var typingTimer = null;
+  var pauseTimer = null;
+
   if (REDUCE_MOTION) {
     onUpdate(text);
-    if (onDone) setTimeout(onDone, speed);
-    return { cancel: function () {} };
+    if (onDone) {
+      pauseTimer = setTimeout(function () {
+        pauseTimer = null;
+        onDone();
+      }, speed);
+    }
+    return {
+      cancel: function () {
+        if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
+      },
+    };
   }
 
   onUpdate('');
   var i = 0;
-  var timer = setInterval(function () {
+  typingTimer = setInterval(function () {
     i++;
     onUpdate(text.slice(0, i));
     if (i >= text.length) {
-      clearInterval(timer);
+      clearInterval(typingTimer);
+      typingTimer = null;
       if (pause > 0) {
-        setTimeout(function () {
+        pauseTimer = setTimeout(function () {
+          pauseTimer = null;
           onUpdate('');
           if (onDone) onDone();
         }, pause);
@@ -59,7 +76,8 @@ function streamText(text, onUpdate, onDone, opts) {
 
   return {
     cancel: function () {
-      clearInterval(timer);
+      if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
+      if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
       onUpdate(text); // 打完剩余内容
     },
   };

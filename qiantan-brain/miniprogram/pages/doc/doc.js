@@ -1,12 +1,19 @@
 /**
  * 文档展示页 — 操作指南 / 常见问题 / 隐私政策 / 用户协议
  * 接收 ?type=guide|faq|privacy|terms 参数展示对应文档。
+ *
+ * 说明：当前四类文档硬编码于本文件（DOCS 对象）。
+ * 法律/合规类（privacy、terms）变更需发版审核，存在合规滞后风险。
+ * 后续应接入后端 /api/v1/docs?type=xxx 接口下发；在统一接口上线前，
+ * 至少给每份文档加 version/effective_date，让 UI 能展示生效时间。
  */
 var app = getApp();
 
 var DOCS = {
   guide: {
     title: '操作指南',
+    version: '1.0',
+    effective_date: '2026-07',
     sections: [
       { h: '一分钟上手', body: '千摊智脑帮你管库存、记流水、看利润。打开首页经营台,今日数据一目了然。' },
       { h: '第一步:记一笔', body: '点底部「记一笔」标签,按住话筒说话(如"进了白菜50斤三毛一斤"),系统自动识别商品、数量、金额,确认后即入库。也支持文字输入。' },
@@ -18,6 +25,8 @@ var DOCS = {
   },
   faq: {
     title: '常见问题',
+    version: '1.0',
+    effective_date: '2026-07',
     sections: [
       { h: '断网了还能记账吗?', body: '可以。语音和文字记账会暂存在本地,联网后自动同步到云端,不会丢失。收银订单也会离线暂存。' },
       { h: '数据安全吗?', body: '所有数据加密存储在云端服务器,仅你自己可见。我们不会向第三方分享你的经营数据。详见隐私政策。' },
@@ -29,6 +38,8 @@ var DOCS = {
   },
   privacy: {
     title: '隐私政策',
+    version: '1.0',
+    effective_date: '2026-07',
     sections: [
       { h: '信息收集', body: '我们收集以下信息为你提供服务:微信授权的公开信息(昵称)、你主动录入的经营数据(进货、销售、库存、费用)、设备绑定的硬件信息。' },
       { h: '信息使用', body: '收集的信息仅用于:提供经营记录与分析功能、生成智能建议、设备联动、故障排查。我们不会将你的经营数据用于广告投放或出售给第三方。' },
@@ -40,6 +51,8 @@ var DOCS = {
   },
   terms: {
     title: '用户协议',
+    version: '1.0',
+    effective_date: '2026-07',
     sections: [
       { h: '服务说明', body: '千摊智脑为小微商户提供经营记录、库存管理、数据分析等工具服务。使用本服务即表示你同意本协议。' },
       { h: '用户责任', body: '你应保证录入的经营数据真实合法,不得利用本服务从事违法违规活动。你对自己录入的数据内容负责。' },
@@ -55,6 +68,8 @@ Page({
   data: {
     skinClass: '',
     docTitle: '',
+    docVersion: '',
+    docEffectiveDate: '',
     sections: [],
   },
 
@@ -64,6 +79,8 @@ Page({
     this.setData({
       skinClass: 'skin-' + app.resolveSkin(),
       docTitle: doc.title,
+      docVersion: doc.version || '',
+      docEffectiveDate: doc.effective_date || '',
       sections: doc.sections,
     });
     wx.setNavigationBarTitle({ title: doc.title });

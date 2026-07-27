@@ -29,11 +29,52 @@ router = APIRouter(prefix="/api/v1/market-admin", tags=["market-admin"])
 async def list_markets(
     merchant: Merchant = Depends(get_current_merchant), db: AsyncSession = Depends(get_db)
 ):
-    rows = (await db.execute(select(Market).where(Market.is_active == True))).scalars().all()  # noqa: E712
+    """获取市场列表 — 限定为当前商户已入场（MarketMerchant 关联）的市场。
+
+    修复（审计 P1-加载通知列表数据泄露）：
+    原实现返回系统中所有 active 市场，导致前端拉到全平台无关市场的通知。
+    现通过 MarketMerchant 关联表只返回与当前商户关联的市场。
+    """
+    rows = (
+        (
+            await db.execute(
+                select(Market)
+                .join(MarketMerchant, MarketMerchant.market_id == Market.id)
+                .where(
+                    MarketMerchant.merchant_id == merchant.id,
+                    Market.is_active.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )  # noqa: E712
     return {
         "code": 0,
         "data": [{"market_id": str(m.id), "name": m.name, "address": m.address} for m in rows],
     }
+
+
+async def _require_market_member(
+    db: AsyncSession, merchant_id: uuid.UUID, market_id: uuid.UUID
+) -> None:
+    """校验商户是否属于指定市场（通过 MarketMerchant 关联表）。
+
+    修复（审计 P1-市场管理 API 权限语义错位）：原 /market-admin 写操作
+    仅校验 get_current_merchant，任何登录摊贩都能创建市场通知；现对涉及
+    market_id 的写操作（notices / inspections / complaints）校验该商户
+    确实属于目标市场。create_market 因尚无"市场管理员"角色概念，暂加 TODO。
+    """
+    mm = (
+        await db.execute(
+            select(MarketMerchant).where(
+                MarketMerchant.merchant_id == merchant_id,
+                MarketMerchant.market_id == market_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if mm is None:
+        raise HTTPException(status_code=403, detail="该商户不属于此市场，无权操作")
 
 
 @router.post("/markets", response_model=AnyResponse)
@@ -42,6 +83,17 @@ async def create_market(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    """创建市场 — 当前仅允许 owner 创建。
+
+    TODO（审计 P1-市场管理 API 权限语义错位）：路由前缀叫 /market-admin，
+    但目前没有独立的"市场管理员"角色与平台运营方 SaaS 上下文。在引入
+    platform_admin / market_admin 角色与权限校验前，临时限制为 owner 才能
+    创建市场，避免任意摊贩随手创建脏数据。后续应：
+      1. 新增 platform_admin / market_admin 角色与登录链路
+      2. 通过 OAuth/邀请码校验后才能创建市场
+    """
+    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
+        raise HTTPException(status_code=403, detail="仅平台管理员可创建市场")
     m = Market(name=body["name"], address=body.get("address"), contact=body.get("contact"))
     db.add(m)
     await db.commit()
@@ -58,6 +110,8 @@ async def list_market_merchants(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 校验当前商户属于该市场（审计 P0-1：原实现任意商户可枚举任意市场商户）
+    await _require_market_member(db, merchant.id, market_id)
     rows = (
         (await db.execute(select(MarketMerchant).where(MarketMerchant.market_id == market_id)))
         .scalars()
@@ -85,6 +139,11 @@ async def register_merchant(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 仅 owner/tenant_admin 可登记商户入场（审计 P0-1：原实现任意商户可塞任意商户进任意市场）
+    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
+        raise HTTPException(status_code=403, detail="仅管理员可登记商户入场")
+    market_id = uuid.UUID(body["market_id"])
+    await _require_market_member(db, merchant.id, market_id)
     mm = MarketMerchant(
         market_id=uuid.UUID(body["market_id"]),
         merchant_id=uuid.UUID(body["merchant_id"]),
@@ -107,6 +166,8 @@ async def list_inspections(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 校验当前商户属于该市场（审计 P0-1）
+    await _require_market_member(db, merchant.id, market_id)
     rows = (
         (
             await db.execute(
@@ -141,8 +202,11 @@ async def create_inspection(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    market_id = uuid.UUID(body["market_id"])
+    # 校验当前商户属于该市场（审计 P1-权限语义错位）
+    await _require_market_member(db, merchant.id, market_id)
     i = MarketInspection(
-        market_id=uuid.UUID(body["market_id"]),
+        market_id=market_id,
         inspector=body["inspector"],
         inspection_type=body.get("inspection_type", "food_safety"),
         result=body.get("result", "pass"),
@@ -166,6 +230,8 @@ async def list_complaints(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 校验当前商户属于该市场（审计 P0-1）
+    await _require_market_member(db, merchant.id, market_id)
     filters = [MarketComplaint.market_id == market_id]
     if status:
         filters.append(MarketComplaint.status == status)
@@ -204,8 +270,11 @@ async def create_complaint(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    market_id = uuid.UUID(body["market_id"])
+    # 校验当前商户属于该市场（审计 P1-权限语义错位）
+    await _require_market_member(db, merchant.id, market_id)
     c = MarketComplaint(
-        market_id=uuid.UUID(body["market_id"]),
+        market_id=market_id,
         complainant=body.get("complainant"),
         complaint_type=body["complaint_type"],
         description=body["description"],
@@ -227,6 +296,8 @@ async def resolve_complaint(
     c = await db.get(MarketComplaint, complaint_id)
     if not c:
         raise HTTPException(status_code=404, detail="投诉不存在")
+    # 校验当前商户属于投诉所在市场（审计 P0-1：原实现任意商户可处置他人投诉）
+    await _require_market_member(db, merchant.id, c.market_id)
     c.status = "resolved"
     c.resolution = body.get("resolution", "")
     c.resolved_at = None  # use server time
@@ -243,6 +314,8 @@ async def list_notices(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 校验当前商户属于该市场（审计 P0-1）
+    await _require_market_member(db, merchant.id, market_id)
     rows = (
         (
             await db.execute(
@@ -276,8 +349,14 @@ async def create_notice(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 仅 owner/tenant_admin 可发布公告，且须属于该市场
+    # （审计 P0-1：原实现任意商户可向任意市场发布公告）
+    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
+        raise HTTPException(status_code=403, detail="仅管理员可发布公告")
+    market_id = uuid.UUID(body["market_id"])
+    await _require_market_member(db, merchant.id, market_id)
     n = MarketNotice(
-        market_id=uuid.UUID(body["market_id"]),
+        market_id=market_id,
         title=body["title"],
         content=body["content"],
         notice_type=body.get("notice_type", "info"),

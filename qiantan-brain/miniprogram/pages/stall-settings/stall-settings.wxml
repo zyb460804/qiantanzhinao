@@ -1,0 +1,34 @@
+<!-- 摊位设置 — 基础信息 / 建议偏好 / 皮肤主题（从「我的」页面拆出） -->
+<view class="page-shell stall-settings-page {{skinClass}}">
+  <!-- ① 基础信息 -->
+  <view class="section-head"><text class="section-title">基础信息</text></view>
+  <view class="setting-group">
+    <view class="setting-row"><text class="setting-label">摊位名称</text><input class="setting-input" value="{{merchantName}}" bindinput="onNameChange" placeholder="输入摊位名称" /></view>
+    <view class="setting-row"><text class="setting-label">所在城市</text><picker range="{{cityOptions}}" value="{{cityIndex}}" bindchange="onCityChange"><text class="setting-val">{{cityOptions[cityIndex]}} ›</text></picker></view>
+    <view class="setting-row"><text class="setting-label">常用方言</text><picker range="{{dialects}}" value="{{dialectIndex}}" bindchange="onDialectChange"><text class="setting-val">{{dialects[dialectIndex]}} ›</text></picker></view>
+    <view class="setting-row"><text class="setting-label">营业时段</text><picker range="{{hoursOptions}}" value="{{hoursIndex}}" bindchange="onBusinessHoursChange"><text class="setting-val">{{hoursOptions[hoursIndex]}} ›</text></picker></view>
+    <view class="setting-row"><text class="setting-label">经营提醒</text><switch checked="{{notificationEnabled}}" bindchange="onNotificationToggle" color="#00B578" /></view>
+  </view>
+
+  <!-- ② 建议偏好 -->
+  <view class="section-head"><text class="section-title">建议偏好</text><text class="section-caption">影响 AI 参谋给的建议风格</text></view>
+  <view class="setting-group">
+    <radio-group class="risk-group" bindchange="onRiskChange">
+      <label class="risk-opt"><radio value="conservative" checked="{{riskProfile === 'conservative'}}" color="#00A06A"/> 稳健经营 · 少压货、优先控制损耗</label>
+      <label class="risk-opt"><radio value="neutral" checked="{{riskProfile === 'neutral'}}" color="#00A06A"/> 平衡经营 · 兼顾销量、利润与风险</label>
+      <label class="risk-opt"><radio value="aggressive" checked="{{riskProfile === 'aggressive'}}" color="#00A06A"/> 进取经营 · 接受波动，争取更多销量</label>
+    </radio-group>
+  </view>
+
+  <!-- ③ 皮肤主题 -->
+  <view class="section-head"><text class="section-title">皮肤主题</text><text class="section-caption">切换早市/夜市视觉</text></view>
+  <view class="setting-group">
+    <radio-group class="skin-group" bindchange="onSkinChange">
+      <label class="risk-opt"><radio value="auto" checked="{{skinManual === 'auto' || !skinManual}}" color="#00A06A"/> 跟随时段（自动）</label>
+      <label class="risk-opt"><radio value="morning" checked="{{skinManual === 'morning'}}" color="#00A06A"/> 早市（明亮）</label>
+      <label class="risk-opt"><radio value="evening" checked="{{skinManual === 'evening'}}" color="#00A06A"/> 夜市（暗色）</label>
+    </radio-group>
+  </view>
+
+  <button class="btn-primary save-btn" bindtap="saveProfile">保存我的经营偏好</button>
+</view>

@@ -2,9 +2,10 @@
   "navigationBarTitleText": "经营看板",
   "usingComponents": {
     "risk-gauge": "/components/risk-gauge/risk-gauge",
-    "stock-chart": "/components/stock-chart/stock-chart"
+    "stock-chart": "/components/stock-chart/stock-chart",
+    "mascot": "/components/mascot/mascot"
   },
-  "navigationBarBackgroundColor": "#123D30",
-  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#FFFFFF",
+  "navigationBarTextStyle": "black",
   "enablePullDownRefresh": true
 }

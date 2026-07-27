@@ -78,15 +78,17 @@ Page({
     });
   },
   sendHeartbeat: function (e) {
+    // 该按钮面向摊主场景命名为「测试连接」：复用后端心跳接口确认设备是否在线，
+    // 避免引入新路由。心跳的固件自动上报路径不受影响。
     var id = e.currentTarget.dataset.id, self = this;
     if (this.data.deviceActionId) return;
     this.setData({ deviceActionId: id });
     app.request({ url: '/devices/' + id + '/heartbeat', method: 'POST', data: {} }).then(function () {
       self.setData({ deviceActionId: '' });
-      wx.showToast({ title: '心跳已发送', icon: 'success' }); self.loadAll();
+      wx.showToast({ title: '设备连接正常', icon: 'success' }); self.loadAll();
     }).catch(function (err) {
       self.setData({ deviceActionId: '' });
-      wx.showToast({ title: (err.body && err.body.detail) || '心跳发送失败', icon: 'none' });
+      wx.showToast({ title: (err.body && err.body.detail) || '连接失败，请检查设备', icon: 'none' });
     });
   },
   deactivateDevice: function (e) {
@@ -103,6 +105,19 @@ Page({
         wx.showToast({ title: (err.body && err.body.detail) || '停用失败', icon: 'none' });
       });
     }, fail: function () { self.setData({ deviceActionId: '' }); }});
+  },
+  /** 重新启用已停用的设备，保留历史心跳与固件信息。 */
+  activateDevice: function (e) {
+    var id = e.currentTarget.dataset.id, self = this;
+    if (this.data.deviceActionId) return;
+    this.setData({ deviceActionId: id });
+    app.request({ url: '/devices/' + id + '/activate', method: 'POST' }).then(function () {
+      self.setData({ deviceActionId: '' });
+      wx.showToast({ title: '已启用', icon: 'success' }); self.loadAll();
+    }).catch(function (err) {
+      self.setData({ deviceActionId: '' });
+      wx.showToast({ title: (err.body && err.body.detail) || '启用失败', icon: 'none' });
+    });
   },
   syncPrices: function () {
     var self = this;

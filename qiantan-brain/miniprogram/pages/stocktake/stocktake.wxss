@@ -5,7 +5,7 @@
 /* ── Tab 切换栏 ───────────────────────────────────────── */
 .tab-bar { display: flex; gap: 8rpx; margin-bottom: 22rpx; padding: 8rpx; background: var(--paper-2); border-radius: 22rpx; }
 .tab-item { flex: 1; min-height: 74rpx; display: flex; align-items: center; justify-content: center; color: var(--muted); border-radius: 16rpx; font-size: 24rpx; font-weight: 650; }
-.tab-item.active { color: var(--green-950); background: var(--paper); box-shadow: 0 6rpx 16rpx rgba(18,61,48,.08); }
+.tab-item.active { color: var(--green-950); background: var(--paper); box-shadow: 0 6rpx 16rpx rgba(16, 32, 24,.08); }
 
 /* ── 开始盘点 · 启动卡片 ───────────────────────────────────────── */
 .start-card { margin-top: 24rpx; padding: 52rpx 32rpx 44rpx; text-align: center; background: var(--paper); border-radius: var(--radius-xl); box-shadow: var(--shadow); animation: card-rise .35s ease both; }
@@ -20,14 +20,14 @@
 .progress-head { display: flex; align-items: center; justify-content: space-between; }
 .progress-label { color: var(--ink); font-size: 26rpx; font-weight: 700; }
 .progress-count { color: var(--green-800); font-size: 32rpx; font-weight: 800; }
-.progress-track { height: 14rpx; margin-top: 18rpx; overflow: hidden; background: #ecefe9; border-radius: 99rpx; }
+.progress-track { height: 14rpx; margin-top: 18rpx; overflow: hidden; background: #eef1ef; border-radius: 99rpx; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, var(--green-800), var(--green-600)); border-radius: 99rpx; transition: width .35s ease; }
 .progress-hint { display: block; margin-top: 12rpx; color: var(--muted); font-size: 21rpx; }
 
 /* ── 商品盘点列表 ───────────────────────────────────────── */
 .stocktake-list { display: flex; flex-direction: column; gap: 18rpx; }
 .stocktake-card { padding: 26rpx; background: var(--paper); border: 1rpx solid transparent; border-radius: var(--radius-lg); box-shadow: 0 8rpx 24rpx rgba(25,48,38,.06); animation: card-rise .32s ease both; }
-.stocktake-card.submitted { border-color: rgba(23,92,69,.15); background: #fbfdfb; }
+.stocktake-card.submitted { border-color: rgba(0, 160, 106,.15); background: #fbfdfb; }
 
 /* 商品头部 */
 .item-head { display: flex; justify-content: space-between; align-items: flex-start; }
@@ -35,7 +35,7 @@
 .item-name { display: block; color: var(--ink); font-size: 33rpx; font-weight: 760; line-height: 1.3; }
 .item-tag-row { display: flex; align-items: center; gap: 10rpx; margin-top: 12rpx; }
 .mini-tag { padding: 5rpx 14rpx; border-radius: 99rpx; font-size: 19rpx; font-weight: 600; }
-.tag-ghost { color: var(--muted); background: #f0f0ea; }
+.tag-ghost { color: var(--muted); background: #eef1ef; }
 
 /* 实际数量输入区 */
 .qty-input-area { margin-top: 22rpx; }
@@ -48,11 +48,11 @@
 /* 快捷调整按钮 */
 .quick-btns { display: flex; gap: 10rpx; margin-top: 16rpx; }
 .quick-btn { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 66rpx; color: var(--green-800); background: var(--green-50); border-radius: 14rpx; font-size: 25rpx; font-weight: 720; }
-.quick-btn.gain { color: var(--corn-deep, #9a6b00); background: rgba(243,168,59,.16); }
+.quick-btn.gain { color: var(--corn-deep, #8f5a00); background: rgba(243,168,59,.16); }
 .quick-btn:active { opacity: .78; transform: scale(.97); }
 
 /* 差异显示区域 */
-.variance-area { margin-top: 18rpx; padding: 16rpx 20rpx; background: #f8f7f1; border-radius: 16rpx; }
+.variance-area { margin-top: 18rpx; padding: 16rpx 20rpx; background: #f5f7f6; border-radius: 16rpx; }
 .variance-row { display: flex; align-items: center; gap: 14rpx; }
 .variance-label { color: var(--muted); font-size: 23rpx; }
 .variance-value { font-size: 30rpx; font-weight: 780; }
@@ -62,14 +62,14 @@
 .variance-value.loss, .variance-text.loss { color: var(--red); }
 .variance-text.loss { background: var(--red-soft); }
 .variance-value.zero, .variance-text.zero { color: var(--muted); }
-.variance-text.zero { background: #eeeee8; }
+.variance-text.zero { background: #eef1ef; }
 .variance-pending { color: var(--amber); font-size: 24rpx; font-weight: 650; }
 
 /* 差异原因选择器 */
 .reason-area { margin-top: 16rpx; }
 .reason-label { display: block; margin-bottom: 10rpx; color: var(--muted); font-size: 22rpx; }
 .reason-btns { display: flex; flex-wrap: wrap; gap: 10rpx; }
-.reason-btn { padding: 13rpx 22rpx; color: var(--ink-2); background: #f2f2ec; border: 1rpx solid var(--line); border-radius: 99rpx; font-size: 22rpx; font-weight: 600; }
+.reason-btn { padding: 13rpx 22rpx; color: var(--ink-2); background: #f0f3f1; border: 1rpx solid var(--line); border-radius: 99rpx; font-size: 22rpx; font-weight: 600; }
 .reason-btn.active { color: #fff; background: var(--green-800); border-color: var(--green-800); }
 .reason-btn:active { opacity: .82; transform: scale(.97); }
 
@@ -128,6 +128,38 @@
 .history-stat-label { display: block; margin-top: 4rpx; color: var(--muted); font-size: 19rpx; }
 .history-notes { margin-top: 14rpx; padding: 14rpx 16rpx; background: var(--canvas); border-radius: 14rpx; }
 .history-notes-text { color: var(--ink-2); font-size: 22rpx; line-height: 1.5; }
+
+/* 历史卡片：展开状态与右侧头部布局（P2 详情查看） */
+.history-head-right { display: flex; align-items: center; gap: 12rpx; }
+.history-toggle-hint { color: var(--green-700); font-size: 21rpx; font-weight: 600; }
+.history-card.expanded { border-color: var(--green-800); box-shadow: 0 10rpx 28rpx rgba(16, 32, 24,.10); }
+
+/* 展开后的逐项明细 */
+.history-detail { margin-top: 16rpx; padding-top: 16rpx; border-top: 1rpx dashed var(--line); }
+.history-detail-loading { padding: 18rpx 0; text-align: center; color: var(--muted); font-size: 22rpx; }
+.history-detail-empty { padding: 18rpx 0; text-align: center; color: var(--muted); font-size: 22rpx; }
+.history-detail-list { display: flex; flex-direction: column; gap: 10rpx; }
+.history-detail-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10rpx; padding: 14rpx 16rpx; background: var(--canvas); border-radius: 12rpx; }
+.detail-name { flex: 1 1 100%; color: var(--ink); font-size: 24rpx; font-weight: 680; }
+.detail-meta { flex: 1 1 60%; color: var(--muted); font-size: 20rpx; }
+.detail-variance { color: var(--ink); font-size: 24rpx; font-weight: 720; }
+.detail-variance.loss { color: var(--red); }
+.detail-variance.gain { color: var(--green-700); }
+
+/* 加载更多 / 触底状态 */
+.history-load-more { margin-top: 16rpx; padding: 18rpx; text-align: center; color: var(--muted); font-size: 22rpx; }
+.history-load-more-link { color: var(--green-700); font-weight: 650; }
+.history-load-more-link:active { opacity: .7; }
+
+/* 盘点备注输入框（P3 修复：绑定原死代码 inputNotes） */
+.notes-card { margin-bottom: 18rpx; padding: 22rpx 24rpx; background: var(--paper); border: 1.5rpx solid var(--ring); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+.notes-label { display: block; margin-bottom: 12rpx; color: var(--muted); font-size: 22rpx; font-weight: 600; }
+.notes-input { width: 100%; min-height: 80rpx; padding: 16rpx 18rpx; color: var(--ink); font-size: 24rpx; line-height: 1.5; background: var(--canvas); border: 1rpx solid var(--line); border-radius: 14rpx; box-sizing: border-box; }
+.notes-placeholder { color: var(--muted); font-size: 22rpx; }
+
+/* 一键保存全部按钮行（P2 修复：弱网下批量提交） */
+.batch-save-row { margin-bottom: 16rpx; }
+.batch-save-btn { width: 100%; }
 
 /* ── 动画 ───────────────────────────────────────── */
 @keyframes card-rise { from { opacity: 0; transform: translateY(12rpx); } to { opacity: 1; transform: translateY(0); } }

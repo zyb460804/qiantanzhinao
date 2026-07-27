@@ -20,9 +20,9 @@ const compact = (value) =>
   new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0)
 
 const statusConfig = {
-  healthy: { text: '运行正常', color: '#16803C', tag: 'green' },
-  warning: { text: '需要关注', color: '#D97706', tag: 'orange' },
-  critical: { text: '存在故障', color: '#DC2626', tag: 'red' },
+  healthy: { text: '运行正常', color: '#00B578', tag: 'green' },
+  warning: { text: '需要关注', color: '#F08C00', tag: 'orange' },
+  critical: { text: '存在故障', color: '#FA5151', tag: 'red' },
 }
 
 const checkStatus = {
@@ -203,11 +203,11 @@ export default function Monitoring() {
                 <ComposedChart data={data?.trend || []} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
                   <defs>
                     <linearGradient id="monitorApiFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#2563EB" stopOpacity={0.24} />
-                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.02} />
+                      <stop offset="0%" stopColor="#3478F6" stopOpacity={0.24} />
+                      <stop offset="100%" stopColor="#3478F6" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#E6EBE8" />
+                  <CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#E8ECEA" />
                   <XAxis dataKey="date" tickFormatter={(value) => value.slice(5)} />
                   <YAxis yAxisId="request" tickFormatter={compact} width={48} />
                   <YAxis yAxisId="task" orientation="right" allowDecimals={false} width={28} />
@@ -218,12 +218,12 @@ export default function Monitoring() {
                     type="monotone"
                     dataKey="api_calls"
                     name="API 请求"
-                    stroke="#2563EB"
+                    stroke="#3478F6"
                     fill="url(#monitorApiFill)"
                     strokeWidth={2.5}
                   />
-                  <Bar yAxisId="task" dataKey="ai_actions" name="AI 任务" fill="#22A06B" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="task" dataKey="ai_failures" name="失败任务" fill="#DC2626" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="task" dataKey="ai_actions" name="AI 任务" fill="#00A06A" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="task" dataKey="ai_failures" name="失败任务" fill="#FA5151" radius={[4, 4, 0, 0]} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>

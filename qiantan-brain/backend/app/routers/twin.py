@@ -139,11 +139,14 @@ async def get_inventory_mirror(
 ):
     """Inventory mirror: by-category bar chart + lifecycle heatmap data."""
     # Aggregate inventory by product, joined with category (exclude voided)
+    # 同时按 unit 分组, 以便后续判定每个 category_group 的单位是否统一
+    # (蔬菜按斤、鸡蛋按个等混合摊位的品类总量不能简单标"斤")
     inv_query = (
         select(
             ProductCategory.category_group,
             ProductCategory.name,
             ProductCategory.id,
+            InventoryRecord.unit,
             func.sum(InventoryRecord.quantity).label("qty"),
         )
         .join(ProductCategory, InventoryRecord.product_id == ProductCategory.id)
@@ -151,7 +154,12 @@ async def get_inventory_mirror(
             InventoryRecord.merchant_id == merchant_id,
             InventoryRecord.is_voided == False,  # noqa: E712
         )
-        .group_by(ProductCategory.category_group, ProductCategory.name, ProductCategory.id)
+        .group_by(
+            ProductCategory.category_group,
+            ProductCategory.name,
+            ProductCategory.id,
+            InventoryRecord.unit,
+        )
     )
     inv_result = await db.execute(inv_query)
     rows = inv_result.all()
@@ -167,13 +175,19 @@ async def get_inventory_mirror(
     ).all()
     sku_by_name = {name: sid for sid, name in sku_rows}
 
-    # Group by category
+    # Group by category, 同时收集每个 category 的单位集合
     by_category = {}
-    for group, name, pid, qty in rows:
+    category_units: dict[str, set[str]] = {}
+    for group, name, pid, unit, qty in rows:
         qty_val = round(float(qty or 0), 1)
         if group not in by_category:
-            by_category[group] = {"category": group, "total_qty": 0, "products": []}
+            by_category[group] = {"category": group, "total_qty": 0.0, "products": []}
+            category_units[group] = set()
+        # 注意: 此处先累加, 末尾统一 round, 避免浮点误差累积
+        # (例如 0.1+0.2 会出现 0.30000000000000004)
         by_category[group]["total_qty"] += qty_val
+        if unit:
+            category_units[group].add(unit)
         sid = sku_by_name.get(name)
         by_category[group]["products"].append(
             {
@@ -204,6 +218,8 @@ async def get_inventory_mirror(
         )
         hours_left = status.get("hours_remaining")
         # Bucket: today (<24h), 1day (24-48h), 2days (48-72h), 3days+ (>72h)
+        # 未知品类 (calc_batch_status 返回 hours_remaining=None) 通常是干货等长保
+        # 商品, 归入 3days+ 列以正确显示其余量, 而非让前端四列全灰误判为无库存
         if hours_left is not None:
             if hours_left <= 24:
                 bucket = "today"
@@ -214,7 +230,7 @@ async def get_inventory_mirror(
             else:
                 bucket = "3days+"
         else:
-            bucket = "unknown"
+            bucket = "3days+"
 
         heatmap.append(
             {
@@ -231,12 +247,20 @@ async def get_inventory_mirror(
             }
         )
 
+    # 末尾统一处理: round 累加后的 total_qty 避免浮点尾差, 并标注每个品类的单位
+    # unit 字段: 当该品类下所有批次单位一致时返回该单位 (如 "斤"/"个");
+    # 否则返回 None, 前端不应硬编码单位后缀
+    category_list = []
+    for group, d in by_category.items():
+        units = category_units.get(group, set())
+        d["total_qty"] = round(d["total_qty"], 1)
+        d["unit"] = next(iter(units)) if len(units) == 1 else None
+        category_list.append(d)
+
     return {
         "code": 0,
         "data": {
-            "by_category": sorted(
-                list(by_category.values()), key=lambda x: x["total_qty"], reverse=True
-            ),
+            "by_category": sorted(category_list, key=lambda x: x["total_qty"], reverse=True),
             "lifecycle_heatmap": heatmap,
         },
     }

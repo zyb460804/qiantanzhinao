@@ -1,13 +1,6 @@
 /** 市场通知 — 查看市场公告/警告/紧急通知 */
 var app = getApp();
 
-/** 通知类型配置 */
-var TYPE_CONFIG = {
-  info: { label: '公告', icon: '📢', color: 'var(--green-700)', bg: 'var(--green-50)' },
-  warning: { label: '警告', icon: '⚠️', color: 'var(--corn)', bg: 'var(--corn-soft)' },
-  urgent: { label: '紧急', icon: '🚨', color: 'var(--tomato)', bg: 'var(--tomato-soft)' }
-};
-
 Page({
   data: {
     skinClass: '', loading: true, loadError: false,
@@ -28,14 +21,18 @@ Page({
     this.loadNotices(function () { wx.stopPullDownRefresh(); });
   },
 
-  /** 加载通知列表 — 调用市场管理 API 获取通知 */
+  /** 加载通知列表 — 调用市场管理 API 获取通知
+
+   * 优化（审计 P1-加载通知列表）：
+   *  - 后端 /market-admin/markets 现在只返回当前商户已入场的市场（按
+   *    MarketMerchant 关联表过滤），避免看到全平台无关市场的通知。
+   *  - 单摊贩通常只属于一个市场，N+1 退化为 1-2 个请求；同时限制最多并发
+   *    5 个市场，避免极端情况下请求扇出过大。
+   */
   loadNotices: function (callback) {
     var self = this;
     this.setData({ loading: true, loadError: false });
 
-    // 先获取商户所属的市场列表，再查每个市场的通知
-    // 简化方案：调用 GET /market-admin/notices 需要 market_id，
-    // 我们通过 GET /market-admin/markets 获取关联市场
     app.request({ url: '/market-admin/markets' })
       .then(function (res) {
         // app.request 已解包 {code:0, data:[...]} → data
@@ -45,7 +42,9 @@ Page({
           if (callback) callback();
           return;
         }
-        var fetches = markets.map(function (m) {
+        // 限制扇出，避免极端情况 100+ 市场导致请求洪水
+        var targetMarkets = markets.slice(0, 5);
+        var fetches = targetMarkets.map(function (m) {
           return app.request({
             url: '/market-admin/notices?market_id=' + (m.market_id || m.id),
           }).catch(function () { return []; });
@@ -81,16 +80,5 @@ Page({
   toggleExpand: function (e) {
     var id = e.currentTarget.dataset.id;
     this.setData({ expandedId: this.data.expandedId === id ? '' : id });
-  },
-
-  /** 获取通知类型配置 */
-  getTypeConfig: function (type) {
-    return TYPE_CONFIG[type] || TYPE_CONFIG.info;
-  },
-
-  /** 格式化时间 */
-  formatTime: function (isoStr) {
-    if (!isoStr) return '';
-    return isoStr.replace('T', ' ').substring(0, 16);
   }
 });

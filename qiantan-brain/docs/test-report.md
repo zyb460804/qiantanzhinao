@@ -14,12 +14,12 @@ python -m pytest tests/test_advice_api.py -v
 ## 2. 测试结果
 
 ```text
-109 passed, 1 skipped in ~4.2s
+549 passed in 41.17s（Python 3.13.14, pytest 9.1.1）
 ```
 
 | 测试模块 | 覆盖内容 |
 |----------|----------|
-| `test_advice_api.py` | 每日建议（三行式）、What-if 沙盘、数字孪生看板、天气接口降级链；校验建议输出含 `forecast` 字段（Prophet 在线接入） |
+| `test_advice_api.py` | 每日建议（三行式）、What-if 沙盘、数字孪生看板、天气接口降级链；校验建议输出含 `forecast` 字段（按数据量自动选模型，Prophet 未安装时回落到移动平均） |
 | `test_auth_api.py` | 微信登录、JWT 鉴权、刷新、吊销、商户隔离 |
 | `test_batch.py` | 批次 FIFO 扣减、作废回滚、临期状态 |
 | `test_edge_auth.py` | Edge 端点 JWT 鉴权与 merchant_id 一致性校验 |

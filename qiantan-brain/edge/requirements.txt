@@ -1,7 +1,21 @@
 # Edge runtime dependencies. Install Picamera2 from Raspberry Pi OS apt packages.
+#
+# ⚠️ numpy 2 原子升级组（2026-07-26 升级审计）：numpy / opencv / simplejpeg 必须同批安装
+#    （opencv>=4.13 的依赖元数据强制 numpy>=2；旧版 simplejpeg 是 Picamera2 链路在
+#    numpy 2 下崩溃的主因）。变更后须在设备上回归 Picamera2 采集 → 推理全链路。
+#    若 venv 用了 --system-site-packages，注意 apt 的 python3-numpy / python3-simplejpeg
+#    旧版会遮蔽 venv 内新版（picamera2 issue #1088/#1211）。
 httpx==0.27.0
-numpy==1.26.4
-onnxruntime==1.19.2
-opencv-python-headless==4.10.0.84
-Pillow==10.4.0
-RPi.GPIO==0.7.1
+# 禁止上 2.5.x：numpy 2.5 起放弃 Python 3.11（Bookworm 系统 Python 即 3.11）
+numpy==2.4.6
+# 需 64 位系统 + Python>=3.11（与 1.19.2 的部署前提一致）；1.19 起官方支持 numpy 2
+onnxruntime==1.28.0
+# 留在 4.x 最新：OpenCV 5.0 有 vector 输出形状（Nx1→1D）等破坏性变更，另立专项再迁
+opencv-python-headless==4.13.0.92
+# 安全升级：10.4.0 受 2026 年多枚 CVE（PSD 越界写 CVE-2026-25990 等）影响
+Pillow==12.3.0
+# Picamera2 JPEG 编码依赖的 numpy 2 兼容构建
+simplejpeg>=1.9.0
+# 替换已停更 4 年半的 RPi.GPIO（Pi 5 / 新内核上不可用）。rpi-lgpio 提供同名
+# `import RPi.GPIO` 接口（drop-in），但与 RPi.GPIO 包互斥：设备上先 pip uninstall RPi.GPIO。
+rpi-lgpio==0.6

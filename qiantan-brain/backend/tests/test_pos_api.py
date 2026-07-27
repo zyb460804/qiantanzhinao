@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import func, select
 from tests.conftest import TEST_MERCHANT_ID
 
-from app.core.timezone import utc_now
+from app.core.timezone import local_now, utc_now
 from app.models.accounts import CustomerReceivable
 from app.models.batch import BatchLifecycle
 from app.models.inventory import InventoryRecord
@@ -153,7 +153,7 @@ async def test_daily_settlement_breaks_down_payment_channels_and_recloses(client
         "/api/v1/pos/orders", json=_order_payload("pos-settle-wechat-001", payment_method="wechat")
     )
     assert cash.status_code == 200 and wechat.status_code == 200
-    settle_date = utc_now().date().isoformat()
+    settle_date = local_now().date().isoformat()
     first = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
     second = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
     assert first.status_code == 200 and second.status_code == 200
@@ -208,7 +208,7 @@ async def test_fifo_cogs_is_persisted_and_restocked_refund_reverses_cost(client,
         json={"reason": "整单退回", "return_to_stock": True},
     )
     assert refunded.status_code == 200
-    settle_date = utc_now().date().isoformat()
+    settle_date = local_now().date().isoformat()
     settled = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
     assert settled.status_code == 200
     data = settled.json()["data"]

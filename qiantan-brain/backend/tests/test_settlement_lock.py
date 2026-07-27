@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import select
 from tests.conftest import TEST_MERCHANT_ID
 
-from app.core.timezone import utc_now
+from app.core.timezone import local_now, utc_now
 from app.models.batch import BatchLifecycle
 from app.models.pos import DailySettlement
 from app.services.batch import create_batch
@@ -31,7 +31,7 @@ async def _seed_stock(db_session, quantity=10):
 
 async def _close_today_settlement(client, db_session):
     """Helper: close today's settlement and return the response."""
-    settle_date = utc_now().date().isoformat()
+    settle_date = local_now().date().isoformat()
     res = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
     assert res.status_code == 200
     return res
@@ -46,7 +46,7 @@ class TestSettlementLock:
     async def test_new_order_blocked_after_settlement(self, client, db_session):
         """日结关闭后创建新订单应拒绝 409."""
         await _seed_stock(db_session, quantity=20)
-        settle_date = utc_now().date().isoformat()
+        settle_date = local_now().date().isoformat()
 
         # Close first
         await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
@@ -73,7 +73,7 @@ class TestSettlementLock:
     async def test_settlement_does_not_block_future(self, client, db_session):
         """关闭今天的日结不影响其他日期的结算查询."""
         await _seed_stock(db_session, quantity=20)
-        settle_date = utc_now().date().isoformat()
+        settle_date = local_now().date().isoformat()
         await _close_today_settlement(client, db_session)
 
         # Future date settlement should show as "open"
@@ -85,7 +85,7 @@ class TestSettlementLock:
     async def test_reclose_idempotent(self, client, db_session):
         """重复关闭日结不应报错（幂等）."""
         await _seed_stock(db_session, quantity=20)
-        settle_date = utc_now().date().isoformat()
+        settle_date = local_now().date().isoformat()
         await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
         res = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
         assert res.status_code == 200

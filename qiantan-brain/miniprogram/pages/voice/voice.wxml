@@ -30,7 +30,15 @@
       <view class="voice-rings"><voice-button state="{{state}}" bind:start="onStart" bind:end="onEnd" bind:cancel="onCancel" /></view>
       <text class="stage-tip" wx:if="{{state === 'idle'}}">例如：“今天进了白菜50斤，三毛一斤”</text>
       <text class="stage-tip active" wx:elif="{{state === 'listening'}}">正在记录，松开后自动识别</text>
+      <text class="stage-tip active" wx:elif="{{state === 'uploading'}}">上传中 {{uploadProgress}}%</text>
+      <text class="stage-tip active" wx:elif="{{state === 'pending_retry'}}">网络异常，录音已暂存</text>
       <text class="stage-tip active" wx:else>正在把你的话整理成账目</text>
+      <!-- 上传进度条：仅在上传中且未到 100% 时显示 -->
+      <view class="upload-progress" wx:if="{{state === 'uploading' && uploadProgress > 0 && uploadProgress < 100}}">
+        <view class="upload-progress-bar" style="width:{{uploadProgress}}%"></view>
+      </view>
+      <!-- 方言切换入口：与后端 Form(dialect) 对齐 -->
+      <view class="dialect-chip" bindtap="chooseDialect" wx:if="{{state === 'idle'}}">方言：{{dialectLabel}}</view>
     </view>
   </block>
 
@@ -59,6 +67,13 @@
     <icon name="bulb" size="40" color="var(--red)" />
     <view class="error-copy"><text class="error-title">这次没有听清</text><text class="error-desc">换个安静的地方，或改用文字输入。</text></view>
     <button class="retry-btn" bindtap="sayAgain">重试</button>
+  </view>
+
+  <!-- 暂存重传面板：上传失败且已暂存时显示 -->
+  <view class="error-panel pending-panel" wx:if="{{state === 'pending_retry'}}">
+    <icon name="bulb" size="40" color="var(--corn)" />
+    <view class="error-copy"><text class="error-title">网络异常，录音已暂存</text><text class="error-desc">连上网后点"重新上传"继续，或重新录一条。</text></view>
+    <button class="retry-btn" bindtap="retryUpload">重新上传</button>
   </view>
 
   <view class="section-head" wx:if="{{recentLogs.length > 0}}"><text class="section-title">最近说过</text><text class="section-caption">可撤销已记账</text></view>

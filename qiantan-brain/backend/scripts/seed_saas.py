@@ -42,24 +42,31 @@ DEMO_TENANT_ID = uuid.UUID("aaa00000-0000-0000-0000-000000000001")
 DEMO_SUBSCRIPTION_ID = uuid.UUID("aaa00000-0000-0000-0000-000000000002")
 
 # 平台管理员
+# 修复（审计 P1-6/P0-2）：生产环境强制通过环境变量传入，不提供默认值；
+# 仅开发环境（APP_ENV 未设置或为 development）允许默认口令便于本地试用。
+_APP_ENV = os.getenv("APP_ENV", "development").lower()
 ADMIN_EMAIL = os.getenv("PLATFORM_ADMIN_EMAIL", "admin@qiantan.com")
-ADMIN_PASSWORD = os.getenv("PLATFORM_ADMIN_PASSWORD", "Admin123!")
+if _APP_ENV in ("production", "staging"):
+    ADMIN_PASSWORD = os.environ.get("PLATFORM_ADMIN_PASSWORD") or ""
+    if not ADMIN_PASSWORD:
+        raise RuntimeError(
+            "生产/预发环境必须通过 PLATFORM_ADMIN_PASSWORD 环境变量设置管理员口令，"
+            "禁止使用默认口令。"
+        )
+else:
+    ADMIN_PASSWORD = os.getenv("PLATFORM_ADMIN_PASSWORD", "Admin123!")
 
 
 def _bcrypt_hash(password: str) -> str:
     """bcrypt 哈希密码。
 
-    生产环境应使用 passlib/bcrypt，此处用 sha256_salt 作为 dev 兜底
-    （要求 requirements 中有 bcrypt 时优先用 bcrypt）。
+    修复（审计 P1-6）：删除 sha256 fallback —— admin_security.verify_password 对非 $2 开头的
+    哈希一律返回 False，fallback 会造出永远无法登录的管理员账号（可用性缺陷）。
+    bcrypt 已在 requirements.txt 声明（==5.0.0），缺失即报错。
     """
-    try:
-        import bcrypt  # type: ignore
+    import bcrypt  # type: ignore
 
-        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    except ImportError:
-        # dev fallback: sha256（非生产级，仅本地开发）
-        salt = "qiantan_dev_salt_"
-        return hashlib.sha256((salt + password).encode()).hexdigest()
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 async def seed_plans(db) -> None:

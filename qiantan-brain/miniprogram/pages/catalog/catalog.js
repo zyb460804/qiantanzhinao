@@ -59,7 +59,7 @@ Page({
     showConvForm: false, convForm: { from_unit: '', to_unit: '斤', factor: '', sku_id: '', _skuName: '' },
 
     // ── 全局：供应商管理 ──
-    allSuppliers: [],
+    allSuppliers: [], allSuppliersLoading: false,
 
     // ── 供应商比价面板 ──
     showComparePanel: false,
@@ -71,7 +71,15 @@ Page({
   },
 
   onShow: function () {
-    this.setData({ skin: 'skin-' + app.resolveSkin() });
+    // 重置详情快照：用户可能在他页（如供应商管理）修改过关联/报价，
+    // 旧 detailSupProds/detailSpecs 不再可信，避免回页面后显示过时数据。
+    this.setData({
+      skin: 'skin-' + app.resolveSkin(),
+      detailSku: null,
+      detailAliases: [],
+      detailSpecs: [],
+      detailSupProds: [],
+    });
     this._loadSkus();
   },
 
@@ -218,10 +226,19 @@ Page({
 
   openSupProdForm: function () {
     var self = this;
-    this.setData({ showSupProdForm: true, supProdForm: { supplier_id: '', last_price: '', min_order_qty: '' } });
+    // 先置 loading，避免空数组触发表单显示「暂无供应商」误判。
+    this.setData({
+      showSupProdForm: true,
+      allSuppliersLoading: true,
+      allSuppliers: [],
+      supProdForm: { supplier_id: '', last_price: '', min_order_qty: '' }
+    });
     app.request({ url: '/catalog/suppliers', data: { limit: 200 } }).then(function (data) {
-      self.setData({ allSuppliers: (data && data.items) || [] });
-    }).catch(function () { wx.showToast({ title: '供应商列表加载失败', icon: 'none' }); });
+      self.setData({ allSuppliers: (data && data.items) || [], allSuppliersLoading: false });
+    }).catch(function () {
+      self.setData({ allSuppliersLoading: false });
+      wx.showToast({ title: '供应商列表加载失败', icon: 'none' });
+    });
   },
   closeSupProdForm: function () { this.setData({ showSupProdForm: false }); },
   onSupProdField: function (e) {
@@ -237,6 +254,10 @@ Page({
   saveSupProd: function () {
     var self = this, f = this.data.supProdForm, skuId = this.data.detailSku.sku_id;
     if (!f.supplier_id) { wx.showToast({ title: '请选择供应商', icon: 'none' }); return; }
+    // 客户端查重：后端 (supplier_id, sku_id) 无唯一约束（models 边界外），
+    // 先用最新 detailSupProds 防止摊主误点重复关联污染比价面板。
+    var existed = (this.data.detailSupProds || []).some(function (p) { return p.supplier_id === f.supplier_id; });
+    if (existed) { wx.showToast({ title: '该供应商已关联此商品，请先解除再重新关联', icon: 'none' }); return; }
     var lastPrice = f.last_price === '' ? null : Number(f.last_price);
     var minQty = f.min_order_qty === '' ? null : Number(f.min_order_qty);
     if ((lastPrice !== null && (!isFinite(lastPrice) || lastPrice < 0)) || (minQty !== null && (!isFinite(minQty) || minQty <= 0))) { wx.showToast({ title: '价格不能为负，起订量必须大于0', icon: 'none' }); return; }
@@ -424,17 +445,26 @@ Page({
   },
   saveConv: function () {
     var self = this, f = this.data.convForm;
+    // 后端会 strip 后判定相同/重复/冲突，前端先 trim 并预检，把错误信息留在用户视野内。
+    var fromUnit = (f.from_unit || '').trim();
+    var toUnit = (f.to_unit || '').trim();
     var factor = Number(f.factor);
-    if (!f.from_unit || !f.to_unit || !isFinite(factor) || factor <= 0) { wx.showToast({ title: '请填写单位，换算系数必须大于0', icon: 'none' }); return; }
+    if (!fromUnit || !toUnit) { wx.showToast({ title: '请填写来源和目标单位', icon: 'none' }); return; }
+    if (fromUnit === toUnit) { wx.showToast({ title: '来源单位与目标单位不能相同', icon: 'none' }); return; }
+    if (!isFinite(factor) || factor <= 0) { wx.showToast({ title: '换算系数必须大于0', icon: 'none' }); return; }
     if (this.data.submitting) return;
     this.setData({ submitting: true });
-    var payload = { from_unit: f.from_unit, to_unit: f.to_unit, factor: factor };
+    var payload = { from_unit: fromUnit, to_unit: toUnit, factor: factor };
     if (f.sku_id) payload.sku_id = f.sku_id;
     app.request({ url: '/catalog/unit-conversions', method: 'POST', data: payload }).then(function () {
       self.setData({ showConvForm: false, submitting: false });
       wx.showToast({ title: '已添加', icon: 'success' });
       self._loadConversions();
-    }).catch(function () { self.setData({ submitting: false }); wx.showToast({ title: '换算添加失败', icon: 'none' }); });
+    }).catch(function (err) {
+      // 透传后端具体原因：409 冲突 / 400 相同单位 / 409 BFS 一致性冲突。
+      self.setData({ submitting: false });
+      wx.showToast({ title: (err.body && err.body.detail) || '换算添加失败', icon: 'none' });
+    });
   },
   deleteConv: function (e) {
     var id = e.currentTarget.dataset.id, self = this;
@@ -501,10 +531,5 @@ Page({
 
   goSupplier: function () {
     wx.navigateTo({ url: '/pages/supplier/supplier' });
-  },
-
-  viewStatement: function (e) {
-    var id = e.currentTarget.dataset.id;
-    wx.navigateTo({ url: '/pages/purchase/purchase?statement=' + id });
   },
 });

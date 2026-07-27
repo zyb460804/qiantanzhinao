@@ -30,8 +30,11 @@
           <text wx:else class="cat-meta">该设备已停止使用</text>
         </view>
         <view wx:if="{{item.is_active}}" class="cat-actions">
-          <text class="act-btn" data-id="{{item.device_id}}" bindtap="sendHeartbeat">心跳</text>
+          <text class="act-btn" data-id="{{item.device_id}}" bindtap="sendHeartbeat">测试连接</text>
           <text class="act-btn del" data-id="{{item.device_id}}" bindtap="deactivateDevice">停用</text>
+        </view>
+        <view wx:else class="cat-actions">
+          <text class="act-btn" data-id="{{item.device_id}}" bindtap="activateDevice">启用</text>
         </view>
       </view>
     </view>

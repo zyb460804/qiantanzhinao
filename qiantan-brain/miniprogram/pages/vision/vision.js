@@ -4,6 +4,10 @@
  */
 var app = getApp();
 
+// 语音解析器支持的基础单位白名单（与 backend/app/services/voice_parser.py
+// _extract_quantity 保持一致）。两/份/克 等不在其中，会被默认回退为「斤」。
+var PARSED_UNITS = ['斤', '公斤', '千克', '个', '把', '箱', '袋', '件'];
+
 Page({
   data: {
     imagePath: '',
@@ -365,6 +369,27 @@ Page({
       return;
     }
 
+    // 单位兼容性预检：语音解析器仅识别 PARSED_UNITS 中的单位，其余会被默认回退为「斤」，
+    // 造成账实不符（如「2 两」会被记成「2 斤」）。提示用户先换算。
+    if (PARSED_UNITS.indexOf(unit) < 0) {
+      var supportedTip = '语音解析仅支持「' + PARSED_UNITS.join('/') + '」；当前单位「' + unit + '」会被当作「斤」入库。';
+      wx.showModal({
+        title: '单位不被识别',
+        content: supportedTip + '是否仍要提交？',
+        confirmText: '仍要提交',
+        cancelText: '去修改',
+        success: function (m) {
+          if (m.confirm) self._beginParseAndConfirm(product, qty, unit, unitPrice);
+        }
+      });
+      return;
+    }
+    this._beginParseAndConfirm(product, qty, unit, unitPrice);
+  },
+
+  /** 走 voice/parse-text → voice/confirm 两步链路入库。 */
+  _beginParseAndConfirm: function (product, qty, unit, unitPrice) {
+    var self = this;
     this.setData({ submitting: true });
 
     var verb = this.data.event_type === 'purchase' ? '进了' : '卖了';
@@ -378,35 +403,78 @@ Page({
       data: { text: text },
     }).then(function (res) {
       var parsed = res.parsed || {};
-      var voiceLogId = parsed.voice_log_id || res.voice_log_id;
-      if (!voiceLogId) {
+      // 商品名识别检查：parser 未识别时 product 为 null/undefined，
+      // 后续 /voice/confirm 会 400「商品 XXX 未在品类表中找到」。
+      // 这里前置拦截，给出明确指引而非让 confirm 直接报错。
+      if (!parsed.product) {
         self.setData({ submitting: false });
-        wx.showToast({ title: '解析失败', icon: 'none' });
+        wx.showModal({
+          title: '商品名未被解析器识别',
+          content: '「' + product.name + '」不在系统品类表中。请改用「手动选择」从目录里挑一个匹配商品，再确认入库。',
+          confirmText: '去手选',
+          cancelText: '取消',
+          showCancel: true,
+          success: function (m) {
+            if (m.confirm) self.manualSelectProduct();
+          }
+        });
         return;
       }
-      app.request({
-        url: '/voice/confirm',
-        method: 'POST',
-        data: { voice_log_id: voiceLogId },
-      }).then(function (confirmRes) {
-        var result = confirmRes || {};
-        result.product = product.name;
-        result.quantity = qty;
-        result.unit = unit;
-        result.event_type = self.data.event_type;
-        self.setData({
-          submitting: false,
-          submitted: true,
-          submitResult: result,
-        });
-        wx.showToast({ title: self.data.event_type === 'purchase' ? '入库成功' : '出库成功', icon: 'success' });
-      }).catch(function (err) {
+      // 数量/单位一致性核对：若 parser 解析出的值与用户输入不一致，
+      // 提示用户存在账实不符风险，避免 UI 静默覆盖后端真实数据。
+      var parsedQty = parsed.quantity;
+      var parsedUnit = parsed.unit;
+      if ((parsedQty !== undefined && parsedQty !== null && Math.abs(Number(parsedQty) - qty) > 0.0001) ||
+          (parsedUnit && parsedUnit !== unit)) {
         self.setData({ submitting: false });
-        wx.showToast({ title: (err && err.body && err.body.detail) || (self.data.event_type === 'purchase' ? '入库失败，请重试' : '出库失败，请重试'), icon: 'none' });
-      });
+        wx.showModal({
+          title: '解析结果与输入不一致',
+          content: '系统解析为 ' + (parsedQty !== undefined ? parsedQty : '?') +
+                   (parsedUnit || '') + '，与你输入的 ' + qty + unit + ' 不同。\n' +
+                   '入库会以解析结果为准。建议重新输入或改用克/两换算到斤。',
+          confirmText: '仍要继续',
+          cancelText: '去修改',
+          success: function (m) {
+            if (m.confirm) self._doConfirm(self.data.event_type, res);
+          }
+        });
+        return;
+      }
+      self._doConfirm(self.data.event_type, res);
     }).catch(function () {
       self.setData({ submitting: false });
       wx.showToast({ title: '解析失败，请重试', icon: 'none' });
+    });
+  },
+
+  /** 调 /voice/confirm，并展示后端实际写入的值（避免本地覆盖造成账实不符）。 */
+  _doConfirm: function (eventType, parseRes) {
+    var self = this;
+    var parsed = (parseRes && parseRes.parsed) || {};
+    var voiceLogId = parsed.voice_log_id || (parseRes && parseRes.voice_log_id);
+    if (!voiceLogId) {
+      self.setData({ submitting: false });
+      wx.showToast({ title: '解析失败', icon: 'none' });
+      return;
+    }
+    app.request({
+      url: '/voice/confirm',
+      method: 'POST',
+      data: { voice_log_id: voiceLogId },
+    }).then(function (confirmRes) {
+      // 直接用后端返回的真实写入值，不再用本地 qty/unit/product 覆盖，
+      // 保证 UI 与 InventoryRecord 一致，便于摊主发现解析偏差。
+      var result = confirmRes || {};
+      result.event_type = eventType;
+      self.setData({
+        submitting: false,
+        submitted: true,
+        submitResult: result,
+      });
+      wx.showToast({ title: eventType === 'purchase' ? '入库成功' : '出库成功', icon: 'success' });
+    }).catch(function (err) {
+      self.setData({ submitting: false });
+      wx.showToast({ title: (err && err.body && err.body.detail) || (eventType === 'purchase' ? '入库失败，请重试' : '出库失败，请重试'), icon: 'none' });
     });
   },
 

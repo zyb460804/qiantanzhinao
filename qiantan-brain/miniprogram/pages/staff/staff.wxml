@@ -1,5 +1,7 @@
 <!-- 员工管理 — 列表·新增·编辑·停用·权限查看 -->
 <wxs module="S">
+  // ROLES 仅用于显示已有员工的角色标签（含 market_admin 以便历史数据正常渲染）。
+  // 添加/编辑表单的可选角色由 Page data.roleOptions 提供（已剔除 market_admin）。
   var ROLES = ['owner','manager','cashier','purchaser','stocker','market_admin'];
   var ROLE_LABELS = { owner:'摊主', manager:'经理', cashier:'收银员', purchaser:'采购员', stocker:'理货员', market_admin:'市场管理' };
   var PERM_LABELS = {
@@ -11,8 +13,16 @@
   };
   module.exports = {
     roleLabel: function(r) { return ROLE_LABELS[r] || r; },
-    roleIndex: function(r) {
-      for (var i = 0; i < ROLES.length; i++) { if (ROLES[i] === r) return i; }
+    // roleIndex 现在基于动态 roleOptions 计算 picker 索引；fallback 到 cashier 索引
+    roleIndex: function(r, roleOptions) {
+      if (roleOptions && roleOptions.length) {
+        for (var i = 0; i < roleOptions.length; i++) {
+          if (roleOptions[i].role === r) return i;
+        }
+        return 0;
+      }
+      // 兜底（roleOptions 尚未加载完成时）
+      for (var j = 0; j < ROLES.length; j++) { if (ROLES[j] === r) return j; }
       return 2;
     },
     permLabel: function(p) { return PERM_LABELS[p] || p; },
@@ -39,6 +49,27 @@
     <text class="toolbar-hint" wx:if="{{staffList.length > 0}}">共 {{staffList.length}} 位员工</text>
     <text class="toolbar-hint muted" wx:else>暂未添加员工</text>
     <button class="btn-primary btn-sm" bindtap="openForm" data-mode="create">+ 添加员工</button>
+  </view>
+  <view class="staff-toolbar secondary">
+    <text class="toolbar-link {{showInactive ? 'active' : ''}}" bindtap="toggleInactive">
+      {{showInactive ? '▾ 隐藏已停用' : '▸ 查看已停用'}}{{inactiveList.length > 0 ? ' (' + inactiveList.length + ')' : ''}}
+    </text>
+  </view>
+
+  <!-- 已停用员工列表（恢复入口） -->
+  <view class="staff-list inactive" wx:if="{{showInactive}}">
+    <view class="empty-tip" wx:if="{{loadingInactive}}"><text class="muted">加载中…</text></view>
+    <view class="empty-tip" wx:elif="{{inactiveList.length === 0}}"><text class="muted">没有已停用的员工</text></view>
+    <view wx:for="{{inactiveList}}" wx:key="staff_id" class="staff-card inactive">
+      <view class="staff-row">
+        <view class="staff-avatar {{item.role}}"></view>
+        <view class="staff-info">
+          <text class="staff-name">{{item.name}}</text>
+          <text class="staff-role-tag {{item.role}}">{{S.roleLabel(item.role)}}</text>
+        </view>
+        <button class="btn-secondary btn-sm" data-id="{{item.staff_id}}" catchtap="reactivate">恢复</button>
+      </view>
+    </view>
   </view>
 
   <!-- 加载态 / 错误态 -->
@@ -99,13 +130,15 @@
       </view>
       <view class="form-field">
         <text class="form-label">角色</text>
-        <picker mode="selector" value="{{S.roleIndex(form.role)}}" range="{{['摊主','经理','收银员','采购员','理货员','市场管理']}}" data-field="role" bindchange="onFormField">
+        <picker mode="selector" value="{{S.roleIndex(form.role, roleOptions)}}" range="{{roleOptions}}" range-key="label" data-field="role" bindchange="onFormField">
           <view class="form-picker">{{S.roleLabel(form.role)}}</view>
         </picker>
       </view>
       <view class="form-field">
         <text class="form-label">PIN 码</text>
         <input class="form-input" type="number" placeholder="4-6位数字, 可选" value="{{form.pin_code}}" data-field="pin_code" bindinput="onFormField" maxlength="6" />
+        <text class="form-clear-pin" wx:if="{{formMode === 'edit' && formPinCleared}}" >已标记清空</text>
+        <button class="btn-ghost btn-sm form-clear-btn" wx:if="{{formMode === 'edit' && !formPinCleared}}" catchtap="clearPin">清空已有 PIN</button>
       </view>
 
       <view class="dialog-actions">

@@ -251,7 +251,7 @@ export default function Tenants() {
             style={{
               marginBottom: 12,
               padding: '8px 12px',
-              background: '#E8F5EF',
+              background: '#D8F7E9',
               borderRadius: 8,
               display: 'flex',
               alignItems: 'center',

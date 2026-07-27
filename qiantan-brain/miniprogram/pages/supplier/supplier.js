@@ -142,11 +142,18 @@ Page({
   // ── 搜索（服务端搜索，重置分页）─────────────────────
 
   onSearchInput: function (e) {
-    this.setData({ searchKeyword: e.detail.value });
-    this.loadSuppliers(false);
+    var kw = e.detail.value;
+    this.setData({ searchKeyword: kw });
+    // 300ms 防抖，避免每输入一个字符就发起请求（菜场弱网场景体验更好）
+    if (this._searchTimer) clearTimeout(this._searchTimer);
+    var self = this;
+    this._searchTimer = setTimeout(function () {
+      self.loadSuppliers(false);
+    }, 300);
   },
 
   onSearchClear: function () {
+    if (this._searchTimer) clearTimeout(this._searchTimer);
     this.setData({ searchKeyword: '' });
     this.loadSuppliers(false);
   },
@@ -292,7 +299,7 @@ Page({
       title: '停用供应商',
       content: '确认停用「' + name + '」？停用后不会出现在采购等选择列表中。',
       confirmText: '确认停用',
-      confirmColor: '#d9524a',
+      confirmColor: '#FA5151',
       success: function (r) {
         if (!r.confirm) return;
         app.request({ url: '/catalog/suppliers/' + id, method: 'DELETE' }).then(function () {
@@ -372,15 +379,26 @@ Page({
     this.setData({
       showProdForm: true,
       prodForm: { supplier_id: supplierId, sku_id: '', last_price: '', min_order_qty: '' },
-      skuSearchKeyword: '', filteredSkus: [],
+      skuSearchKeyword: '', filteredSkus: [], allSkus: [],
     });
-    // 加载全部SKU
-    app.request({ url: '/catalog/skus' }).then(function (data) {
-      var skus = (data || []).map(function (s) {
-        return { sku_id: s.sku_id, name: s.name, _initial: (s.name || '商').slice(0, 1) };
-      });
-      self.setData({ allSkus: skus, filteredSkus: skus });
-    }).catch(function () {});
+    // 初始加载首屏 SKU（后端默认上限 500），搜索时改为服务端 keyword 查询
+    this._fetchSkus('');
+  },
+
+  // 服务端 SKU 检索，带 300ms 防抖；SKU 数过多时避免一次性拉全量
+  _fetchSkus: function (keyword) {
+    var self = this;
+    if (this._skuSearchTimer) clearTimeout(this._skuSearchTimer);
+    this._skuSearchTimer = setTimeout(function () {
+      var params = { limit: 200 };
+      if (keyword) params.keyword = keyword;
+      app.request({ url: '/catalog/skus', data: params }).then(function (data) {
+        var skus = (data || []).map(function (s) {
+          return { sku_id: s.sku_id, name: s.name, _initial: (s.name || '商').slice(0, 1) };
+        });
+        self.setData({ allSkus: skus, filteredSkus: skus });
+      }).catch(function () {});
+    }, 300);
   },
 
   closeProdForm: function () {
@@ -395,16 +413,10 @@ Page({
   },
 
   onSkuSearch: function (e) {
-    var kw = (e.detail.value || '').trim().toLowerCase();
+    var kw = (e.detail.value || '').trim();
     this.setData({ skuSearchKeyword: kw });
-    if (!kw) {
-      this.setData({ filteredSkus: this.data.allSkus });
-      return;
-    }
-    var filtered = (this.data.allSkus || []).filter(function (s) {
-      return (s.name || '').toLowerCase().indexOf(kw) >= 0;
-    });
-    this.setData({ filteredSkus: filtered });
+    // 服务端增量搜索，避免本地全量过滤造成的卡顿
+    this._fetchSkus(kw);
   },
 
   pickSku: function (e) {

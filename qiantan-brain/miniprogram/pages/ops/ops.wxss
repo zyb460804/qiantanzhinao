@@ -10,9 +10,9 @@
 .cat-name { display:block; color:var(--ink); font-size:27rpx; font-weight:750; }
 .cat-meta { display:block; margin-top:4rpx; color:var(--muted); font-size:20rpx; }
 .cat-amount { font-family:var(--font-num); font-size:25rpx; font-weight:800; flex:0 0 auto; }
-.cat-amount.warn { color:#c0493d; }
+.cat-amount.warn { color:#c93a30; }
 .cat-balance { font-size:23rpx; font-weight:700; flex:0 0 auto; }
-.cat-balance.warn { color:#c0493d; }
+.cat-balance.warn { color:#c93a30; }
 .cat-actions { display:flex; gap:8rpx; flex:0 0 auto; }
 .act-btn { padding:6rpx 14rpx; color:var(--green-800); background:var(--green-50); border-radius:99rpx; font-size:20rpx; }
 .act-btn:active { opacity:.7; }
@@ -44,8 +44,8 @@
 .clear-head { display:flex; justify-content:space-between; align-items:center; }
 .clear-name { color:var(--ink); font-size:27rpx; font-weight:750; }
 .risk-tag { padding:4rpx 14rpx; border-radius:99rpx; font-size:19rpx; font-weight:700; }
-.risk-tag.high { color:#fff; background:#c0493d; }
-.risk-tag.medium { color:#9a5c06; background:var(--amber-soft); }
+.risk-tag.high { color:#fff; background:#c93a30; }
+.risk-tag.medium { color:#8f5a00; background:var(--amber-soft); }
 .risk-tag.low { color:var(--green-700); background:var(--green-100); }
 .clear-stats { display:flex; gap:20rpx; margin-top:10rpx; color:var(--muted); font-size:22rpx; }
 .clear-suggest { display:flex; justify-content:space-between; align-items:center; margin-top:14rpx; padding-top:14rpx; border-top:1rpx dashed var(--line); color:var(--green-800); font-size:23rpx; font-weight:700; }
@@ -55,7 +55,7 @@
 .statement-summary { display:flex; gap:16rpx; margin-bottom:20rpx; padding:20rpx; background:var(--green-50); border-radius:16rpx; }
 .stmt-stat { flex:1; text-align:center; }
 .stmt-num { display:block; color:var(--ink); font-size:30rpx; font-weight:850; }
-.stmt-num.warn { color:#c0493d; }
+.stmt-num.warn { color:#c93a30; }
 .stmt-label { display:block; margin-top:4rpx; color:var(--muted); font-size:19rpx; }
 .statement-list { max-height:420rpx; overflow-y:auto; }
 .stmt-item { display:flex; justify-content:space-between; align-items:flex-start; padding:16rpx 0; border-bottom:1rpx solid var(--line); }

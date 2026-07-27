@@ -19,7 +19,7 @@
     </view>
   </view>
 
-  <view class="mirror-tabs">
+  <view class="mirror-tabs" wx:if="{{!loadError}}">
     <view wx:for="{{tabs}}" wx:key="key" class="mirror-tab {{activeTab === item.key ? 'active' : ''}}" data-key="{{item.key}}" bindtap="onTabChange"><text class="tab-mark">{{item.icon}}</text><text>{{item.label}}镜像</text></view>
   </view>
 
@@ -28,9 +28,10 @@
     <view class="chart-card"><stock-chart items="{{inventoryChartItems}}" compact="{{true}}" /></view>
     <view class="category-card" wx:if="{{inventoryMirror && inventoryMirror.by_category}}">
       <view wx:for="{{inventoryMirror.by_category}}" wx:key="category" class="category-row">
-        <view class="category-head"><text>{{item.category}}</text><text>{{item.total_qty}}斤</text></view>
-        <view class="bar-track"><view class="bar-fill" style="width: {{item.total_qty / 200 * 100 > 100 ? 100 : item.total_qty / 200 * 100}}%"></view></view>
+        <view class="category-head"><text>{{item.category}}</text><text>{{item.total_qty}}{{item.unit}}</text></view>
+        <view class="bar-track"><view class="bar-fill" style="width: {{item.total_qty / maxCategoryQty * 100 > 100 ? 100 : item.total_qty / maxCategoryQty * 100}}%"></view></view>
       </view>
+      <text class="data-note">不同商品单位不可直接相加;混合单位的品类仅作总量参考,以批次实际单位为准。</text>
     </view>
 
     <view class="heatmap-card" wx:if="{{heatmapRows && heatmapRows.length}}">
@@ -41,7 +42,7 @@
       </view>
       <view wx:for="{{heatmapRows}}" wx:key="product_name" class="heatmap-grid heatmap-row">
         <view class="heatmap-row-name">{{item.product_name}}</view>
-        <view wx:for="{{item.cells}}" wx:for-item="cell" wx:key="index" class="heatmap-cell" style="{{cell.style}}">
+        <view wx:for="{{item.cells}}" wx:for-item="cell" wx:key="bucket" class="heatmap-cell" style="{{cell.style}}">
           <text wx:if="{{cell.remaining_qty !== null}}">{{cell.remaining_qty}}</text>
         </view>
       </view>
@@ -68,6 +69,14 @@
   </view>
 
   <view class="loading-state" wx:if="{{loading}}"><view class="loading-spinner"></view><text>正在同步经营镜像</text></view>
+
+  <!-- 错误态: 三接口全部失败时给出明确提示与重试入口, 不再让摊主面对空 tab -->
+  <view class="empty-state surface" wx:if="{{loadError}}">
+    <mascot size="md" mood="think"/>
+    <text>经营镜像加载失败</text>
+    <text class="data-note">请检查网络后重试</text>
+    <button class="retry-btn" bindtap="onRetryLoad">重新加载</button>
+  </view>
 </view>
 
 

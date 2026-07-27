@@ -1,6 +1,14 @@
 /** API environment isolation for develop / trial / release builds. */
 var DEV_API_BASE = 'http://127.0.0.1:8000/api/v1';
-// Optional compile-time production fallback. Prefer extConfig.apiBase in CI/release.
+// ============================================================================
+// 生产 API 地址 —— 发布前必填（二选一）：
+//   方式 A（推荐）：在微信公众平台「小程序后台 → 扩展 → 扩展属性配置」里
+//                  设置 extConfig.apiBase = "https://your-domain.com/api/v1"
+//   方式 B：直接把域名填到下面的常量里（仅当未配置 extConfig 时作为兜底）
+// 注意：必须 https:// 开头、禁止 localhost/127.0.0.1/0.0.0.0。
+// 若两者都未配置，trial/release 版会 fail-closed 停止所有请求并弹窗提示。
+// ============================================================================
+// TODO(release): 发布正式版前确认 extConfig.apiBase 已配置或在此填入域名。
 var FIXED_PRODUCTION_API_BASE = '';
 
 function normalize(value) {
@@ -52,6 +60,11 @@ function resolveApiBase() {
   // from leaking into a signed build. Both environments enforce HTTPS.
   var deployedBase = extBase || normalize(FIXED_PRODUCTION_API_BASE);
   var error = validateSecureBase(deployedBase);
+  if (error) {
+    console.error('[api] 生产 API 地址未就绪：', error,
+      '请在「小程序后台 → 扩展属性」配置 extConfig.apiBase，',
+      '或在 config/api.js 的 FIXED_PRODUCTION_API_BASE 填入域名。');
+  }
   return {
     ok: !error,
     envVersion: envVersion,

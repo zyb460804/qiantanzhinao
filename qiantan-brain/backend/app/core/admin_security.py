@@ -29,8 +29,28 @@ ADMIN_ISSUER = "qiantan-admin"
 _oauth2_scheme = HTTPBearer(auto_error=False)
 
 
+# bcrypt 算法本身只使用密码前 72 字节；bcrypt 5.0 起超长密码直接抛 ValueError
+# （4.x 是静默截断）。API 层的 Pydantic 校验（validate_password_bytes）会先拦截，
+# 这里再兜底一次，保证任何调用路径都不会产生截断哈希。
+BCRYPT_MAX_PASSWORD_BYTES = 72
+
+
+def validate_password_bytes(plain: str) -> str:
+    """校验密码 UTF-8 编码后不超过 bcrypt 的 72 字节上限（供 Pydantic validator 复用）。
+
+    注意 max_length 限的是字符数，64 个汉字可达 192 字节，必须按字节校验。
+    """
+    if len(plain.encode("utf-8")) > BCRYPT_MAX_PASSWORD_BYTES:
+        # bcrypt 只用前 72 字节，超长密码会被截断（4.x）或抛 ValueError（5.0+）
+        raise ValueError(
+            f"密码过长：UTF-8 编码后不能超过 {BCRYPT_MAX_PASSWORD_BYTES} 字节（汉字每字占 3 字节）"
+        )
+    return plain
+
+
 def hash_password(plain: str) -> str:
     """bcrypt 哈希密码。"""
+    validate_password_bytes(plain)
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 

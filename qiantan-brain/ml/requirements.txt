@@ -1,6 +1,19 @@
 # Reproducible training and forecasting environment (Python 3.11).
-numpy==1.26.4
-pandas==2.2.3
-Pillow==10.4.0
-prophet==1.1.6
-ultralytics==8.3.40
+#
+# ⚠️ 本组合整体自洽（numpy 2.4 + pandas 3 + prophet 1.3），升降级须整组进行（2026-07-26 升级审计）：
+#   - numpy 禁止上 2.5.x（已放弃 Python 3.11）；
+#   - pandas 3.0：Copy-on-Write 唯一化（链式赋值 df[a][b]=x 直接报错）、字符串列默认
+#     str dtype（不再是 object），训练/特征脚本如有依赖旧行为的写法需适配；
+#   - prophet 1.3.0 是唯一同时支持 pandas 3 与 numpy 2.4 的版本（CmdStan 有升级，
+#     既有预测任务建议做一次数值回归对比）。
+numpy==2.4.6
+# 3.0.4 因 datetime segfault 被官方 yank，勿用
+pandas==3.0.5
+# 安全升级：10.4.0 受 2026 年多枚 CVE（PSD 越界写等）影响
+Pillow==12.3.0
+prophet==1.3.0
+# numpy 2 兼容下限（ultralytics 的传递依赖，显式声明防止解析到旧版）
+torch>=2.4.1
+# 注意：8.3 后期起 benchmark()/results.to_df() 改返回 polars DataFrame，
+# 下游若用 pandas API 消费需加 .to_pandas()
+ultralytics==8.4.106

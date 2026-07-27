@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.timezone import local_days_ago, utc_now
+from app.core.timezone import local_days_ago, utc_now, utc_today_start
 from app.models.ai_action import AIAction
 from app.models.environment import EnvironmentRecord
 from app.models.inventory import InventoryRecord
@@ -306,9 +306,47 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
     # 4. 创建库存优化器 (一次创建，所有商品复用)
     optimizer = InventoryOptimizer(service_level=0.95, lead_time_days=1)
 
+    # ── 当日幂等：GET /advice/daily 是有副作用的接口（落库 Recommendation +
+    #    pending AIAction），叠加 app.js 对 GET 的自动重试（最多 2 次）会成倍
+    #    重复写库。这里按 (merchant_id, product_id, 当天) 去重：已存在则更新，
+    #    不再新建；当日已有 pending 采购动作的 recommendation 不再重复生成。
+    today_start_dt = utc_today_start()
+    existing_today_recs: dict[int, Recommendation] = {
+        r.product_id: r
+        for r in (
+            await db.execute(
+                select(Recommendation).where(
+                    Recommendation.merchant_id == merchant_id,
+                    Recommendation.created_at >= today_start_dt,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+    existing_pending_rec_ids: set[uuid.UUID] = {
+        a.recommendation_id
+        for a in (
+            await db.execute(
+                select(AIAction).where(
+                    AIAction.merchant_id == merchant_id,
+                    AIAction.action_type == "purchase",
+                    AIAction.status == "pending",
+                    AIAction.created_at >= today_start_dt,
+                )
+            )
+        )
+        .scalars()
+        .all()
+        if a.recommendation_id is not None
+    }
+
     # 5. 逐商品计算库存 / 销量 / 建议
     recommendations: list[dict] = []
     saved_rec_ids: list[Recommendation] = []
+    # 待生成的 AIAction 规格列表（第一阶段先创建 Recommendation 并 flush 拿到 id，
+    # 第二阶段才能把 recommendation_id 正确关联到 AIAction，否则新建的 rec.id 还是 None）
+    pending_action_specs: list[dict] = []
     for product in products:
         pid = product.id
         # 解析本商户主 SKU（category:sku 当前一对一）
@@ -390,6 +428,8 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
         )
         advice["product_id"] = pid
         advice["sku_id"] = str(sku_id) if sku_id else None
+        # 占位：flush 后回填，供前端反馈按钮精确定位（避免排序后下标错位）
+        advice["recommendation_id"] = None
 
         # 基于行为画像个性化
         raw_qty = advice.get("recommended_qty", 0)
@@ -397,45 +437,78 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
         advice["recommended_qty"] = personalized_qty
         advice["personalized"] = profile["purchase_style"] != "balanced"
 
-        # 落库 Recommendation 以追踪行为反馈；同时生成可执行 AIAction
-        rec = Recommendation(
-            merchant_id=merchant_id,
-            product_id=pid,
-            sku_id=sku_id,
-            suggestion=advice["suggestion"],
-            basis=advice.get("basis", []),
-            risk_warning=advice.get("risk_warning"),
-            recommended_qty=personalized_qty,
-            confidence=advice.get("confidence", 0.78),
-        )
-        db.add(rec)
-        saved_rec_ids.append(rec)
-
-        # 仅当有采购建议时生成可执行 AIAction（hold 无需执行）
-        if personalized_qty > 0:
-            action = AIAction(
+        # 落库 Recommendation 以追踪行为反馈；当日已存在则更新复用，避免每次访问
+        # GET /advice/daily 都新建一条（onShow + GET 自动重试会成倍累积）
+        existing_rec = existing_today_recs.get(pid)
+        if existing_rec:
+            existing_rec.suggestion = advice["suggestion"]
+            existing_rec.basis = advice.get("basis", [])
+            existing_rec.risk_warning = advice.get("risk_warning")
+            existing_rec.recommended_qty = personalized_qty
+            existing_rec.confidence = advice.get("confidence", 0.78)
+            if sku_id and not existing_rec.sku_id:
+                existing_rec.sku_id = sku_id
+            rec = existing_rec
+        else:
+            rec = Recommendation(
                 merchant_id=merchant_id,
-                recommendation_id=rec.id,
-                action_type="purchase",
-                title=f"采购{product.name}{personalized_qty}斤",
-                payload={
-                    "items": [
-                        {
-                            "product_id": pid,
-                            "sku_id": str(sku_id) if sku_id else None,
-                            "qty": float(personalized_qty),
-                            "unit": "斤",
-                            "cost": 0,
-                        }
-                    ],
-                    "total_cost": 0,
-                },
+                product_id=pid,
+                sku_id=sku_id,
+                suggestion=advice["suggestion"],
+                basis=advice.get("basis", []),
+                risk_warning=advice.get("risk_warning"),
+                recommended_qty=personalized_qty,
+                confidence=advice.get("confidence", 0.78),
             )
-            db.add(action)
-
+            db.add(rec)
+        saved_rec_ids.append(rec)
         recommendations.append(advice)
 
-    await db.flush()  # Flush 以拿到 recommendation IDs
+        # 仅当有采购建议且当日尚无该建议的 pending 动作时生成（去重，避免重复卡片）。
+        # 这里只记录规格，真正建 AIAction 放到第二阶段（flush 拿到 rec.id 之后）。
+        if personalized_qty > 0 and rec.id not in existing_pending_rec_ids:
+            # 用商品默认采购价估算成本（避免采购卡片永远显示¥0）
+            unit_cost = float(product.default_price) if product.default_price else 0
+            line_cost = round(unit_cost * float(personalized_qty), 2)
+            pending_action_specs.append(
+                {
+                    "rec": rec,
+                    "product_name": product.name,
+                    "product_id": pid,
+                    "sku_id": sku_id,
+                    "qty": float(personalized_qty),
+                    "unit_cost": unit_cost,
+                    "line_cost": line_cost,
+                }
+            )
+
+    await db.flush()  # Flush 以拿到所有（新建的）recommendation IDs
+    # 第二阶段：基于已 flush 的 rec.id 生成 AIAction
+    for spec in pending_action_specs:
+        action = AIAction(
+            merchant_id=merchant_id,
+            recommendation_id=spec["rec"].id,
+            action_type="purchase",
+            title=f"采购{spec['product_name']}{spec['qty']}斤",
+            payload={
+                "items": [
+                    {
+                        "product_id": spec["product_id"],
+                        "sku_id": str(spec["sku_id"]) if spec["sku_id"] else None,
+                        "qty": spec["qty"],
+                        "unit": "斤",
+                        "cost": spec["unit_cost"],
+                    }
+                ],
+                "total_cost": spec["line_cost"],
+            },
+        )
+        db.add(action)
+
+    # 回填每条 advice 的 recommendation_id（供前端反馈按钮精确定位）
+    # recommendations 与 saved_rec_ids 在同一循环内同步 append，长度严格相等
+    for advice, rec in zip(recommendations, saved_rec_ids, strict=True):
+        advice["recommendation_id"] = str(rec.id)
     await db.commit()  # 保持 ID 有效，供后续行为反馈
 
     # 按置信度（最紧急优先）排序

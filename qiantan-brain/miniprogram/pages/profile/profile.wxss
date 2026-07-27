@@ -44,9 +44,9 @@
 .device-row:last-child { border-bottom: 0; }
 .device-row.muted { justify-content: center; color: var(--muted); font-size: 24rpx; }
 .dev-status { width: 16rpx; height: 16rpx; border-radius: 50%; flex-shrink: 0; }
-.dev-status.online { background: #2BA24C; box-shadow: 0 0 8rpx rgba(43,162,76,.4); }
-.dev-status.unstable { background: #F3A83B; }
-.dev-status.offline { background: #E5484D; }
+.dev-status.online { background: #00B578; box-shadow: 0 0 8rpx rgba(0,181,120,.4); }
+.dev-status.unstable { background: #FFA800; }
+.dev-status.offline { background: #FA5151; }
 .dev-name { flex: 1; color: var(--ink); font-size: 25rpx; font-weight: 600; }
 .dev-time { color: var(--muted); font-size: 22rpx; }
 .dev-action { color: var(--green-800); font-size: 22rpx; font-weight: 700; }
@@ -56,30 +56,23 @@
 .tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16rpx; }
 .tool-group { margin-top: 20rpx; }
 .tool-group-head { display: flex; align-items: baseline; gap: 14rpx; margin-bottom: 14rpx; padding: 0 6rpx; }
-.tool-group-title { font-size: 26rpx; font-weight: 700; color: var(--ink-1, #1f2a24); }
+.tool-group-title { font-size: 26rpx; font-weight: 700; color: var(--ink); }
 .tool-group-caption { font-size: 20rpx; color: var(--muted); }
 .tool-chip { display: flex; flex-direction: column; align-items: center; gap: 12rpx; padding: 26rpx 12rpx; background: var(--paper); border: 1rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .tool-chip:active { transform: translateY(1rpx); box-shadow: none; }
 .tool-glyph { display: flex; align-items: center; justify-content: center; width: 76rpx; height: 76rpx; border-radius: 22rpx; font-size: 28rpx; font-weight: 800; }
 .tool-glyph.blue { color: #2e6685; background: #e0eff7; }
-.tool-glyph.corn { color: #8a4a06; background: #fdf0d8; }
+.tool-glyph.corn { color: #8f5a00; background: #fdf0d8; }
 .tool-glyph.green { color: var(--green-800); background: var(--green-100); }
 .tool-name { color: var(--ink-2); font-size: 22rpx; font-weight: 650; }
 
-/* ── ⑤ 摊位设置 ── */
-.setting-group { overflow: hidden; margin-bottom: 18rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.setting-row { display: flex; align-items: center; gap: 20rpx; min-height: 96rpx; padding: 20rpx 24rpx; border-bottom: 1rpx solid var(--line); }
-.setting-row:last-child { border-bottom: 0; }
-.setting-label { flex-shrink: 0; width: 140rpx; color: var(--muted); font-size: 24rpx; }
-.setting-input { flex: 1; color: var(--ink); font-size: 28rpx; font-weight: 600; }
-.setting-val { color: var(--ink); font-size: 28rpx; font-weight: 600; }
-.setting-group-title { display: block; padding: 20rpx 24rpx 8rpx; color: var(--muted); font-size: 22rpx; }
-.risk-opt { display: flex; align-items: center; gap: 14rpx; min-height: 88rpx; padding: 18rpx 24rpx; border-bottom: 1rpx solid var(--line); font-size: 25rpx; color: var(--ink-2); }
-.risk-opt:last-child { border-bottom: 0; }
-.risk-opt radio { transform: scale(.82); }
-
-.save-btn { margin-top: 24rpx; min-height: 96rpx; color: #fff; background: var(--green-800); border-radius: 22rpx; font-size: 29rpx; font-weight: 750; box-shadow: 0 12rpx 26rpx rgba(23,92,69,.22); }
-.save-btn:active { transform: scale(.99); }
+/* ── ⑤ 摊位设置入口（跳转独立页面）── */
+.setting-entry { display: flex; align-items: center; gap: 16rpx; padding: 30rpx 28rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); transition: transform var(--dur-fast) var(--ease-spring); }
+.setting-entry:active { transform: scale(.99); }
+.setting-entry-body { flex: 1; display: flex; flex-direction: column; gap: 8rpx; }
+.setting-entry-title { color: var(--ink); font-size: 31rpx; font-weight: 700; }
+.setting-entry-desc { color: var(--muted); font-size: 22rpx; }
+.setting-entry-arrow { color: var(--muted); font-size: 40rpx; font-weight: 300; line-height: 1; }
 
 /* ── ⑥ 帮助与反馈 ── */
 .help-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16rpx; }
@@ -93,3 +86,21 @@
 .about-row { display: flex; align-items: center; justify-content: space-between; min-height: 92rpx; padding: 20rpx 24rpx; border-bottom: 1rpx solid var(--line); font-size: 26rpx; color: var(--ink); }
 .about-row:last-child { border-bottom: 0; }
 .about-row .muted { color: var(--muted); font-size: 23rpx; }
+.about-row.logout-row { border-bottom: 0; }
+.logout-text { color: var(--red, #FA5151); font-weight: 700; }
+
+/* ── 皮肤切换 ── */
+.skin-group { display: block; }
+
+/* ── 员工身份切换横条（权限体系）── */
+.identity-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 0 24rpx 20rpx; padding: 24rpx 28rpx;
+  background: var(--surface, #fff); border-radius: 20rpx;
+  box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.04);
+}
+.identity-bar.is-staff { border-left: 8rpx solid var(--brand, #00A06A); }
+.identity-info { display: flex; flex-direction: column; gap: 6rpx; }
+.identity-role { font-size: 30rpx; font-weight: 700; color: var(--text, #1A1A1A); }
+.identity-hint { font-size: 24rpx; color: var(--muted, #98A29D); }
+.identity-action { font-size: 28rpx; font-weight: 600; color: var(--brand, #00A06A); }

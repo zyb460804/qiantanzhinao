@@ -62,7 +62,7 @@
       </view>
 
       <view class="kpi kpi-amber">
-        <view class="kpi-top"><icon name="cart" size="sm" color="var(--corn-deep, #9a6b00)"></icon><text class="kpi-label">采购成本</text></view>
+        <view class="kpi-top"><icon name="cart" size="sm" color="var(--corn-deep, #8f5a00)"></icon><text class="kpi-label">采购成本</text></view>
         <text class="kpi-value">{{metrics.costDisplay}}</text>
         <view class="kpi-sub" wx:if="{{activeTab === 'daily' && dailyData}}">销量 {{dailyData.sale_qty}} 件</view>
       </view>
@@ -158,8 +158,8 @@
           <view class="ai-head-copy"><text class="ai-name">小智</text><text class="ai-role">经营参谋</text></view>
         </view>
 
-        <!-- 健康评分（周报模式） -->
-        <view class="health-section" wx:if="{{activeTab === 'weekly' && weeklyData}}">
+        <!-- 健康评分（周报 / 月报模式） -->
+        <view class="health-section" wx:if="{{(activeTab === 'weekly' || activeTab === 'monthly') && weeklyData}}">
           <view class="health-ring" style="background:conic-gradient(var(--green-600) {{weeklyData.health_score}}%, var(--green-100) 0)">
             <text class="health-score">{{weeklyData.health_score}}</text>
             <text class="health-unit">分</text>

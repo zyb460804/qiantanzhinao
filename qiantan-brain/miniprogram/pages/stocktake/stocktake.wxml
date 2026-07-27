@@ -50,6 +50,19 @@
         <text class="section-caption">逐项核对实际数量</text>
       </view>
 
+      <!-- 盘点备注（P3 修复：原 inputNotes handler 是死代码，此处补上绑定） -->
+      <view class="notes-card">
+        <text class="notes-label">盘点备注（选填）</text>
+        <textarea class="notes-input" value="{{notes}}" placeholder="如：今天停电了盘得不准" placeholder-class="notes-placeholder" bindinput="inputNotes" maxlength="200" auto-height="true" />
+      </view>
+
+      <!-- P2 修复：批量保存按钮，弱网下减少请求数 -->
+      <view class="batch-save-row" wx:if="{{stocktakeItems.length > 0}}">
+        <button class="btn-secondary batch-save-btn" bindtap="submitAllItems" loading="{{submitting}}">
+          一键保存全部
+        </button>
+      </view>
+
       <view class="stocktake-list">
         <view wx:for="{{stocktakeItems}}" wx:key="product_id" class="stocktake-card {{item.submitted ? 'submitted' : ''}}">
 
@@ -209,10 +222,14 @@
     </view>
 
     <view class="history-list" wx:if="{{historyList.length > 0}}">
-      <view wx:for="{{historyList}}" wx:key="id" class="history-card">
+      <view wx:for="{{historyList}}" wx:key="id" class="history-card {{expandedHistoryId === item.id ? 'expanded' : ''}}" data-id="{{item.id}}" bindtap="toggleHistoryDetail">
         <view class="history-head">
           <text class="history-date">{{item.date_text}}</text>
-          <text class="tag {{item.status === 'completed' ? 'tag-green' : 'tag-amber'}}">{{item.status_text}}</text>
+          <view class="history-head-right">
+            <text wx:if="{{expandedHistoryId !== item.id}}" class="history-toggle-hint">点击查看明细 ›</text>
+            <text wx:else class="history-toggle-hint">收起 ⌃</text>
+            <text class="tag {{item.status === 'completed' ? 'tag-green' : 'tag-amber'}}">{{item.status_text}}</text>
+          </view>
         </view>
         <view class="history-stats">
           <view class="history-stat">
@@ -235,6 +252,39 @@
         <view class="history-notes" wx:if="{{item.notes}}">
           <text class="history-notes-text">{{item.notes}}</text>
         </view>
+
+        <!-- P2 修复：展开后展示逐项明细 -->
+        <view class="history-detail" wx:if="{{expandedHistoryId === item.id}}">
+          <view class="history-detail-loading" wx:if="{{historyDetailLoading}}">
+            <text>明细加载中...</text>
+          </view>
+          <block wx:elif="{{historyDetailCache[item.id]}}">
+            <view class="history-detail-empty" wx:if="{{historyDetailCache[item.id].length === 0}}">
+              <text>无明细数据</text>
+            </view>
+            <view wx:else class="history-detail-list">
+              <view wx:for="{{historyDetailCache[item.id]}}" wx:for-item="detail" wx:key="item_id" class="history-detail-row">
+                <text class="detail-name">{{detail.product_name}}</text>
+                <text class="detail-meta">账面 {{detail.book_qty}}{{detail.unit}} → 实际 {{detail.actual_qty === null ? '—' : detail.actual_qty}}{{detail.unit}}</text>
+                <text class="detail-variance {{detail.variance < 0 ? 'loss' : (detail.variance > 0 ? 'gain' : '')}}">{{detail.variance_text}} {{detail.unit}}</text>
+              </view>
+            </view>
+          </block>
+          <view class="history-detail-loading" wx:else>
+            <text>正在加载...</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- P2 修复：触底加载更多 + 提示状态 -->
+      <view class="history-load-more" wx:if="{{historyLoadingMore}}">
+        <text>正在加载更多...</text>
+      </view>
+      <view class="history-load-more" wx:if="{{!historyHasMore && historyList.length > 0}}">
+        <text>没有更多记录了</text>
+      </view>
+      <view class="history-load-more history-load-more-link" wx:if="{{historyHasMore && !historyLoadingMore && historyList.length > 0}}" bindtap="loadMoreHistory">
+        <text>加载更多 ↓</text>
       </view>
     </view>
 

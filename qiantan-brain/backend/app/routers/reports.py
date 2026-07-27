@@ -340,22 +340,27 @@ async def weekly_report(
     for i in range(7):
         day_start = datetime.combine((end_now - timedelta(days=6 - i)).date(), datetime.min.time())
         day_end = day_start + timedelta(days=1)
-        day_revenue = sum(
-            float(r.total_amount or 0)
+        day_sale_records = [
+            r
             for r in week_records
             if r.event_type == "sale" and day_start <= r.event_time < day_end
-        )
+        ]
+        day_revenue = sum(float(r.total_amount or 0) for r in day_sale_records)
         day_cost = sum(
             float(r.total_amount or 0)
             for r in week_records
             if r.event_type == "purchase" and day_start <= r.event_time < day_end
         )
+        # 客单价 = 当日营业额 / 当日销售笔数(与 /reports/trends 口径保持一致)
+        day_sale_count = len(day_sale_records)
+        day_customer_price = round(day_revenue / day_sale_count, 2) if day_sale_count > 0 else 0
         daily_trends.append(
             {
                 "date": day_start.date().isoformat(),
                 "revenue": round(day_revenue, 2),
                 "cost": round(day_cost, 2),
                 "profit": round(day_revenue - day_cost, 2),
+                "customer_price": day_customer_price,
             }
         )
 
@@ -664,13 +669,17 @@ async def monthly_report(
         )
         day_end = day_start + timedelta(days=1)
         day_records = [r for r in month_records if day_start <= r.event_time < day_end]
-        day_revenue = sum(float(r.total_amount or 0) for r in day_records if r.event_type == "sale")
+        day_sale_records = [r for r in day_records if r.event_type == "sale"]
+        day_revenue = sum(float(r.total_amount or 0) for r in day_sale_records)
         day_cost = sum(
             float(r.total_amount or 0) for r in day_records if r.event_type == "purchase"
         )
         day_cogs = sum(
-            abs(float(r.quantity)) * 0 for r in day_records if r.event_type == "sale"
+            abs(float(r.quantity)) * 0 for r in day_sale_records
         )  # COGS approximated at aggregate level
+        # 客单价 = 当日营业额 / 当日销售笔数(与 /reports/trends 口径保持一致)
+        day_sale_count = len(day_sale_records)
+        day_customer_price = round(day_revenue / day_sale_count, 2) if day_sale_count > 0 else 0
         daily_trends.append(
             {
                 "date": day_start.date().isoformat(),
@@ -678,6 +687,7 @@ async def monthly_report(
                 "cost": round(day_cost, 2),
                 "profit": round(day_revenue - day_cost, 2),
                 "estimated_gross_profit": round(day_revenue - day_cogs, 2),
+                "customer_price": day_customer_price,
             }
         )
 

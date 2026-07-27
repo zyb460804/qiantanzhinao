@@ -101,21 +101,31 @@ class DemoDetection(TypedDict):
 
 
 def _load_categories() -> list[dict]:
+    """从 product_categories.json 加载品类，作为 ProductCategory 表为空时的兜底。
+
+    兜底产物需要给前端 wx:key="product_id" / data-id 提供稳定占位 id，
+    否则会出现 wx:key 警告与 manualProduct.product_id 为 undefined 的连锁问题。
+    占位 id 用负数（从 -1 递减）以免与数据库自增主键冲突。
+    """
     config_path = _RULES_DIR / "product_categories.json"
     if not config_path.exists():
         return []
     with open(config_path, encoding="utf-8") as f:
         data = json.load(f)
-    result = []
+    result: list[dict] = []
+    placeholder_id = -1
     for group_name, group_data in data.get("categories", {}).items():
         for product_name in group_data.get("products", []):
             result.append(
                 {
+                    # 数据库主键从 1 起；负数占位 id 避免与真实记录冲突。
+                    "product_id": placeholder_id,
                     "name": product_name,
                     "category_group": group_name,
                     "unit": group_data.get("unit", "斤"),
                 }
             )
+            placeholder_id -= 1
     return result
 
 

@@ -67,4 +67,17 @@
 
 .detail-actions { display: flex; gap: 16rpx; margin-top: 8rpx; }
 
+/* ── 已停用员工列表 ── */
+.staff-toolbar.secondary { padding-top: 0; padding-bottom: 12rpx; }
+.toolbar-link { font-size: var(--fs-sm); color: var(--green-800); }
+.toolbar-link.active { color: var(--tomato); }
+.staff-list.inactive { opacity: .82; }
+.staff-card.inactive { background: var(--surface-muted, #f7f7f7); border-style: dashed; }
+.staff-card.inactive .staff-name { color: var(--ink-2); text-decoration: line-through; }
+.empty-tip { padding: 24rpx 32rpx; text-align: center; }
+
+/* ── 表单内"清空已有 PIN"按钮 ── */
+.form-clear-btn { margin-top: 12rpx; align-self: flex-start; }
+.form-clear-pin { margin-top: 8rpx; font-size: var(--fs-xs); color: var(--tomato); }
+
 /* 弹窗 / 表单 / 按钮 / 空态：统一复用全局 .dialog / .form-field / .btn-* / .empty-state */

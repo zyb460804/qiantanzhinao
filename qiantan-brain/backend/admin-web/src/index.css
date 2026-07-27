@@ -100,7 +100,7 @@ select {
   gap: 8px;
   padding: 6px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 12px;
   color: inherit;
   background: transparent;
   cursor: pointer;
@@ -132,7 +132,7 @@ select {
 .monitor-overview,
 .service-check {
   height: 100%;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 .metric-card .ant-card-body {
@@ -155,7 +155,7 @@ select {
   width: 44px;
   height: 44px;
   flex: 0 0 44px;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 20px;
 }
 
@@ -163,37 +163,37 @@ select {
 .metric-card--green .metric-card__icon,
 .monitor-metric--green .monitor-metric__icon {
   color: var(--qg-primary);
-  background: #dcf0e6;
+  background: #d8f7e9;
 }
 
 .metric-card--blue .metric-card__icon,
 .monitor-metric--blue .monitor-metric__icon {
   color: var(--qg-info);
-  background: #e3edfd;
+  background: #e9f0fe;
 }
 
 .metric-card--cyan .metric-card__icon,
 .monitor-metric--cyan .monitor-metric__icon {
   color: var(--qg-teal);
-  background: #e2f7fb;
+  background: #dff7f5;
 }
 
 .metric-card--purple .metric-card__icon,
 .monitor-metric--purple .monitor-metric__icon {
   color: var(--qg-grape);
-  background: #efe9f8;
+  background: #f1ebfe;
 }
 
 .metric-card--orange .metric-card__icon,
 .monitor-metric--orange .monitor-metric__icon {
   color: var(--qg-warning);
-  background: #fcefd8;
+  background: #fff4e0;
 }
 
 .metric-card--red .metric-card__icon,
 .monitor-metric--red .monitor-metric__icon {
   color: var(--qg-error);
-  background: #fbe4df;
+  background: #ffeceb;
 }
 
 .metric-card__body {
@@ -222,7 +222,7 @@ select {
   margin-bottom: 20px;
   padding: 18px 20px;
   border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--ant-color-bg-container);
 }
 
@@ -243,7 +243,7 @@ select {
   justify-content: space-between;
   padding: 12px 14px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 12px;
   color: inherit;
   background: var(--ant-color-fill-quaternary);
   cursor: pointer;
@@ -408,7 +408,7 @@ select {
   align-items: center;
   gap: 10px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--ant-color-fill-quaternary);
 }
 
@@ -416,7 +416,7 @@ select {
   width: 36px;
   height: 36px;
   flex: 0 0 36px;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 17px;
 }
 
@@ -460,9 +460,9 @@ select {
 .service-check__icon {
   width: 34px;
   height: 34px;
-  border-radius: 8px;
+  border-radius: 12px;
   color: var(--qg-primary);
-  background: #dcf0e6;
+  background: #d8f7e9;
   font-size: 17px;
 }
 
@@ -484,9 +484,9 @@ select {
   display: flex;
   gap: 12px;
   padding: 12px;
-  border-radius: 8px;
-  color: #8a5a08;
-  background: #fcefd8;
+  border-radius: 12px;
+  color: #8f5a00;
+  background: #fff4e0;
 }
 
 .issue-row + .issue-row {

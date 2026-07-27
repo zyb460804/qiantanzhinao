@@ -9,7 +9,9 @@ class Settings(BaseSettings):
     app_name: str = "千摊智脑 API"
     app_version: str = "0.1.0"
     app_env: str = os.getenv("APP_ENV", "development")
-    debug: bool = True
+    # 修复（审计 P1-4）：debug 默认 False，避免裸 uvicorn/systemd/k8s 部署时
+    # validate_security 被 fail-open 短路。本地开发通过 .env 显式打开 DEBUG=true。
+    debug: bool = False
 
     # PostgreSQL (production/Docker) or SQLite (dev fallback)
     database_url: str = os.getenv(
@@ -125,10 +127,16 @@ class Settings(BaseSettings):
           1. JWT_SECRET 沿用默认/弱密钥 —— 源码公开即等于零鉴权，可被任意伪造 token。
           2. auth_allow_fallback=True —— 允许从 query/header 取 merchant_id，越权黑洞重现。
           3. CORS_ORIGINS='*' —— 即便已自动关闭 credentials，仍应明确前端白名单。
-        dev 环境（debug=True）跳过，避免本地开发被拦截。
+        dev/test 环境（app_env in development/test 且 debug=True）跳过，避免本地开发被拦截。
         """
-        if self.debug:
+        # 修复（审计 P1-4）：原实现 `if self.debug: return` + debug 默认 True = 永远跳过。
+        # 现按 app_env 判定，且仅当显式 dev/test 环境且 debug=True 时才跳过。
+        if self.app_env in ("development", "test") and self.debug:
             return
+
+        # 致命组合：debug=True 且生产环境 —— 直接拒绝启动
+        if self.debug and self.app_env in ("production", "staging"):
+            raise RuntimeError(f"APP_ENV={self.app_env} 下禁止 DEBUG=true，请设置 DEBUG=false")
 
         import logging
 
@@ -147,7 +155,14 @@ class Settings(BaseSettings):
             )
 
         # 3) CORS 通配符：仅告警（不直接拒绝，因已自动关闭 credentials），提示配置白名单
-        if self.cors_origins.strip() == "*":
+        # 修复（审计 MEDIUM）：CORS_ORIGINS 含 "*" 且与其他域名混用时强制拒绝
+        _origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        if "*" in _origins and len(_origins) > 1:
+            raise RuntimeError(
+                "CORS_ORIGINS 不允许 '*' 与其他域名混用（会导致 credentials+通配符同时生效），"
+                "请改为纯白名单"
+            )
+        if _origins == ["*"]:
             logging.getLogger("uvicorn.error").critical(
                 "生产环境 CORS_ORIGINS 为 '*'，建议配置具体前端域名白名单（如 "
                 "https://mp.weixin.qq.com,https://your-domain.com）"

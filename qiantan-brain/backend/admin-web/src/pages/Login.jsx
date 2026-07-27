@@ -30,7 +30,7 @@ export default function Login() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        background: 'linear-gradient(135deg, #00A06A 0%, #06C77F 100%)',
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -77,7 +77,7 @@ export default function Login() {
               width: 56,
               height: 56,
               borderRadius: 14,
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              background: 'linear-gradient(135deg, #00A06A 0%, #06C77F 100%)',
               marginBottom: 16,
               fontSize: 28,
             }}
@@ -116,7 +116,7 @@ export default function Login() {
               style={{
                 height: 44,
                 borderRadius: 8,
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                background: 'linear-gradient(135deg, #00A06A 0%, #06C77F 100%)',
                 border: 'none',
                 fontWeight: 500,
                 fontSize: 16,
@@ -125,12 +125,6 @@ export default function Login() {
               登 录
             </Button>
           </Form.Item>
-
-          <div style={{ textAlign: 'center' }}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              默认账号 admin@qiantan.com / Admin123!
-            </Typography.Text>
-          </div>
         </Form>
       </Card>
     </div>

@@ -246,8 +246,20 @@ async def create_from_advice(
         matched_manual_count += 1
         if product.id in existing_product_ids:
             continue
-        est_cost = _to_d(product.default_price)
-        est_total = (qty * est_cost).quantize(Decimal("0.01"))
+        # 优先采用用户手动录入的进价 cost（兼容 actual_unit_cost 字段），
+        # 避免摊主输入的进价被丢弃导致后续毛利分析失真。
+        default_cost = _to_d(product.default_price)
+        user_cost_raw = raw.get("cost", raw.get("actual_unit_cost"))
+        user_cost: Decimal | None = None
+        if user_cost_raw not in (None, ""):
+            try:
+                cand = _to_d(user_cost_raw)
+                if cand > 0:
+                    user_cost = cand
+            except Exception:
+                user_cost = None
+        unit_cost = user_cost if user_cost is not None else default_cost
+        item_total = (qty * unit_cost).quantize(Decimal("0.01"))
         unit = str(raw.get("unit") or product.unit)[:20]
         source = str(raw.get("from") or raw.get("source") or "手工添加")[:100]
         db.add(
@@ -258,8 +270,11 @@ async def create_from_advice(
                 recommended_qty=qty,
                 actual_qty=qty,
                 unit=unit,
-                estimated_unit_cost=est_cost,
-                estimated_cost=est_total,
+                estimated_unit_cost=unit_cost,
+                estimated_cost=item_total,
+                # 用户录入进价时同步写入实际单价/小计，保留原始成本数据
+                actual_unit_cost=user_cost if user_cost is not None else None,
+                actual_cost=item_total if user_cost is not None else None,
                 status="pending",
                 reason=source,
             )

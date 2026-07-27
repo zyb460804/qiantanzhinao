@@ -82,7 +82,11 @@ class DetectionConfig:
     moving_avg_window: int = 7  # 移动平均窗口
     seasonal_period: int = 7  # 季节性周期(天)
     min_data_points: int = 5  # 最少需要的数据点
-    ensemble_vote_threshold: int = 2  # 集成投票阈值(至少N个检测器同意)
+    # 修复（审计 P1-接线）：原默认 2 要求同类型≥2 检测器同意，但 ZERO_SALES /
+    # DATA_ERROR / PATTERN_SHIFT 各只有 1 个检测器产出，永远凑不满 2 票被静默丢弃。
+    # 实测 quick_check([12,10,11,0,0,0], 0.0).by_type 返回空 {} —— 最有价值的
+    # 「连续零销提醒忘记记账」信号一条都发不出。改为 1 即单检测器发现即报告。
+    ensemble_vote_threshold: int = 1  # 集成投票阈值(至少N个检测器同意)
 
 
 @dataclass

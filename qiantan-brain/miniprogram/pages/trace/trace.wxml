@@ -123,8 +123,12 @@
 
             <view class="detail-actions">
               <button class="btn-primary-sm" data-id="{{item.batch_id}}" catchtap="generateQR" wx:if="{{item.status === 'sellable' || item.status === 'near_expiry'}}">生成追溯码</button>
+              <button class="btn-secondary-sm" data-id="{{item.batch_id}}" catchtap="inspectBatch" wx:if="{{item.status === 'sellable' || item.status === 'near_expiry' || item.status === 'locked'}}">录入快检</button>
               <button class="btn-secondary-sm" data-id="{{item.batch_id}}" catchtap="lockBatch" wx:if="{{item.status === 'sellable' || item.status === 'near_expiry'}}">锁定</button>
               <button class="btn-secondary-sm" data-id="{{item.batch_id}}" catchtap="unlockBatch" wx:if="{{item.status === 'locked'}}">解锁</button>
+              <button class="btn-secondary-sm" data-id="{{item.batch_id}}" catchtap="recallBatch" wx:if="{{item.status === 'locked'}}">召回</button>
+              <button class="btn-secondary-sm" data-id="{{item.batch_id}}" catchtap="destroyBatch" wx:if="{{item.status === 'recalled'}}">销毁</button>
+              <button class="btn-secondary-sm" data-id="{{item.batch_id}}" catchtap="viewAffectedOrders" wx:if="{{item.status === 'locked' || item.status === 'recalled'}}">受影响订单</button>
             </view>
           </view>
         </view>

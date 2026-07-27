@@ -226,14 +226,25 @@ def _prophet_predict(history: list[dict], env: dict) -> dict | None:
         df.columns = ["ds", "y"]
         df["ds"] = pd.to_datetime(df["ds"])
 
-        # Remove zero-sale days for better trend capture
-        df = df[df["y"] > 0].copy()
+        # 修复（审计 P1-Prophet）：原 df = df[df["y"] > 0] 剔除零销日会系统性
+        # 抬高预测均值并破坏时序等间距（Prophet 需要连续日期）。现保留零销日。
         if len(df) < 14:
             return None
 
-        # Add regressors
-        df["temp"] = env["temp_high"]
-        df["rain"] = env["rainfall_prob"]
+        # 修复（审计 P1-Prophet）：原实现把 df["temp"] 整列赋成同一个常数
+        # （env["temp_high"]），零方差回归变量与截距共线，Prophet 学不出任何
+        # 有意义的系数。且 _get_env_factors 只返回当天天气，无历史逐日数据。
+        # 现改为：仅当我们真的能取到逐日历史天气时才加 regressor；
+        # 否则只保留趋势 + 周季节性（Prophet 的核心能力），不假装有天气回归。
+        has_historical_weather = (
+            isinstance(env, dict)
+            and isinstance(env.get("history_temp"), list)
+            and len(env["history_temp"]) == len(df)
+        )
+
+        if has_historical_weather:
+            df["temp"] = env["history_temp"]
+            df["rain"] = env.get("history_rain", [0.0] * len(df))
 
         # Create and fit model
         model = Prophet(
@@ -242,14 +253,19 @@ def _prophet_predict(history: list[dict], env: dict) -> dict | None:
             daily_seasonality=False,
             changepoint_prior_scale=0.05,
         )
-        model.add_regressor("temp")
-        model.add_regressor("rain")
+        if has_historical_weather:
+            model.add_regressor("temp")
+            model.add_regressor("rain")
         model.fit(df)
 
         # Predict tomorrow
         future = model.make_future_dataframe(periods=1)
-        future["temp"] = env["temp_high"]
-        future["rain"] = env["rainfall_prob"]
+        if has_historical_weather:
+            # 明天的天气用 forecast 值（env 里的 temp_high / rainfall_prob）
+            future["temp"] = env["history_temp"] + [env.get("temp_high", df["temp"].mean())]
+            future["rain"] = env.get("history_rain", [0.0] * len(df)) + [
+                env.get("rainfall_prob", 0.0)
+            ]
 
         forecast = model.predict(future)
         tomorrow = forecast.iloc[-1]
@@ -263,24 +279,34 @@ def _prophet_predict(history: list[dict], env: dict) -> dict | None:
         # 需求标准差 (7日滚动)
         demand_std = float(df["y"].tail(7).std()) if len(df["y"]) >= 7 else baseline * 0.3
 
+        # 修复（审计 P1-Prophet）：Prophet 的 forecast DataFrame 没有
+        # extra_regressors 这一列，实际列名是 extra_regressors_additive。
+        # 原实现取不存在的列名 → 界面恒显示 0.00。
+        factors = [
+            {"name": "趋势", "value": round(float(tomorrow["trend"]), 1)},
+            {"name": "周季节性", "value": round(float(tomorrow.get("weekly", 0)), 1)},
+        ]
+        if has_historical_weather:
+            factors.append(
+                {
+                    "name": "温度回归",
+                    "value": round(float(tomorrow.get("extra_regressors_additive", 0)), 2),
+                }
+            )
+            factors.append(
+                {
+                    "name": "降雨回归",
+                    "value": round(float(tomorrow.get("extra_regressors_additive", 0)), 2),
+                }
+            )
+
         return {
             "predicted_qty": round(predicted, 1),
             "baseline_qty": round(baseline, 1),
             "model": "prophet",
             "demand_std": round(demand_std, 2),
             "data_days": len(df),
-            "factors": [
-                {"name": "趋势", "value": round(float(tomorrow["trend"]), 1)},
-                {"name": "周季节性", "value": round(float(tomorrow.get("weekly", 0)), 1)},
-                {
-                    "name": "温度回归",
-                    "value": round(float(tomorrow.get("extra_regressors", {}).get("temp", 0)), 2),
-                },
-                {
-                    "name": "降雨回归",
-                    "value": round(float(tomorrow.get("extra_regressors", {}).get("rain", 0)), 2),
-                },
-            ],
+            "factors": factors,
             "confidence": 0.80,
             "lower_bound": round(lower, 1),
             "upper_bound": round(upper, 1),

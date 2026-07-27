@@ -25,6 +25,15 @@
     </block>
   </view>
 
+  <!-- 员工身份切换（权限体系） -->
+  <view class="identity-bar {{staffMode ? 'is-staff' : ''}}" bindtap="onIdentityTap">
+    <view class="identity-info">
+      <text class="identity-role">{{staffMode ? (currentStaff.name + ' · ' + currentStaff.roleLabel) : ((merchantName || '老板') + ' · 全部权限')}}</text>
+      <text class="identity-hint">{{staffMode ? '当前为员工身份，点击退出恢复老板' : '点击切换为员工身份（按角色限权）'}}</text>
+    </view>
+    <text class="identity-action">{{staffMode ? '退出' : '切换 ›'}}</text>
+  </view>
+
   <!-- ② 快捷操作 -->
   <view class="section-head"><text class="section-title">快捷操作</text></view>
   <view class="quick-grid">
@@ -80,22 +89,15 @@
     </view>
   </view>
 
-  <!-- ⑤ 摊位设置 -->
+  <!-- ⑤ 摊位设置（跳转独立页面） -->
   <view class="section-head"><text class="section-title">摊位设置</text></view>
-  <view class="setting-group">
-    <view class="setting-row"><text class="setting-label">摊位名称</text><input class="setting-input" value="{{merchantName}}" bindinput="onNameChange" placeholder="输入摊位名称" /></view>
-    <view class="setting-row"><text class="setting-label">所在城市</text><picker range="{{cityOptions}}" value="{{cityIndex}}" bindchange="onCityChange"><text class="setting-val">{{cityOptions[cityIndex]}} ›</text></picker></view>
-    <view class="setting-row"><text class="setting-label">常用方言</text><picker range="{{dialects}}" value="{{dialectIndex}}" bindchange="onDialectChange"><text class="setting-val">{{dialects[dialectIndex]}} ›</text></picker></view>
-    <view class="setting-row"><text class="setting-label">营业时段</text><picker range="{{hoursOptions}}" value="{{hoursIndex}}" bindchange="onBusinessHoursChange"><text class="setting-val">{{hoursOptions[hoursIndex]}} ›</text></picker></view>
-    <view class="setting-row"><text class="setting-label">经营提醒</text><switch checked="{{notificationEnabled}}" bindchange="onNotificationToggle" color="#175C45" /></view>
+  <view class="setting-entry" bindtap="goStallSettings">
+    <view class="setting-entry-body">
+      <text class="setting-entry-title">{{merchantName || '未设置摊位名称'}}</text>
+      <text class="setting-entry-desc">名称 · 城市 · 方言 · 营业时段 · 建议偏好 · 皮肤主题</text>
+    </view>
+    <text class="setting-entry-arrow">›</text>
   </view>
-  <view class="setting-group">
-    <text class="setting-group-title">建议偏好</text>
-    <label class="risk-opt"><radio value="conservative" checked="{{riskProfile === 'conservative'}}" bindchange="onRiskChange"/> 稳健经营 · 少压货、优先控制损耗</label>
-    <label class="risk-opt"><radio value="neutral" checked="{{riskProfile === 'neutral'}}" bindchange="onRiskChange"/> 平衡经营 · 兼顾销量、利润与风险</label>
-    <label class="risk-opt"><radio value="aggressive" checked="{{riskProfile === 'aggressive'}}" bindchange="onRiskChange"/> 进取经营 · 接受波动，争取更多销量</label>
-  </view>
-  <button class="btn-primary save-btn" bindtap="saveProfile">保存我的经营偏好</button>
 
   <!-- ⑥ 帮助与反馈 -->
   <view class="section-head"><text class="section-title">帮助与反馈</text></view>
@@ -113,5 +115,6 @@
     <view class="about-row" bindtap="showPrivacy"><text>隐私政策</text><text>›</text></view>
     <view class="about-row" bindtap="showTerms"><text>用户协议</text><text>›</text></view>
     <view class="about-row"><text>开源许可</text><text class="muted">MIT</text></view>
+    <view class="about-row logout-row" bindtap="logout"><text class="logout-text">退出登录</text><text class="muted">›</text></view>
   </view>
 </view>

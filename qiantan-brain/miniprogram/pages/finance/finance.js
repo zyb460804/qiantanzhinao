@@ -174,7 +174,7 @@ Page({
       Chart.drawBarChart(canvas.ctx, canvas.width, canvas.height, data, {
         valueKey: 'amount',
         labelKey: 'name',
-        colors: ['#2BA24C', '#D9524A', '#175C45', '#F3A83B', '#5A9B8E'],
+        colors: ['#00B578', '#FA5151', '#008556', '#FFA800', '#00B9A8'],
         unitPrefix: '¥',
         recommendLabel: '最优',
       });
@@ -230,7 +230,7 @@ Page({
       var tasks = (data || []).map(function (item) {
         var statusText = item.status === 'balanced' ? '已平账'
           : item.status === 'resolved' ? '已处理'
-            : item.status === 'exception' ? '有差异' : '待账单';
+            : item.status === 'exception' ? '有差异' : '待对账';
         return Object.assign({}, item, { statusText: statusText });
       });
       self.setData({ reconTasks: tasks, reconLoading: false });

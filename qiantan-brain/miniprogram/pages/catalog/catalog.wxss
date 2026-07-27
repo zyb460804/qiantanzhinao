@@ -45,7 +45,7 @@
 .sku-acts { display: flex; gap: 12rpx; margin-top: 18rpx; padding-top: 16rpx; border-top: 1rpx solid var(--line-soft); }
 .act-chip { padding: 8rpx 18rpx; color: var(--green-800); background: var(--green-50); border-radius: var(--r-pill); font-size: 21rpx; font-weight: 600; }
 .act-chip:active { opacity: .65; transform: scale(.96); }
-.act-chip.del { color: #c0493d; background: rgba(201,67,51,.08); }
+.act-chip.del { color: #c93a30; background: rgba(201,67,51,.08); }
 .act-chip.hint { color: var(--muted); background: transparent; padding: 8rpx 6rpx; font-weight: 500; }
 
 /* ═══════════════ 空状态 ═══════════════ */

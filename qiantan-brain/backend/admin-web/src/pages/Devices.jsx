@@ -192,19 +192,19 @@ export default function Devices() {
             <Statistic
               title="在线"
               value={data.online}
-              valueStyle={{ color: '#16803C' }}
+              valueStyle={{ color: '#00B578' }}
               suffix={<Progress percent={onlinePercent} size="small" style={{ width: 64 }} showInfo={false} />}
             />
           </Card>
         </Col>
         <Col xs={12} md={6}>
           <Card>
-            <Statistic title="异常" value={data.warning} valueStyle={{ color: '#D97706' }} />
+            <Statistic title="异常" value={data.warning} valueStyle={{ color: '#F08C00' }} />
           </Card>
         </Col>
         <Col xs={12} md={6}>
           <Card>
-            <Statistic title="离线" value={data.offline} valueStyle={{ color: '#DC2626' }} />
+            <Statistic title="离线" value={data.offline} valueStyle={{ color: '#FA5151' }} />
           </Card>
         </Col>
       </Row>

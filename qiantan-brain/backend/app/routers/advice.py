@@ -76,6 +76,9 @@ async def simulate_what_if_endpoint(
         estimated_sales_base=estimated_sales_base,
         avg_historical_price=scenario.get("avg_historical_price"),
     )
+    # 回传基线值：三方案对比接口本路由无 DB 上下文，前端拿到后原样透传，
+    # 避免同屏「单场景结果」与「三方案对比」出现两套互斥基线（误导读进货决策）
+    result["estimated_sales_base"] = estimated_sales_base
 
     return {"code": 0, "data": result}
 

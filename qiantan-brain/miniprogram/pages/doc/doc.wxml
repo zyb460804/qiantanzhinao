@@ -11,6 +11,6 @@
     </view>
   </view>
   <view class="doc-footer">
-    <text class="doc-meta">由千摊智脑提供 · 最后更新 2026-07</text>
+    <text class="doc-meta">由千摊智脑提供 · 版本 {{docVersion || '1.0'}} · 生效 {{docEffectiveDate || '—'}}</text>
   </view>
 </view>

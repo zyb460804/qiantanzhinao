@@ -6,7 +6,7 @@
     "icon": "/components/icon/icon",
     "mascot": "/components/mascot/mascot"
   },
-  "navigationBarBackgroundColor": "#123D30",
-  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#FFFFFF",
+  "navigationBarTextStyle": "black",
   "enablePullDownRefresh": true
 }

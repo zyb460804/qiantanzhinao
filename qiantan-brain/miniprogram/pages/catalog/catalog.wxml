@@ -287,7 +287,9 @@
               <view class="cmp-info">
                 <text class="cmp-name">{{item.supplier_name}}</text>
                 <view class="cmp-meta">
-                  <text class="cmp-price">¥{{fmt.fixed(item.last_price, 2) || '—'}}/{{detailSku.canonical_unit || '斤'}}</text>
+                  <!-- last_price 为 null 时不显示 ¥0.00 误导（fmt.fixed 把 null 转为 '0' 是 truthy） -->
+                  <text wx:if="{{item.last_price}}" class="cmp-price">¥{{fmt.fixed(item.last_price, 2)}}/{{detailSku.canonical_unit || '斤'}}</text>
+                  <text wx:else class="cmp-price muted">—</text>
                   <text wx:if="{{item.value_score}}" class="cmp-value">性价比 {{fmt.fixed(item.value_score, 1)}}</text>
                 </view>
                 <view class="cmp-metrics">
@@ -429,7 +431,8 @@
       <text class="form-hint">记录该供应商对这个商品的报价和起订量</text>
 
       <text class="form-label">选择供应商</text>
-      <scroll-view wx:if="{{allSuppliers.length}}" class="pick-scroll" scroll-y>
+      <view wx:if="{{allSuppliersLoading}}" class="block-empty pick-empty">正在加载供应商…</view>
+      <scroll-view wx:elif="{{allSuppliers.length}}" class="pick-scroll" scroll-y>
         <view wx:for="{{allSuppliers}}" wx:key="supplier_id"
               class="pick-row {{supProdForm.supplier_id === item.supplier_id ? 'active' : ''}}"
               data-id="{{item.supplier_id}}" catchtap="pickSupProdSupplier">

@@ -2,5 +2,6 @@
   "usingComponents": {
     "mascot": "/components/mascot/mascot"
   },
+  "enablePullDownRefresh": true,
   "navigationBarTitleText": "市场通知"
 }

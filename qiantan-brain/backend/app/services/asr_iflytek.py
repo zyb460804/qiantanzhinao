@@ -157,8 +157,10 @@ async def _transcribe_ws(auth_url: str, frames: list[bytes], pd: str | None) -> 
 
     total = len(frames)
     try:
+        # proxy=None：websockets 15+ 默认识别 HTTP(S)_PROXY/SOCKS 环境变量，
+        # 部署机若配置了代理会让讯飞 wss 连接意外走代理，这里显式禁用。
         async with websockets.connect(
-            ws_url, max_size=None, ping_interval=None, close_timeout=5
+            ws_url, max_size=None, ping_interval=None, close_timeout=5, proxy=None
         ) as ws:
             send_task = asyncio.create_task(_send_frames(ws, frames, pd))
             try:

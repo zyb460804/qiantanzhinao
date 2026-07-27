@@ -19,7 +19,7 @@
 .kpi-label { font-size: 24rpx; color: var(--muted); }
 .kpi-value { font-family: var(--font-num); font-size: 52rpx; font-weight: 800; color: var(--ink); line-height: 1; letter-spacing: -1rpx; }
 .kpi-green .kpi-value { color: var(--green-700); }
-.kpi-amber .kpi-value { color: var(--corn-deep, #9a6b00); }
+.kpi-amber .kpi-value { color: var(--corn-deep, #8f5a00); }
 .kpi-blue .kpi-value { color: var(--blue); }
 .kpi-red .kpi-value { color: var(--red); }
 .kpi-change { display: flex; align-items: center; gap: 6rpx; font-size: 22rpx; font-family: var(--font-num); }
@@ -61,7 +61,7 @@
 .waste-card { padding: 8rpx 24rpx; }
 .waste-row { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 0; border-bottom: 1rpx solid var(--line); }
 .waste-row:last-child { border-bottom: none; }
-.waste-mark { width: 48rpx; height: 48rpx; border-radius: 14rpx; background: var(--corn-soft); color: var(--corn-deep, #9a6b00); font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+.waste-mark { width: 48rpx; height: 48rpx; border-radius: 14rpx; background: var(--corn-soft); color: var(--corn-deep, #8f5a00); font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
 .waste-info { flex: 1; display: flex; flex-direction: column; gap: 4rpx; min-width: 0; }
 .waste-name { font-size: 28rpx; font-weight: 700; color: var(--ink); }
 .waste-detail { font-size: 22rpx; color: var(--muted); }
@@ -119,7 +119,7 @@
 .report-signal-strip { display: flex; align-items: center; margin: 18rpx 0 24rpx; padding: 20rpx 12rpx; background: var(--paper); border: 1.5rpx solid var(--ring); border-radius: 22rpx; box-shadow: var(--shadow-sm); }
 .report-signal-strip > view { flex: 1; text-align: center; }
 .signal-num { display: block; color: var(--ink); font-family: var(--font-num); font-size: 31rpx; font-weight: 850; }
-.signal-num.warn { color: var(--corn-deep, #9a6b00); }.signal-num.good { color: var(--green-700); }
+.signal-num.warn { color: var(--corn-deep, #8f5a00); }.signal-num.good { color: var(--green-700); }
 .signal-label { display: block; margin-top: 5rpx; color: var(--muted); font-size: 19rpx; }
 .signal-divider { width: 1rpx; height: 42rpx; flex: 0 0 auto !important; background: var(--line); }
 .kpi { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }

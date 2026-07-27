@@ -1,6 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
+// React 19 下 antd v5 静态方法（message/notification/Modal.confirm）依赖的官方兼容补丁，
+// 必须在任何 antd 使用之前 import 一次；升级到 antd 6 后应移除。
+import '@ant-design/v5-patch-for-react-19'
 import { ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import App from './App.jsx'

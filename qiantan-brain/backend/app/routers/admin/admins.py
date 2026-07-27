@@ -5,12 +5,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.admin_permissions import ADMIN_MANAGE, require_admin_permission
-from app.core.admin_security import get_current_admin, hash_password
+from app.core.admin_security import get_current_admin, hash_password, validate_password_bytes
 from app.core.audit import log_action
 from app.database import get_db
 from app.models.saas import PlatformAdmin
@@ -38,12 +38,20 @@ class AdminCreate(BaseModel):
     name: str = Field(..., max_length=60)
     role: str = Field(default="ops_admin")
 
+    # bcrypt 只处理前 72 字节，按字节数二次校验（max_length 限的是字符数）
+    _password_bytes = field_validator("password")(validate_password_bytes)
+
 
 class AdminUpdate(BaseModel):
     name: str | None = None
     role: str | None = None
     is_active: bool | None = None
     password: str | None = Field(None, min_length=8, max_length=64)
+
+    @field_validator("password")
+    @classmethod
+    def _password_bytes(cls, v: str | None) -> str | None:
+        return validate_password_bytes(v) if v is not None else None
 
 
 def _serialize(admin: PlatformAdmin) -> AdminInfo:

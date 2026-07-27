@@ -1,0 +1,24 @@
+/* ============================================================
+ * 摊位设置页样式 — 基础信息 / 建议偏好 / 皮肤主题
+ * 全局变量与 section-head 等基类来自 app.wxss
+ * ============================================================ */
+
+.stall-settings-page { padding-top: 22rpx; padding-bottom: 160rpx; }
+
+/* ── 设置卡片 ── */
+.setting-group { overflow: hidden; margin-bottom: 18rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.setting-row { display: flex; align-items: center; gap: 20rpx; min-height: 96rpx; padding: 20rpx 24rpx; border-bottom: 1rpx solid var(--line); }
+.setting-row:last-child { border-bottom: 0; }
+.setting-label { flex-shrink: 0; width: 140rpx; color: var(--muted); font-size: 24rpx; }
+.setting-input { flex: 1; color: var(--ink); font-size: 28rpx; font-weight: 600; }
+.setting-val { color: var(--ink); font-size: 28rpx; font-weight: 600; }
+
+/* ── 单选偏好行（风险偏好 / 皮肤主题共用）── */
+.risk-opt { display: flex; align-items: center; gap: 14rpx; min-height: 88rpx; padding: 18rpx 24rpx; border-bottom: 1rpx solid var(--line); font-size: 25rpx; color: var(--ink-2); }
+.risk-opt:last-child { border-bottom: 0; }
+.risk-opt radio { transform: scale(.82); }
+.skin-group { display: block; }
+
+/* ── 保存按钮 ── */
+.save-btn { margin-top: 24rpx; min-height: 96rpx; color: #fff; background: var(--green-800); border-radius: 22rpx; font-size: 29rpx; font-weight: 750; box-shadow: 0 12rpx 26rpx rgba(0, 160, 106,.22); }
+.save-btn:active { transform: scale(.99); }

@@ -1,6 +1,11 @@
 /** 库存盘点页面 — 核对实际库存，校准数字孪生 */
 var app = getApp();
 
+/** 离线盘点提交队列的本地存储键。 */
+var OFFLINE_QUEUE_KEY = 'qt_stocktake_queue';
+/** 历史列表每页条数（与后端默认 limit 对齐）。 */
+var HISTORY_PAGE_SIZE = 10;
+
 Page({
   data: {
     activeTab: 'stocktake',
@@ -13,6 +18,13 @@ Page({
     completed: false,
     result: null,
     historyList: [],
+    // 历史分页与详情相关
+    historyPage: 1,
+    historyHasMore: true,
+    historyLoadingMore: false,
+    expandedHistoryId: null,
+    historyDetailCache: {},
+    historyDetailLoading: false,
     progressCount: 0,
     totalVariance: 0,
     lossAmount: 0,
@@ -34,18 +46,25 @@ Page({
   },
 
   onShow: function () {
+    var self = this;
     this.setData({ skinClass: 'skin-' + app.resolveSkin() });
     if (this.data.activeTab === 'history') {
-      this.loadHistory();
+      this.loadHistory(false);
     } else if (!this.data.sessionId && !this.data.completed) {
-      this.loadCurrentStocktake();
+      this.loadCurrentStocktake().then(function () {
+        // 恢复会话后，尝试把离线缓存的未同步项推到服务端。
+        self._flushPendingSubmits();
+      }).catch(function () {});
+    } else if (this.data.sessionId) {
+      // 已有会话，直接重试离线队列。
+      this._flushPendingSubmits();
     }
   },
 
   onPullDownRefresh: function () {
     var self = this;
     if (this.data.activeTab === 'history') {
-      this.loadHistory().then(function () {
+      this.loadHistory(false).then(function () {
         wx.stopPullDownRefresh();
       }).catch(function () {
         wx.stopPullDownRefresh();
@@ -59,17 +78,33 @@ Page({
     }
   },
 
+  // 触底加载更多历史
+  onReachBottom: function () {
+    if (this.data.activeTab !== 'history') return;
+    this.loadHistory(true);
+  },
+
+  // WXML "加载更多" 链接的 tap handler（bindtap 只能传 event，需包装）
+  loadMoreHistory: function () {
+    this.loadHistory(true);
+  },
+
   switchTab: function (event) {
     var self = this;
     var tab = event.currentTarget.dataset.tab;
-    // 盘点进行中切 Tab → 确认放弃
+    // P1 修复：盘点进行中切 Tab 时不再强制取消。后端 in_progress 会话长期保留，
+    // 已提交项已持久化；下次切回时 onShow 自动恢复。仅提示用户先保存未提交数据。
     if (this.data.sessionId && !this.data.completed && tab !== 'stocktake') {
       wx.showModal({
-        title: '放弃盘点？', content: '当前盘点尚未完成，切换后将丢失已核对的数据。',
-        confirmText: '放弃盘点', cancelText: '继续盘点', confirmColor: '#d9524a',
+        title: '暂停盘点？',
+        content: '当前盘点进度会保留，可随时切回继续。未提交的数据建议先保存。',
+        confirmText: '暂停并切换',
+        cancelText: '留在这里',
+        confirmColor: '#FA5151',
         success: function (res) {
           if (res.confirm) {
-            self._cancelCurrentStocktake(tab);
+            self.setData({ activeTab: tab });
+            if (tab === 'history') self.loadHistory(false);
           }
         },
       });
@@ -77,7 +112,7 @@ Page({
     }
     this.setData({ activeTab: tab });
     if (tab === 'history') {
-      this.loadHistory();
+      this.loadHistory(false);
     }
   },
 
@@ -105,8 +140,10 @@ Page({
         notes: '',
         progressPercent: 0
       });
+      // 清理本会话的离线缓存
+      self._clearPendingSubmits(sessionId);
       wx.showToast({ title: '盘点已取消', icon: 'success' });
-      if (nextTab === 'history') self.loadHistory();
+      if (nextTab === 'history') self.loadHistory(false);
     }).catch(function (err) {
       self.setData({ submitting: false });
       wx.showToast({ title: self._errorText(err, '取消盘点失败'), icon: 'none' });
@@ -138,6 +175,7 @@ Page({
         product_name: item.product_name,
         unit: item.unit || '斤',
         book_qty: Number(item.book_qty) || 0,
+        // P1 修复：后端已下发 avg_cost，离线时回退 unit_cost 字段。
         avg_cost: Number(item.avg_cost || item.unit_cost) || 0,
         actual_qty: submitted ? String(item.actual_qty) : '',
         variance: variance,
@@ -202,6 +240,7 @@ Page({
   // ── 输入实际数量 ─────────────────────────────────────────
 
   inputActualQty: function (event) {
+    var self = this;
     var index = event.currentTarget.dataset.index;
     var value = event.detail.value;
     var items = this.data.stocktakeItems.slice();
@@ -218,6 +257,12 @@ Page({
     delete submittedMap[item.product_id];
     this.setData({ stocktakeItems: items, submittedMap: submittedMap });
     this._recalcSummary();
+    // P0 修复：实盘=账面（variance=0）时差异原因按钮被 wx:if 隐藏，
+    // 原代码没有任何触发 _submitItem 的路径，导致整次盘点无法完成。
+    // 这里在 variance=0 时自动提交，与 quickAdjust 行为一致，打破死锁。
+    if (item.variance === 0 && !isNaN(actualNum) && value !== '') {
+      this._submitItem(index);
+    }
   },
 
   // ── 快捷调整数量 ─────────────────────────────────────────
@@ -227,7 +272,11 @@ Page({
     var offset = Number(event.currentTarget.dataset.offset);
     var items = this.data.stocktakeItems.slice();
     var item = items[index];
-    var newVal = item.book_qty + offset;
+    // P1 修复：以当前实盘数量为基准累加；未输入则回退账面值。
+    // 原代码 item.book_qty + offset 会覆盖用户键盘输入且多击不累加。
+    var currentActual = parseFloat(item.actual_qty);
+    var base = !isNaN(currentActual) && item.actual_qty !== '' ? currentActual : item.book_qty;
+    var newVal = base + offset;
     if (newVal < 0) newVal = 0;
     item.actual_qty = String(newVal);
     item.variance = Math.round((newVal - item.book_qty) * 100) / 100;
@@ -292,14 +341,205 @@ Page({
         item_id: data.item_id,
       };
       self.setData({ stocktakeItems: items, submittedMap: submittedMap, submitting: false });
+      // 提交成功后清除该商品对应的离线缓存（如有）。
+      self._removePendingSubmit(self.data.sessionId, item.product_id);
       self._recalcSummary();
     }).catch(function (err) {
       console.error('Submit item fail:', err);
       var failedItems = self.data.stocktakeItems.slice();
       if (failedItems[index]) failedItems[index]._submitting = false;
       self.setData({ stocktakeItems: failedItems, submitting: false });
-      wx.showToast({ title: self._errorText(err, '保存盘点数量失败'), icon: 'none' });
+      // P1 修复：网络失败时缓存到本地，下次有网自动重试，避免弱网下数据丢失。
+      self._savePendingSubmit(self.data.sessionId, {
+        product_id: item.product_id,
+        actual_qty: actualNum,
+        variance_reason: reason,
+      });
+      wx.showToast({ title: '已离线保存，联网后自动同步', icon: 'none' });
     });
+  },
+
+  // ── 批量保存全部未提交项（P2 修复：弱网下减少请求数） ──────────────
+
+  submitAllItems: function () {
+    var self = this;
+    if (this.data.submitting || this.data.completing) return;
+    var items = this.data.stocktakeItems;
+    var pending = items.filter(function (item) {
+      return !item.submitted && item.actual_qty !== '' && !isNaN(parseFloat(item.actual_qty));
+    });
+    if (pending.length === 0) {
+      wx.showToast({ title: '没有可保存的项', icon: 'none' });
+      return;
+    }
+    // 本地先校验，避免无效请求
+    for (var i = 0; i < pending.length; i++) {
+      if (parseFloat(pending[i].actual_qty) < 0) {
+        wx.showToast({ title: '实盘数量必须是非负数', icon: 'none' });
+        return;
+      }
+    }
+    this.setData({ submitting: true });
+    var payload = {
+      items: pending.map(function (item) {
+        return {
+          product_id: item.product_id,
+          actual_qty: parseFloat(item.actual_qty),
+          variance_reason: (item.variance === 0 || item.variance === null)
+            ? 'unknown'
+            : (item.reason || 'unknown'),
+        };
+      }),
+    };
+    app.request({
+      url: '/inventory/stocktake/' + this.data.sessionId + '/submit-batch',
+      method: 'POST',
+      data: payload,
+    }).then(function (data) {
+      var results = (data && data.results) || [];
+      var okByPid = {};
+      var failCount = 0;
+      results.forEach(function (r) {
+        if (r.status === 'ok') okByPid[r.product_id] = r;
+        else failCount += 1;
+      });
+      var newItems = self.data.stocktakeItems.map(function (item) {
+        var r = okByPid[item.product_id];
+        if (r) {
+          return Object.assign({}, item, {
+            submitted: true,
+            _submitting: false,
+            variance: r.variance,
+          });
+        }
+        return item;
+      });
+      var submittedMap = Object.assign({}, self.data.submittedMap);
+      Object.keys(okByPid).forEach(function (pid) {
+        var r = okByPid[pid];
+        submittedMap[pid] = {
+          actual_qty: r.actual_qty,
+          variance: r.variance,
+          reason: '',
+          item_id: r.item_id,
+        };
+      });
+      self.setData({
+        stocktakeItems: newItems,
+        submittedMap: submittedMap,
+        submitting: false,
+      });
+      // 成功项从离线队列清除
+      Object.keys(okByPid).forEach(function (pid) {
+        self._removePendingSubmit(self.data.sessionId, Number(pid));
+      });
+      self._recalcSummary();
+      var okCount = Object.keys(okByPid).length;
+      if (failCount > 0) {
+        wx.showToast({ title: '成功 ' + okCount + ' 项，失败 ' + failCount + ' 项', icon: 'none' });
+      } else {
+        wx.showToast({ title: '已保存 ' + okCount + ' 项', icon: 'success' });
+      }
+    }).catch(function (err) {
+      console.error('Batch submit fail:', err);
+      self.setData({ submitting: false });
+      wx.showToast({ title: self._errorText(err, '批量保存失败'), icon: 'none' });
+    });
+  },
+
+  // ── 离线盘点缓存：本地持久化失败的提交，下次有网重试 ─────────
+
+  _savePendingSubmit: function (sessionId, payload) {
+    if (!sessionId) return;
+    try {
+      var queue = wx.getStorageSync(OFFLINE_QUEUE_KEY) || [];
+      // 按 session_id + product_id 去重，保留最新
+      queue = queue.filter(function (it) {
+        return !(it.session_id === sessionId && it.product_id === payload.product_id);
+      });
+      queue.push(Object.assign({ session_id: sessionId }, payload, {
+        queued_at: Date.now(),
+      }));
+      wx.setStorageSync(OFFLINE_QUEUE_KEY, queue);
+    } catch (e) {
+      console.warn('Save pending submit fail:', e);
+    }
+  },
+
+  _removePendingSubmit: function (sessionId, productId) {
+    try {
+      var queue = wx.getStorageSync(OFFLINE_QUEUE_KEY) || [];
+      var next = queue.filter(function (it) {
+        return !(it.session_id === sessionId && it.product_id === productId);
+      });
+      if (next.length !== queue.length) wx.setStorageSync(OFFLINE_QUEUE_KEY, next);
+    } catch (e) {
+      console.warn('Remove pending submit fail:', e);
+    }
+  },
+
+  _clearPendingSubmits: function (sessionId) {
+    try {
+      var queue = wx.getStorageSync(OFFLINE_QUEUE_KEY) || [];
+      var next = queue.filter(function (it) { return it.session_id !== sessionId; });
+      wx.setStorageSync(OFFLINE_QUEUE_KEY, next);
+    } catch (e) {
+      console.warn('Clear pending submits fail:', e);
+    }
+  },
+
+  // 串行重试当前会话的所有离线缓存提交
+  _flushPendingSubmits: function () {
+    var self = this;
+    var sessionId = this.data.sessionId;
+    if (!sessionId || this.data.submitting) return Promise.resolve();
+    var queue;
+    try {
+      queue = wx.getStorageSync(OFFLINE_QUEUE_KEY) || [];
+    } catch (e) {
+      return Promise.resolve();
+    }
+    var pending = queue.filter(function (it) { return it.session_id === sessionId; });
+    if (pending.length === 0) return Promise.resolve();
+    // 串行重试，避免并发覆盖
+    return pending.reduce(function (chain, item) {
+      return chain.then(function () {
+        if (!self.data.sessionId || self.data.sessionId !== item.session_id) return;
+        return app.request({
+          url: '/inventory/stocktake/' + item.session_id + '/submit',
+          method: 'POST',
+          data: {
+            product_id: item.product_id,
+            actual_qty: item.actual_qty,
+            variance_reason: item.variance_reason,
+          }
+        }).then(function (data) {
+          self._removePendingSubmit(item.session_id, item.product_id);
+          // 同步本地状态：标记该项为已提交
+          var items = self.data.stocktakeItems.slice();
+          for (var i = 0; i < items.length; i++) {
+            if (items[i].product_id === item.product_id) {
+              items[i].submitted = true;
+              items[i]._submitting = false;
+              items[i].variance = data.variance;
+              items[i].actual_qty = String(data.actual_qty);
+              break;
+            }
+          }
+          var submittedMap = Object.assign({}, self.data.submittedMap);
+          submittedMap[item.product_id] = {
+            actual_qty: data.actual_qty,
+            variance: data.variance,
+            reason: item.variance_reason,
+            item_id: data.item_id,
+          };
+          self.setData({ stocktakeItems: items, submittedMap: submittedMap });
+          self._recalcSummary();
+        }).catch(function () {
+          // 仍失败，保留在队列里下次再试
+        });
+      });
+    }, Promise.resolve());
   },
 
   // ── 重新计算汇总 ─────────────────────────────────────────
@@ -352,6 +592,8 @@ Page({
         completing: false,
         lossAmount: data.total_loss_amount || 0,
       });
+      // 完成后清空本会话的离线缓存
+      self._clearPendingSubmits(self.data.sessionId);
       wx.showToast({ title: '盘点完成', icon: 'success' });
     }).catch(function (err) {
       console.error('Complete stocktake fail:', err);
@@ -360,16 +602,23 @@ Page({
     });
   },
 
+  // P3 修复：本方法此前无对应 WXML 绑定（死代码），已在盘点进行区添加备注 textarea。
   inputNotes: function (event) {
     this.setData({ notes: event.detail.value });
   },
 
   // ── 加载盘点历史 ─────────────────────────────────────────
 
-  loadHistory: function () {
+  // P2 修复：支持分页加载。append=true 时加载下一页，否则重置到第一页。
+  loadHistory: function (append) {
     var self = this;
+    var page = append ? (this.data.historyPage || 1) + 1 : 1;
+    if (append && (this.data.historyLoadingMore || !this.data.historyHasMore)) {
+      return Promise.resolve();
+    }
+    if (append) this.setData({ historyLoadingMore: true });
     return app.request({
-      url: '/inventory/stocktake/history'
+      url: '/inventory/stocktake/history?page=' + page + '&limit=' + HISTORY_PAGE_SIZE
     }).then(function (data) {
       var list = (data || []).map(function (item) {
         var copy = {};
@@ -382,12 +631,51 @@ Page({
         copy.is_gain = (Number(item.total_variance) || 0) > 0;
         return copy;
       });
-      self.setData({ historyList: list });
+      var merged = append ? self.data.historyList.concat(list) : list;
+      var hasMore = list.length >= HISTORY_PAGE_SIZE;
+      self.setData({
+        historyList: merged,
+        historyPage: page,
+        historyHasMore: hasMore,
+        historyLoadingMore: false,
+      });
     }).catch(function (err) {
       console.error('Load history fail:', err);
-      self.setData({ historyList: [] });
+      if (!append) self.setData({ historyList: [] });
+      self.setData({ historyLoadingMore: false });
       wx.showToast({ title: self._errorText(err, '盘点记录加载失败'), icon: 'none' });
       return Promise.reject(err);
+    });
+  },
+
+  // P2 修复：点击历史卡片展开/折叠明细
+  toggleHistoryDetail: function (event) {
+    var self = this;
+    var sessionId = event.currentTarget.dataset.id;
+    if (this.data.expandedHistoryId === sessionId) {
+      this.setData({ expandedHistoryId: null });
+      return;
+    }
+    this.setData({ expandedHistoryId: sessionId });
+    // 已缓存则直接展示
+    if (this.data.historyDetailCache[sessionId]) return;
+    // 拉取明细
+    this.setData({ historyDetailLoading: true });
+    app.request({
+      url: '/inventory/stocktake/history/' + sessionId
+    }).then(function (data) {
+      var items = (data && data.items) || [];
+      var cache = Object.assign({}, self.data.historyDetailCache);
+      cache[sessionId] = items.map(function (item) {
+        return Object.assign({}, item, {
+          variance_text: self._formatVariance(item.variance),
+        });
+      });
+      self.setData({ historyDetailCache: cache, historyDetailLoading: false });
+    }).catch(function (err) {
+      console.error('Load history detail fail:', err);
+      self.setData({ historyDetailLoading: false });
+      wx.showToast({ title: self._errorText(err, '明细加载失败'), icon: 'none' });
     });
   },
 

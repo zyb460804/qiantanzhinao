@@ -1,24 +1,43 @@
-# ⚠️ 严禁升级到 >=0.139.0：该版本在 Python 3.13 上 include_router 静默失效，
-# 导致所有路由 404。如需升级请先在 Python 3.13 上验证 include_router 行为。
-# 已知可用：0.115.6。参考：2026-07-12 资深开发排查修复。
+# ⚠️ 严禁升级 fastapi 到 >=0.137.0：0.137.0 起路由内部大重构（app.routes 出现
+# _IncludedRouter 树节点、惰性注册），存在「路由已注册但 404 / 遍历 routes 的库崩溃」
+# 回归类别；本项目 2026-07-12 曾在 Python 3.13 上实测 >=0.139.0 include_router 静默失效
+# 导致全部路由 404。0.139.2 有疑似相关的线程安全修复但官方未确认覆盖此场景。
+# 已知可用：0.115.6。如需升级：安全上限为 0.136.3（路由重构前最后一版），
+# 且需配 starlette>=0.46 并全量回归所有路由（2026-07-26 升级审计结论）。
 fastapi==0.115.6
-uvicorn[standard]==0.30.0
-sqlalchemy[asyncio]==2.0.35
-asyncpg==0.29.0
+# uvicorn>=0.50.2 硬性要求 websockets>=13，两者必须同批升级
+uvicorn[standard]==0.51.0
+sqlalchemy[asyncio]==2.0.51
+# >=0.30 才有 Python 3.13 wheel；0.29 在 py3.13 上无法安装
+asyncpg==0.31.0
 aiosqlite==0.22.1
-alembic==1.13.0
-pydantic==2.9.0
-pydantic-settings==2.5.0
-email-validator==2.2.0
-python-multipart==0.0.12
-httpx==0.27.0
+# 1.15 起 autogenerate 的 compare_type 默认 True，升级后首次生成迁移需人工核对类型 diff
+alembic==1.18.5
+pydantic==2.13.4
+# 勿装 2.12.0~2.14.1（CVE-2026-58203：secrets 目录 symlink 逃逸）
+pydantic-settings==2.14.2
+email-validator==2.3.0
+# 0.0.12 受 CVE-2024-53981 等 5 枚 DoS/路径穿越漏洞影响，0.0.30+ 才全部修复
+python-multipart==0.0.32
+httpx==0.28.1
 cryptography==49.0.0
+# 2.13.0 是 2026-05 批量安全修复版（CVE-2026-48522~48526），严禁降级
 pyjwt==2.13.0
-bcrypt==4.2.1
-aiofiles==24.1.0
-websockets==12.0
-apscheduler==3.10.4
-redis==5.2.1
+# 5.0 起对 >72 字节密码抛 ValueError（不再静默截断）；API 层已加字节长度校验
+bcrypt==5.0.0
+aiofiles==25.1.0
+# 15+ 默认识别 HTTP(S)_PROXY 环境变量；讯飞 ASR 外连已显式 proxy=None 固化
+websockets==16.1.1
+apscheduler==3.11.3
+# 6.0 起默认重试 3 次（指数抖动退避）；暂不上 8.x（RESP3 默认化 + 连接默认值大改，观察期）
+redis==7.4.1
 prometheus-client>=0.20.0
 prometheus-fastapi-instrumentator>=7.0.0
-sentry-sdk[fastapi]>=2.0.0
+# 钉死版本保证部署可复现（浮动下限曾允许解析到 2.0.0~2.7.1 带洞区间）
+sentry-sdk[fastapi]==2.66.1
+
+# ── 算法依赖（审计 P1-1/P1-3：inventory_optimizer 顶层 import numpy，forecast/newsvendor 用 scipy，
+#    多处用 pandas；此前未声明导致干净环境 pip install 后 uvicorn 启动即 ModuleNotFoundError）──
+numpy==2.2.6
+scipy==1.15.3
+pandas==2.2.3

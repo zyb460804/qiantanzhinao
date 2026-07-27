@@ -27,13 +27,24 @@
 
   <!-- Empty -->
   <view wx:elif="{{!listData}}" class="empty-state surface empty-purchase">
-    <mascot size="lg" mood="idle"></mascot>
-    <text class="empty-title">今日还没有采购清单</text>
-    <text class="empty-desc">从AI建议生成，或手动录入采购清单</text>
-    <view class="two-btns">
-      <button class="btn-primary empty-action" bindtap="generateFromAdvice" loading="{{submitting}}">从AI建议生成</button>
-      <button class="btn-secondary empty-action" bindtap="showManualForm">手动录入</button>
-    </view>
+    <block wx:if="{{loadError}}">
+      <mascot size="lg" mood="think"></mascot>
+      <text class="empty-title">采购清单加载失败</text>
+      <text class="empty-desc">网络不稳定，请重试</text>
+      <view class="two-btns">
+        <button class="btn-primary empty-action" bindtap="loadList" loading="{{loading}}">重新加载</button>
+        <button class="btn-secondary empty-action" bindtap="generateFromAdvice" loading="{{submitting}}">从AI建议生成</button>
+      </view>
+    </block>
+    <block wx:else>
+      <mascot size="lg" mood="idle"></mascot>
+      <text class="empty-title">今日还没有采购清单</text>
+      <text class="empty-desc">从AI建议生成，或手动录入采购清单</text>
+      <view class="two-btns">
+        <button class="btn-primary empty-action" bindtap="generateFromAdvice" loading="{{submitting}}">从AI建议生成</button>
+        <button class="btn-secondary empty-action" bindtap="showManualForm">手动录入</button>
+      </view>
+    </block>
   </view>
 
   <!-- List view -->
@@ -285,7 +296,10 @@
     <text class="history-toggle-arrow">{{showHistory ? '收起' : '展开'}} ›</text>
   </view>
   <view class="history-list" wx:if="{{showHistory}}">
-    <view wx:if="{{historyList.length === 0}}" class="empty-state mini">
+    <view wx:if="{{historyError}}" class="empty-state mini" bindtap="loadHistory">
+      <text>历史加载失败，点击重试</text>
+    </view>
+    <view wx:elif="{{historyList.length === 0}}" class="empty-state mini">
       <text>近30日暂无历史采购记录</text>
     </view>
     <view wx:for="{{historyList}}" wx:key="list_id" class="history-card">
@@ -319,8 +333,8 @@
         <input class="form-input" placeholder="商品名（如：白菜）" value="{{manualName}}" data-field="name" bindinput="onManualField" />
         <view class="manual-row">
           <input class="form-input flex-2" type="digit" placeholder="数量" value="{{manualQty}}" data-field="qty" bindinput="onManualField" />
-          <picker mode="selector" value="{{manualUnit === '斤' ? 0 : manualUnit === '公斤' ? 1 : manualUnit === '个' ? 2 : 3}}" range="{{['斤','公斤','个','袋']}}" data-field="unit" bindchange="onManualField">
-            <view class="form-picker-sm">{{manualUnit || '斤'}}</view>
+          <picker mode="selector" value="{{manualUnitIdx}}" range="{{manualUnits}}" bindchange="onManualUnitChange">
+            <view class="form-picker-sm">{{manualUnit}}</view>
           </picker>
         </view>
         <input class="form-input" type="digit" placeholder="进价/单价（可选）" value="{{manualCost}}" data-field="cost" bindinput="onManualField" />

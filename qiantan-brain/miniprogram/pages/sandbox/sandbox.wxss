@@ -20,7 +20,7 @@
 .money-input { display: flex; align-items: center; margin-top: 12rpx; padding: 18rpx; background: var(--paper-2); border: 1rpx solid var(--line); border-radius: 16rpx; color: var(--green-800); font-size: 25rpx; font-weight: 700; }
 .money-input input { flex: 1; min-width: 0; margin-left: 7rpx; color: var(--ink); font-size: 29rpx; }
 .money-input .unit { color: var(--muted); font-size: 18rpx; font-weight: 500; }
-.run-button { display: flex; align-items: center; justify-content: center; gap: 14rpx; min-height: 96rpx; margin-top: 28rpx; color: #fff; background: var(--green-800); border-radius: 20rpx; font-size: 29rpx; font-weight: 750; box-shadow: 0 12rpx 26rpx rgba(23,92,69,.22); }
+.run-button { display: flex; align-items: center; justify-content: center; gap: 14rpx; min-height: 96rpx; margin-top: 28rpx; color: #fff; background: var(--green-800); border-radius: 20rpx; font-size: 29rpx; font-weight: 750; box-shadow: 0 12rpx 26rpx rgba(0, 160, 106,.22); }
 .run-mark { display: flex; align-items: center; justify-content: center; width: 40rpx; height: 40rpx; color: var(--green-950); background: #f6ca78; border-radius: 12rpx; font-size: 20rpx; font-weight: 800; }
 .profit-card { padding: 30rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .profit-label { display: block; color: var(--muted); font-size: 22rpx; }

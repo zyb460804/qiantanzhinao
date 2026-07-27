@@ -72,7 +72,7 @@
       <canvas type="2d" id="reportChart" class="report-chart" style="width:100%;height:240px;"></canvas>
       <view wx:if="{{monthlyReport.expense_breakdown && monthlyReport.expense_breakdown.length}}" class="report-breakdown">
         <text class="report-sub">费用明细</text>
-        <view wx:for="{{monthlyReport.expense_breakdown}}" wx:key="category" class="report-row sm"><text>{{item.category}}</text><text>¥{{fmt.fixed(item.amount,2)}}</text></view>
+        <view wx:for="{{monthlyReport.expense_breakdown}}" wx:key="category" class="report-row sm"><text>{{item.category==='rent'?'租金':item.category==='utility'?'水电':item.category==='labor'?'人工':item.category==='fee'?'手续费':'其他'}}</text><text>¥{{fmt.fixed(item.amount,2)}}</text></view>
       </view>
     </view>
     <view wx:else class="empty-state"><text>暂无报表数据</text></view>

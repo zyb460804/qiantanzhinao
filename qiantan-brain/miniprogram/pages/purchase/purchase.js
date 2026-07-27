@@ -11,6 +11,8 @@ Page({
     skinClass: '', loading: true, submitting: false,
     listData: null, editingItemId: '',
     confirmed: false, confirmResult: null,
+    // 加载失败标志（区分"今日无采购"与"加载失败"）
+    loadError: false, historyError: false,
     // 验收模式
     acceptanceMode: false, acceptanceItems: {},
     // 付款弹窗
@@ -29,6 +31,9 @@ Page({
     // 手动录入
     showManual: false, manualItems: [], manualName: '', manualQty: '', manualUnit: '斤', manualCost: '',
     manualSubmitting: false,
+    // 中国菜市场常用单位选项（覆盖少量配菜、青菜、鱼类等场景）
+    manualUnits: ['斤','公斤','两','个','袋','把','条','份'],
+    manualUnitIdx: 0,
   },
 
   onLoad: function (options) {
@@ -105,16 +110,23 @@ Page({
       self.setData({ suppliers: items.map(function (s) {
         return { supplier_id: s.supplier_id, supplier_name: s.name, balance: s.current_balance || 0 };
       }) });
-    }).catch(function () {});
+    }).catch(function (err) {
+      // 供应商列表失败不弹 toast（次要数据），但在打开付款/选择弹窗时
+      // 若列表为空会触发空态提示，用户感知到失败后可重试。
+      console.warn('loadSuppliers failed', err);
+    });
   },
 
   loadList: function () {
     var self = this;
-    this.setData({ loading: true });
+    this.setData({ loading: true, loadError: false });
     return app.request({ url: '/purchase/today' }).then(function (data) {
       var decorated = self._decorateList(data);
-      self.setData({ loading: false, listData: decorated, confirmed: false, confirmResult: null, editingItemId: '', acceptanceMode: false, acceptanceItems: {} });
-    }).catch(function () { self.setData({ loading: false }); });
+      self.setData({ loading: false, loadError: false, listData: decorated, confirmed: false, confirmResult: null, editingItemId: '', acceptanceMode: false, acceptanceItems: {} });
+    }).catch(function (err) {
+      self.setData({ loading: false, loadError: true });
+      wx.showToast({ title: (err && err.body && err.body.detail) || '采购清单加载失败，请下拉刷新重试', icon: 'none' });
+    });
   },
 
   // ── 装饰 ──────────────────────────────────────────────
@@ -215,7 +227,7 @@ Page({
   // ── 手动录入 ──────────────────────────────────────────
 
   showManualForm: function () {
-    this.setData({ showManual: true, manualItems: [], manualName: '', manualQty: '', manualUnit: '斤', manualCost: '' });
+    this.setData({ showManual: true, manualItems: [], manualName: '', manualQty: '', manualUnit: '斤', manualUnitIdx: 0, manualCost: '' });
   },
 
   closeManualForm: function () {
@@ -231,10 +243,17 @@ Page({
     this.setData(up);
   },
 
+  // 单位 picker 专用 handler：picker selector 返回的是 index，需映射为单位名
+  onManualUnitChange: function (e) {
+    var idx = parseInt(e.detail.value, 10) || 0;
+    var unit = this.data.manualUnits[idx] || '斤';
+    this.setData({ manualUnitIdx: idx, manualUnit: unit });
+  },
+
   addManualItem: function () {
     var name = (this.data.manualName || '').trim();
     var qty = parseFloat(this.data.manualQty);
-    var unit = this.data.manualUnit || '斤';
+    var unit = this.data.manualUnit || this.data.manualUnits[this.data.manualUnitIdx] || '斤';
     var cost = parseFloat(this.data.manualCost) || 0;
     if (!name) { wx.showToast({ title: '请输入商品名', icon: 'none' }); return; }
     if (!qty || qty <= 0) { wx.showToast({ title: '请输入有效数量', icon: 'none' }); return; }
@@ -291,6 +310,7 @@ Page({
 
   loadHistory: function () {
     var self = this;
+    this.setData({ historyError: false });
     app.request({ url: '/purchase/history', data: { days: 30, limit: 10 } }).then(function (data) {
       var items = (data || []).map(function (h) {
         var statusMap = { stored: '已入库', completed: '已完成', cancelled: '已取消', returned: '已退货' };
@@ -304,8 +324,11 @@ Page({
           created_at: h.created_at,
         };
       });
-      self.setData({ historyList: items, historyLoaded: true });
-    }).catch(function () {});
+      self.setData({ historyList: items, historyLoaded: true, historyError: false });
+    }).catch(function () {
+      self.setData({ historyError: true });
+      wx.showToast({ title: '历史加载失败，可点击重试', icon: 'none' });
+    });
   },
 
   toggleHistory: function () {
@@ -382,7 +405,7 @@ Page({
   cancelItem: function (e) {
     var itemId = e.currentTarget.dataset.id, self = this;
     if (this.data.submitting) return;
-    wx.showModal({ title: '取消采购', content: '确认取消该采购项？', confirmColor: '#d9524a', success: function (r) {
+    wx.showModal({ title: '取消采购', content: '确认取消该采购项？', confirmColor: '#FA5151', success: function (r) {
       if (!r.confirm) return;
       self.setData({ submitting: true });
       app.request({ url: '/purchase/item/' + itemId, method: 'DELETE' }).then(function () { self.setData({ submitting: false }); wx.showToast({ title: '已取消', icon: 'none' }); self.loadList(); }).catch(function (err) { self.setData({ submitting: false }); wx.showToast({ title: (err.body && err.body.detail) || '取消失败', icon: 'none' }); self.loadList(); });
@@ -529,7 +552,13 @@ Page({
   openPayment: function () {
     var list = this.data.listData; if (!list) return;
     // 多供应商清单不能把整单金额默认付给某一个供应商。
-    this.setData({ showPayment: true, paymentSupplierId: '', paymentSupplierName: '', paymentAmount: 0, paymentNote: '', paymentPayableIds: [] });
+    // 每次打开付款弹窗生成新的幂等键；本次会话内重试复用同一键，
+    // 后端命中的话会返回原付款记录，避免弱网下用户重复点击造成重复付款。
+    this.setData({
+      showPayment: true, paymentSupplierId: '', paymentSupplierName: '',
+      paymentAmount: 0, paymentNote: '', paymentPayableIds: [],
+      paymentIdempotencyKey: 'pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000000),
+    });
     this.loadSuppliers();
   },
 
@@ -572,7 +601,9 @@ Page({
     this.setData({ paymentSubmitting: true });
     app.request({ url: '/accounts/supplier-payment', method: 'POST', data: {
       supplier_id: this.data.paymentSupplierId, payable_ids: this.data.paymentPayableIds, amount: this.data.paymentAmount,
-      method: this.data.paymentMethod, note: this.data.paymentNote
+      method: this.data.paymentMethod, note: this.data.paymentNote,
+      // 幂等键：弱网下用户主动二次点击不会产生重复付款流水
+      idempotency_key: this.data.paymentIdempotencyKey
     }}).then(function () {
       self.setData({ paymentSubmitting: false, showPayment: false });
       wx.showToast({ title: '付款成功', icon: 'success' });

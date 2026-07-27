@@ -36,6 +36,13 @@ Page({
     if (this.data.result) this.renderChart();
   },
 
+  // sandbox.json 已开启 enablePullDownRefresh，必须实现 handler，
+  // 否则下拉加载动画悬挂且不刷新数据。商品加载失败后这是唯一的重试入口
+  onPullDownRefresh: function () {
+    this.loadProducts();
+    wx.stopPullDownRefresh();
+  },
+
   // ── 加载商品列表 ─────────────────────────────────────
 
   loadProducts: function () {
@@ -121,6 +128,10 @@ Page({
         { name: '激进', purchase_qty: Math.max(1, Math.round(qty * 1.3)), unit_cost: unitCost, unit_price: unitPrice },
       ];
 
+      // 三方案对比基线必须与同屏『本次结果』一致——直接透传 what-if 回传的真实基线，
+      // 否则后端兜底 18.0 斤/天会让『标准』方案净利与『本次结果』出现两个矛盾数字
+      var salesBase = singleResult && singleResult.estimated_sales_base;
+
       return app.request({
         url: '/simulate/scenario',
         method: 'POST',
@@ -131,6 +142,7 @@ Page({
               unit_cost: s.unit_cost,
               unit_price: s.unit_price,
               product_name: productName,
+              estimated_sales_base: salesBase,
             };
           }),
         },
