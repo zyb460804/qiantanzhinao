@@ -124,18 +124,20 @@
 .home-profit-simple { align-items: flex-end; }
 .profit-note { display:block; margin-top:10rpx; color:rgba(255,255,255,.68); font-size:23rpx; }
 .home-weather { position:static; margin:0 0 8rpx; }
-.task-stack { display:flex; flex-direction:column; gap:16rpx; }
-.task-card { display:flex; align-items:center; gap:18rpx; padding:24rpx; background:var(--paper); border:2rpx solid var(--line); border-radius:var(--radius-lg); box-shadow:var(--shadow); }
-.task-card.warn { border-color:#f2d39b; background:#fffaf0; }
-.task-card.danger { border-color:#f2bbb5; background:#fff7f5; }
-.task-card.good { border-color:var(--green-100); background:var(--green-50); }
-.task-glyph { display:flex; flex:0 0 auto; align-items:center; justify-content:center; width:66rpx; height:66rpx; color:var(--green-800); background:var(--green-100); border-radius:20rpx; font-size:25rpx; font-weight:800; }
-.task-card.warn .task-glyph { color:#8f5a00; background:var(--corn-soft); }
-.task-card.danger .task-glyph { color:var(--red); background:var(--red-soft); }
+/* v4.2 去卡片化：task-stack 为容器，task-card 为条目 */
+.task-stack { display:flex; flex-direction:column; gap:0; margin-top:16rpx; background:var(--paper); border:1rpx solid var(--ring); border-radius:var(--r-lg); box-shadow:var(--shadow-sm); overflow:hidden; }
+.task-card { display:flex; align-items:center; gap:18rpx; padding:22rpx 24rpx; background:transparent; border:none; border-bottom:1rpx solid var(--line); border-radius:0; box-shadow:none; }
+.task-card:last-child { border-bottom:0; }
+.task-card.warn { background:var(--corn-soft); }
+.task-card.danger { background:var(--tomato-soft); }
+.task-card.good { background:var(--green-50); }
+.task-glyph { display:flex; flex:0 0 auto; align-items:center; justify-content:center; width:48rpx; height:48rpx; color:var(--green-700); background:var(--green-100); border-radius:var(--r-sm); font-size:22rpx; font-weight:800; }
+.task-card.warn .task-glyph { color:var(--corn-ink); background:#f6e6bf; }
+.task-card.danger .task-glyph { color:var(--tomato-ink); background:#f6d9d5; }
 .task-copy { flex:1; min-width:0; }
 .task-title { display:block; color:var(--ink); font-size:27rpx; font-weight:750; }
 .task-desc { display:block; margin-top:6rpx; color:var(--muted); font-size:22rpx; line-height:1.45; }
-.task-action { flex:0 0 auto; color:var(--green-800); font-size:22rpx; font-weight:700; }
+.task-action { flex:0 0 auto; color:var(--green-700); font-size:22rpx; font-weight:700; }
 .work-grid .action-card { min-height:190rpx; }
 .inventory-summary { display:flex; align-items:center; padding:28rpx 18rpx; }
 .summary-stat { flex:1; text-align:center; }
