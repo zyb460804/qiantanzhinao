@@ -1,4 +1,4 @@
-<!-- 库存盘点 · 核对实际库存，校准数字孪生 -->
+<!-- 库存盘点 · 核对实际库存，校准库存账本 -->
 <view class="page-shell stocktake-page {{skinClass}}">
 
   <view class="page-hero stocktake-hero" wx:if="{{activeTab === 'stocktake' && !completed}}">
@@ -152,7 +152,7 @@
       <view class="page-hero result-hero page-hero--breathing">
         <text class="eyebrow">盘点完成</text>
         <text class="hero-title">盘点已完成</text>
-        <text class="hero-desc">已根据盘点结果更新库存数字孪生</text>
+        <text class="hero-desc">已根据盘点结果更新库存账本</text>
       </view>
 
       <!-- 盘点总结卡片 -->

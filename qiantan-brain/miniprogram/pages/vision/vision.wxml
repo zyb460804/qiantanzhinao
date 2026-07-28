@@ -1,11 +1,11 @@
-<!-- 拍照识货 · 拍一张照片，智能识别商品 -->
+<!-- 拍照识货 · 拍一张照片，识别商品 -->
 <view class="page-shell vision-page {{skinClass}}">
 
   <!-- Hero -->
   <view class="page-hero vision-hero ">
     <text class="eyebrow">智能识货</text>
     <text class="hero-title">拍照识货</text>
-    <text class="hero-desc">拍一张照片，智能识别商品</text>
+    <text class="hero-desc">拍一张照片，识别商品</text>
   </view>
 
   <!-- 操作区 -->

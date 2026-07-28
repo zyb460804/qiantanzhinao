@@ -25,7 +25,11 @@
 .notice-head {
   display: flex; align-items: center; padding: 24rpx 28rpx; gap: 16rpx;
 }
-.notice-emoji { font-size: 40rpx; flex-shrink: 0; }
+/* v4.2: emoji 改色块单字（告/警/急），按 type 区分底色 */
+.notice-emoji { display: flex; align-items: center; justify-content: center; width: 48rpx; height: 48rpx; flex-shrink: 0; border-radius: var(--r-sm); font-size: 24rpx; font-weight: 800; color: #fff; background: var(--green-700); }
+.notice-card.notice-info .notice-emoji { background: var(--green-600); }
+.notice-card.notice-warning .notice-emoji { background: var(--corn); color: var(--corn-ink); }
+.notice-card.notice-urgent .notice-emoji { background: var(--tomato); }
 .notice-head-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
 .notice-title { font-size: 30rpx; font-weight: 600; color: var(--ink); }
 .notice-meta { display: flex; align-items: center; gap: 12rpx; }

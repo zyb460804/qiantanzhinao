@@ -60,7 +60,7 @@
     <view class="section-head"><text class="section-title">今日建议</text><text class="section-link" bindtap="navigateToAdvisor">全部 ›</text></view>
     <view class="today-advisor" bindtap="navigateToAdvisor">
       <view class="ta-glyph"><icon name="bulb" size="md" color="var(--corn)"/></view>
-      <view class="ta-copy"><text class="ta-title">小智今天怎么卖更稳？</text><text class="ta-desc">基于天气、库存与经营偏好的判断</text></view>
+      <view class="ta-copy"><text class="ta-title">今天怎么卖更稳？</text><text class="ta-desc">基于天气、库存与经营偏好的判断</text></view>
       <text class="ta-arrow">›</text>
     </view>
 

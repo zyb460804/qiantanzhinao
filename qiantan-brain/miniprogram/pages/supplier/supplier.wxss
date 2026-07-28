@@ -9,7 +9,7 @@
   margin-top: 22rpx; padding: 24rpx 28rpx;
   background: var(--paper); border: 1.5rpx solid var(--ring);
   border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
-  animation: card-rise .32s ease both;
+ 
 }
 .supplier-stat { flex: 1; text-align: center; }
 .stat-num { display: block; font-family: var(--font-num); font-size: 40rpx; font-weight: 850; color: var(--ink); }

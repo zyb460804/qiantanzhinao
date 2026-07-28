@@ -1,5 +1,5 @@
 /**
- * 数字孪生看板 — 实时库存与风险镜像
+ * 库存看板 — 实时库存与风险镜像
  * Tab: 库存镜像 / 风险镜像
  *   经营走势统一在「经营报告」页查看，避免重复展示。
  *
@@ -14,7 +14,7 @@ Page({
     activeTab: 'inventory',  // inventory | risk
     tabs: [
       { key: 'inventory', label: '库存', icon: '📦' },
-      { key: 'risk', label: '风险', icon: '⚠️' },
+      { key: 'risk', label: '风险', icon: '险' },
     ],
 
     // 数据

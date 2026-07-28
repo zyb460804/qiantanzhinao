@@ -45,7 +45,7 @@
     <view class="insight-card {{insightTone}}" wx:if="{{inventoryItems.length > 0}}">
       <mascot size="sm" mood="{{insightTone === 'good' ? 'idle' : 'think'}}"></mascot>
       <view class="insight-copy">
-        <text class="insight-kicker">小智库存提示</text>
+        <text class="insight-kicker">库存提示</text>
         <text class="insight-title">{{insightTitle}}</text>
         <text class="insight-desc">{{insightText}}</text>
       </view>

@@ -1,9 +1,9 @@
 <!-- 市场通知 — 公告/警告/紧急 — 查看通知详情 -->
 <wxs module="notice">
   var TYPE_CONFIG = {
-    info: { label: '公告', emoji: '📢' },
-    warning: { label: '警告', emoji: '⚠️' },
-    urgent: { label: '紧急', emoji: '🚨' }
+    info: { label: '公告', emoji: '告' },
+    warning: { label: '警告', emoji: '警' },
+    urgent: { label: '紧急', emoji: '急' }
   };
   module.exports = {
     config: function(type) {

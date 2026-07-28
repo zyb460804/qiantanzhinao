@@ -8,7 +8,7 @@
       </view>
       <mascot size="md" mood="{{state==='listening' ? 'think' : 'idle'}}" />
     </view>
-    <text class="hero-desc">按住说话，或直接打字。小智会整理成商品、数量和金额。</text>
+    <text class="hero-desc">按住说话，或直接打字。自动整理成商品、数量和金额。</text>
     <view class="today-chip"><text class="chip-number">{{todayCount}}</text><text>今日已记</text></view>
   </view>
 

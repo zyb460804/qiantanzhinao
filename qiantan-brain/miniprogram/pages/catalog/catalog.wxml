@@ -179,7 +179,7 @@
     <view class="detail-block">
       <view class="detail-block-head">
         <view class="dbh-left">
-          <text class="dbh-icon">🏷️</text>
+          <text class="dbh-icon">价</text>
           <text class="dbh-title">别名</text>
           <text wx:if="{{detailAliases.length}}" class="dbh-badge">{{detailAliases.length}}</text>
         </view>
@@ -198,7 +198,7 @@
     <view class="detail-block">
       <view class="detail-block-head">
         <view class="dbh-left">
-          <text class="dbh-icon">📐</text>
+          <text class="dbh-icon">量</text>
           <text class="dbh-title">规格</text>
           <text wx:if="{{detailSpecs.length}}" class="dbh-badge">{{detailSpecs.length}}</text>
         </view>
@@ -222,12 +222,12 @@
     <view class="detail-block">
       <view class="detail-block-head">
         <view class="dbh-left">
-          <text class="dbh-icon">🤝</text>
+          <text class="dbh-icon">供</text>
           <text class="dbh-title">供应商与报价</text>
           <text wx:if="{{detailSupProds.length}}" class="dbh-badge">{{detailSupProds.length}}</text>
         </view>
         <view class="dbh-actions">
-          <text wx:if="{{detailSupProds.length >= 2}}" class="section-link compare-link" bindtap="openComparePanel">⚖ 比价</text>
+          <text wx:if="{{detailSupProds.length >= 2}}" class="section-link compare-link" bindtap="openComparePanel">比价</text>
           <text class="section-link" bindtap="openSupProdForm">+ 关联</text>
         </view>
       </view>
@@ -251,7 +251,7 @@
       <!-- 比价面板 -->
       <view wx:if="{{showComparePanel}}" class="compare-panel">
         <view class="compare-panel-head">
-          <text class="compare-panel-title">⚖ 供应商比价分析</text>
+          <text class="compare-panel-title">供应商比价分析</text>
           <text class="panel-close-sm" bindtap="closeComparePanel">✕</text>
         </view>
         <view wx:if="{{compareLoading}}" class="compare-loading">
@@ -313,7 +313,7 @@
   <view wx:if="{{showUnitPanel}}" class="panel-overlay" bindtap="closeUnitPanel">
     <view class="panel-sheet" catchtap="stopMaskTap">
       <view class="panel-head">
-        <text class="panel-title">⚖️ 单位换算管理</text>
+        <text class="panel-title">单位换算管理</text>
         <text class="panel-close" bindtap="closeUnitPanel">✕</text>
       </view>
       <view class="panel-body">

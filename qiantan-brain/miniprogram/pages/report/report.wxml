@@ -141,7 +141,7 @@
         </view>
       </view>
       <view wx:else class="empty-state card">
-        <text>✅</text>
+        <text>✓</text>
         <text>{{activeTab === 'daily' ? '暂无滞销商品' : '暂无损耗记录'}}</text>
       </view>
     </view>

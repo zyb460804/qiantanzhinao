@@ -3,7 +3,7 @@
 .purchase-hero { background: var(--green-950); }
 
 /* 状态条 */
-.status-bar { display:flex; align-items:center; gap:20rpx; margin-top:22rpx; padding:24rpx 28rpx; background:var(--paper); border:1rpx solid rgba(16, 32, 24,.06); border-radius:var(--radius-lg); box-shadow:var(--shadow); animation:card-rise .32s ease both; }
+.status-bar { display:flex; align-items:center; gap:20rpx; margin-top:22rpx; padding:24rpx 28rpx; background:var(--paper); border:1rpx solid rgba(16, 32, 24,.06); border-radius:var(--radius-lg); box-shadow:var(--shadow); }
 .status-block { flex:1; }
 .status-block .tag { margin-top:8rpx; }
 .status-divider { width:1rpx; height:64rpx; background:var(--line); }
@@ -17,7 +17,7 @@
 
 /* 采购卡片 */
 .purchase-list { display:flex; flex-direction:column; gap:16rpx; }
-.purchase-card { padding:24rpx; background:var(--paper); border:1rpx solid transparent; border-radius:var(--radius-lg); box-shadow:0 8rpx 24rpx rgba(25,48,38,.06); animation:card-rise .32s ease both; }
+.purchase-card { padding:24rpx; background:var(--paper); border:1rpx solid transparent; border-radius:var(--radius-lg); box-shadow:0 8rpx 24rpx rgba(25,48,38,.06); }
 .purchase-card.purchased { border-color:rgba(31,114,85,.14); background:var(--green-50); }
 .purchase-card.returned { border-color:rgba(201,67,51,.14); background:rgba(201,67,51,.04); }
 .purchase-card.cancelled { opacity:.5; }
@@ -148,7 +148,7 @@
 
 /* 结果弹窗 */
 .result-mask { position:fixed; top:0; left:0; right:0; bottom:0; display:flex; align-items:center; justify-content:center; padding:40rpx; background:rgba(18,34,29,.55); z-index:100; animation:fade-in .2s ease both; }
-.result-card { width:100%; max-width:620rpx; max-height:1050rpx; overflow-y:auto; padding:40rpx 32rpx 32rpx; background:var(--paper); border-radius:var(--radius-xl); box-shadow:0 20rpx 60rpx rgba(0,0,0,.2); animation:card-rise .3s ease both; }
+.result-card { width:100%; max-width:620rpx; max-height:1050rpx; overflow-y:auto; padding:40rpx 32rpx 32rpx; background:var(--paper); border-radius:var(--radius-xl); box-shadow:0 20rpx 60rpx rgba(0,0,0,.2); }
 .result-mascot { width:140rpx; height:140rpx; margin:0 auto 20rpx; display:block; }
 .result-title { display:block; text-align:center; color:var(--ink); font-size:32rpx; font-weight:760; }
 .result-subtitle { display:block; margin-top:6rpx; text-align:center; color:var(--muted); font-size:22rpx; }
@@ -182,7 +182,6 @@
 .tag-green { color:#1a4528; background:rgba(0,133,86,.10); }
 
 @keyframes shimmer { 0% { background-position:100% 0; } 100% { background-position:-100% 0; } }
-@keyframes card-rise { from { opacity:0; transform:translateY(12rpx); } to { opacity:1; transform:translateY(0); } }
 @keyframes fade-in { from { opacity:0; } to { opacity:1; } }
 
 /* 2026 统一设计升级：采购流程页 */
