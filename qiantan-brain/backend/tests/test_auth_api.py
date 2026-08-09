@@ -64,6 +64,73 @@ async def test_refresh_issues_new_token(auth_client, monkeypatch):
     me = await auth_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {new_token}"})
     assert me.status_code == 200
 
+    # 旧 token 必须失效（refresh 吊销语义 / 审计 H1）
+    old_me = await auth_client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert old_me.status_code == 401
+
+
+async def test_staff_token_refresh_preserves_role(auth_client, monkeypatch, db_session):
+    """员工 token refresh 后角色与 staff_id 保持不变（不因 refresh 被升级为 owner）。
+
+    覆盖审计 F1 权限提升修复：refresh 必须从 token claim 读 role/staff_id 原样轮转。
+    """
+    import uuid
+
+    from app.models.staff import StaffMember
+
+    # 1. owner 登录拿 JWT + merchant_id
+    owner_token = await _login(auth_client, monkeypatch, "openid-staff-refresh")
+    me_resp = await auth_client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {owner_token}"}
+    )
+    merchant_id = me_resp.json()["data"]["id"]
+
+    # 2. 直接 seed 一个带 PIN 的 cashier 员工
+    async with db_session() as session:
+        staff = StaffMember(
+            merchant_id=uuid.UUID(merchant_id),
+            name="测试收银员",
+            role="cashier",
+            pin_code="1234",
+            is_active=True,
+        )
+        session.add(staff)
+        await session.commit()
+        await session.refresh(staff)
+        staff_id = str(staff.id)
+
+    # 3. 用 owner token 走员工 PIN 登录链路，拿 cashier token
+    login_resp = await auth_client.post(
+        "/api/v1/staff/login",
+        json={"staff_id": staff_id, "pin_code": "1234"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert login_resp.status_code == 200, login_resp.text
+    staff_token = login_resp.json()["data"]["token"]
+    assert login_resp.json()["data"]["role"] == "cashier"
+
+    # 4. refresh 员工 token
+    refresh_resp = await auth_client.post(
+        "/api/v1/auth/refresh", headers={"Authorization": f"Bearer {staff_token}"}
+    )
+    assert refresh_resp.status_code == 200, refresh_resp.text
+    new_staff_token = refresh_resp.json()["data"]["token"]
+
+    # 5. 新 token 的 role/staff_id 必须保持 cashier（不被升级为 owner）
+    from app.core.security import decode_access_token
+
+    payload = decode_access_token(new_staff_token)
+    assert payload["role"] == "cashier"
+    assert payload.get("staff_id") == staff_id
+
+    # 6. 旧 staff token 同样失效
+    old_staff_me = await auth_client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {staff_token}"}
+    )
+    assert old_staff_me.status_code == 401
+
 
 async def test_logout_revokes_token(auth_client, monkeypatch):
     token = await _login(auth_client, monkeypatch, "openid-auth-logout")

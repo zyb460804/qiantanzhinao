@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, DecimalNum
 
 
 # ---------------------------------------------------------------------------
@@ -19,18 +20,18 @@ class AcceptanceItemRequest(BaseModel):
     """单条验收明细。"""
 
     item_id: uuid.UUID
-    arrival_qty: float = Field(ge=0)  # 实际到货
-    accepted_qty: float = Field(ge=0)  # 合格可入库
-    shortage_qty: float = Field(default=0, ge=0)
-    damaged_qty: float = Field(default=0, ge=0)
-    rejected_qty: float = Field(default=0, ge=0)
-    returned_qty: float = Field(default=0, ge=0)
-    replenish_qty: float = Field(default=0, ge=0)
+    arrival_qty: DecimalNum = Field(ge=0)  # 实际到货
+    accepted_qty: DecimalNum = Field(ge=0)  # 合格可入库
+    shortage_qty: DecimalNum = Field(default=Decimal("0"), ge=0)
+    damaged_qty: DecimalNum = Field(default=Decimal("0"), ge=0)
+    rejected_qty: DecimalNum = Field(default=Decimal("0"), ge=0)
+    returned_qty: DecimalNum = Field(default=Decimal("0"), ge=0)
+    replenish_qty: DecimalNum = Field(default=Decimal("0"), ge=0)
     package_count: int | None = Field(default=None, ge=0)
-    gross_weight: float | None = Field(default=None, ge=0)
-    tare_weight: float | None = Field(default=None, ge=0)
-    net_weight: float | None = Field(default=None, ge=0)
-    actual_unit_cost: float | None = Field(default=None, ge=0)  # 实际单价
+    gross_weight: DecimalNum | None = Field(default=None, ge=0)
+    tare_weight: DecimalNum | None = Field(default=None, ge=0)
+    net_weight: DecimalNum | None = Field(default=None, ge=0)
+    actual_unit_cost: DecimalNum | None = Field(default=None, ge=0)  # 实际单价
     quality_ok: bool = True
     acceptance_photos: str | None = Field(default=None, max_length=2000)
     certificates: str | None = Field(default=None, max_length=2000)
@@ -76,8 +77,8 @@ class ConfirmAcceptanceRequest(BaseModel):
 
 
 class PurchaseItemUpdateRequest(BaseModel):
-    actual_qty: float | None = Field(default=None, ge=0, le=1000000)
-    actual_unit_cost: float | None = Field(default=None, ge=0, le=10000000)
+    actual_qty: DecimalNum | None = Field(default=None, ge=0, le=1000000)
+    actual_unit_cost: DecimalNum | None = Field(default=None, ge=0, le=10000000)
     supplier_id: uuid.UUID | None = None
 
 
@@ -89,7 +90,7 @@ class PurchaseItemUpdateRequest(BaseModel):
 class SupplierPaymentRequest(BaseModel):
     supplier_id: uuid.UUID
     payable_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
-    amount: float = Field(gt=0, le=10000000)
+    amount: DecimalNum = Field(gt=0, le=10000000)
     method: Literal["cash", "wechat", "alipay", "bank_transfer"] = "cash"
     note: str | None = Field(default=None, max_length=500)
     idempotency_key: str | None = Field(default=None, max_length=64)
@@ -104,7 +105,7 @@ class PurchaseReturnRequest(BaseModel):
     """退货给供应商。"""
 
     item_id: uuid.UUID
-    return_qty: float = Field(gt=0)
+    return_qty: DecimalNum = Field(gt=0)
     reason: str = Field(min_length=1, max_length=500)
     offset_payable: bool = True  # 是否抵扣应付
 
@@ -117,7 +118,7 @@ class PurchaseReturnRequest(BaseModel):
 class SupplierStatementItem(BaseModel):
     id: str
     direction: str  # purchase / payment / return
-    amount: float
+    amount: DecimalNum
     note: str | None = None
     created_at: str | None = None
 
@@ -125,10 +126,10 @@ class SupplierStatementItem(BaseModel):
 class SupplierStatementData(BaseModel):
     supplier_id: str
     supplier_name: str | None = None
-    total_purchases: float
-    total_payments: float
-    total_returns: float
-    current_balance: float
+    total_purchases: DecimalNum
+    total_payments: DecimalNum
+    total_returns: DecimalNum
+    current_balance: DecimalNum
     items: list[SupplierStatementItem]
 
 
@@ -141,35 +142,35 @@ class PurchaseItemData(BaseModel):
     item_id: str
     product_id: int
     product_name: str
-    recommended_qty: float | None = None
-    actual_qty: float
+    recommended_qty: DecimalNum | None = None
+    actual_qty: DecimalNum
     unit: str
-    estimated_unit_cost: float | None = None
-    actual_unit_cost: float | None = None
-    estimated_cost: float | None = None
-    actual_cost: float | None = None
+    estimated_unit_cost: DecimalNum | None = None
+    actual_unit_cost: DecimalNum | None = None
+    estimated_cost: DecimalNum | None = None
+    actual_cost: DecimalNum | None = None
     deviation_ratio: float | None = None
     status: str
     # 验收字段
-    arrival_qty: float | None = None
-    accepted_qty: float | None = None
-    shortage_qty: float | None = None
-    damaged_qty: float | None = None
-    rejected_qty: float | None = None
-    returned_qty: float | None = None
+    arrival_qty: DecimalNum | None = None
+    accepted_qty: DecimalNum | None = None
+    shortage_qty: DecimalNum | None = None
+    damaged_qty: DecimalNum | None = None
+    rejected_qty: DecimalNum | None = None
+    returned_qty: DecimalNum | None = None
     package_count: int | None = None
-    net_weight: float | None = None
+    net_weight: DecimalNum | None = None
     quality_ok: bool | None = None
 
 
 class PurchaseListData(BaseModel):
     list_id: str
     status: str
-    total_estimated_cost: float
-    total_actual_cost: float | None = None
+    total_estimated_cost: DecimalNum
+    total_actual_cost: DecimalNum | None = None
     item_count: int
     payment_status: str | None = None
-    paid_amount: float | None = None
+    paid_amount: DecimalNum | None = None
     created_at: str | None = None
     confirmed_at: str | None = None
     accepted_at: str | None = None
@@ -179,7 +180,7 @@ class PurchaseListData(BaseModel):
 class PurchaseCreateData(BaseModel):
     list_id: str
     status: str
-    total_estimated_cost: float
+    total_estimated_cost: DecimalNum
     item_count: int
 
 
@@ -187,31 +188,31 @@ class AcceptanceResult(BaseModel):
     list_id: str
     status: str
     items_processed: int
-    total_accepted_qty: float
-    total_shortage: float
-    total_damaged: float
-    total_rejected: float
+    total_accepted_qty: DecimalNum
+    total_shortage: DecimalNum
+    total_damaged: DecimalNum
+    total_rejected: DecimalNum
 
 
 class PurchaseConfirmData(BaseModel):
     list_id: str
     status: str
     confirmed_count: int
-    total_actual_cost: float
+    total_actual_cost: DecimalNum
     records: list[dict]
 
 
 class SupplierPaymentResult(BaseModel):
     payment_id: str
     supplier_id: str
-    amount: float
+    amount: DecimalNum
     method: str
-    new_balance: float
+    new_balance: DecimalNum
 
 
 class PurchaseReturnResult(BaseModel):
     item_id: str
-    return_qty: float
+    return_qty: DecimalNum
     reason: str
     offset_payable: bool
     new_item_status: str

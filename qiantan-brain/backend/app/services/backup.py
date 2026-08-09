@@ -4,9 +4,9 @@ Supports SQLite (file copy) and PostgreSQL (pg_dump) backends.
 Rotates old backups based on retention configuration.
 """
 
+import asyncio
 import logging
 import shutil
-import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -91,33 +91,22 @@ async def _backup_postgres(backup_dir: Path, timestamp: str) -> dict:
 
     dest = backup_dir / f"qiantan-postgres-{timestamp}.sql.gz"
 
+    # pg_dump is a libpq client — it does not understand SQLAlchemy async driver
+    # suffixes like "+asyncpg" or "+psycopg2". Strip them so the URL is plain
+    # postgresql://user:pass@host/db that libpq can parse.
+    db_url = settings.database_url.replace("+asyncpg", "").replace("+psycopg2", "")
+
     try:
-        result = subprocess.run(
-            [
-                "pg_dump",
-                settings.database_url,
-                "--no-owner",
-                "--no-acl",
-                "--compress=9",
-                f"--file={dest}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5-minute timeout for large databases
+        proc = await asyncio.create_subprocess_exec(
+            "pg_dump",
+            db_url,
+            "--no-owner",
+            "--no-acl",
+            "--compress=9",
+            f"--file={dest}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-
-        if result.returncode != 0:
-            logger.error("pg_dump failed: %s", result.stderr)
-            return {"ok": False, "error": result.stderr.strip()}
-
-        file_size = dest.stat().st_size if dest.exists() else 0
-
-        # Rotate old backups
-        _rotate_backups(backup_dir, "qiantan-postgres-", ".sql.gz")
-
-        logger.info("PostgreSQL backup created: %s (%d bytes)", dest, file_size)
-        return {"ok": True, "backend": "postgresql", "file": str(dest), "size_bytes": file_size}
-
     except FileNotFoundError:
         msg = (
             "pg_dump executable not found — install PostgreSQL client tools "
@@ -125,10 +114,29 @@ async def _backup_postgres(backup_dir: Path, timestamp: str) -> dict:
         )
         logger.warning(msg)
         return {"ok": False, "error": msg}
-    except subprocess.TimeoutExpired:
+
+    try:
+        # communicate() without blocking the event loop; cap at 5 minutes.
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
         msg = "pg_dump timed out after 300 seconds"
         logger.error(msg)
         return {"ok": False, "error": msg}
+
+    if proc.returncode != 0:
+        error_output = stderr.decode(errors="replace").strip() if stderr else ""
+        logger.error("pg_dump failed: %s", error_output)
+        return {"ok": False, "error": error_output}
+
+    file_size = dest.stat().st_size if dest.exists() else 0
+
+    # Rotate old backups
+    _rotate_backups(backup_dir, "qiantan-postgres-", ".sql.gz")
+
+    logger.info("PostgreSQL backup created: %s (%d bytes)", dest, file_size)
+    return {"ok": True, "backend": "postgresql", "file": str(dest), "size_bytes": file_size}
 
 
 def _rotate_backups(base_dir: Path, prefix: str, suffix: str) -> None:

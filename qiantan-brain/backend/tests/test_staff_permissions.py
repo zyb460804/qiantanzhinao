@@ -155,3 +155,109 @@ class TestUnauthenticated:
         """Role definitions should be public."""
         res = await client.get("/api/v1/staff/roles")
         assert res.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 员工 PIN 登录（审计 C-6 限流 + H2 compare_digest）
+# ═══════════════════════════════════════════════════════════════════
+
+
+async def _create_staff_with_pin(db_session, role="cashier", pin_code="1234"):
+    """创建带 PIN 的员工，用于 PIN 登录测试。"""
+    async with db_session() as session:
+        s = StaffMember(
+            merchant_id=uuid.UUID(TEST_MERCHANT_ID),
+            name=f"员工-PIN-{role}",
+            role=role,
+            is_active=True,
+            pin_code=pin_code,
+        )
+        session.add(s)
+        await session.commit()
+        await session.refresh(s)
+        return str(s.id)
+
+
+class TestStaffPinLogin:
+    async def test_correct_pin_returns_token(self, client, db_session):
+        """正确 PIN 登录成功，返回带 staff_id 的 token。"""
+        sid = await _create_staff_with_pin(db_session, "cashier", "1234")
+        res = await client.post(
+            "/api/v1/staff/login",
+            json={"staff_id": sid, "pin_code": "1234"},
+        )
+        assert res.status_code == 200, res.text
+        data = res.json()["data"]
+        assert data["role"] == "cashier"
+        assert data["staff_id"] == sid
+        assert "token" in data
+
+    async def test_wrong_pin_returns_401(self, client, db_session):
+        """错误 PIN 返回 401（hmac.compare_digest 常量时间比较，审计 H2）。"""
+        sid = await _create_staff_with_pin(db_session, "cashier", "1234")
+        res = await client.post(
+            "/api/v1/staff/login",
+            json={"staff_id": sid, "pin_code": "9999"},
+        )
+        assert res.status_code == 401
+        assert "PIN" in res.json()["detail"]
+
+    async def test_missing_fields_returns_400(self, client, db_session):
+        """缺 staff_id 或 pin_code → 400。"""
+        res = await client.post(
+            "/api/v1/staff/login",
+            json={"staff_id": str(uuid.uuid4())},
+        )
+        assert res.status_code == 400
+
+    async def test_nonexistent_staff_returns_404(self, client, db_session):
+        """不存在的 staff_id → 404（且记录失败尝试）。"""
+        res = await client.post(
+            "/api/v1/staff/login",
+            json={"staff_id": str(uuid.uuid4()), "pin_code": "1234"},
+        )
+        assert res.status_code == 404
+
+    async def test_pin_login_rate_limited(self, client, db_session):
+        """连续 5 次错误 PIN 后第 6 次触发 429 限流（审计 C-6）。
+
+        MAX_ATTEMPTS=5：前 5 次错误返回 401，第 6 次被 check_rate_limit 拦截 → 429。
+        """
+        sid = await _create_staff_with_pin(db_session, "cashier", "1234")
+        # 前 5 次：错误 PIN → 401
+        for i in range(5):
+            res = await client.post(
+                "/api/v1/staff/login",
+                json={"staff_id": sid, "pin_code": "wrong"},
+            )
+            assert res.status_code == 401, f"attempt {i + 1}: expected 401, got {res.status_code}"
+        # 第 6 次：限流 → 429
+        res = await client.post(
+            "/api/v1/staff/login",
+            json={"staff_id": sid, "pin_code": "wrong"},
+        )
+        assert res.status_code == 429
+        assert "频繁" in res.json()["detail"] or "锁定" in res.json()["detail"]
+
+    async def test_successful_login_clears_rate_limit(self, client, db_session):
+        """登录成功后清除失败计数（后续错误 PIN 不会立即被锁）。"""
+        sid = await _create_staff_with_pin(db_session, "cashier", "1234")
+        # 2 次错误
+        for _ in range(2):
+            await client.post(
+                "/api/v1/staff/login",
+                json={"staff_id": sid, "pin_code": "wrong"},
+            )
+        # 正确 PIN 登录成功 → clear_attempts
+        ok = await client.post(
+            "/api/v1/staff/login",
+            json={"staff_id": sid, "pin_code": "1234"},
+        )
+        assert ok.status_code == 200
+        # 再 2 次错误不应该被限流（计数已清）
+        for _ in range(2):
+            res = await client.post(
+                "/api/v1/staff/login",
+                json={"staff_id": sid, "pin_code": "wrong"},
+            )
+            assert res.status_code == 401

@@ -39,9 +39,36 @@ class Base(DeclarativeBase):
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
+        # RLS: 仅 PostgreSQL 设置租户上下文（SQLite/测试环境跳过）
+        # app.core.rls 的 set_tenant_context 执行 SET app.current_tenant_id，
+        # 这是 PostgreSQL 特性；SQLite（测试环境）不支持会话变量，跳过即可。
+        # 租户隔离在 SQLite 下由应用层 WHERE 过滤保证。
+        dialect_name = ""
+        if session.bind is not None:
+            dialect_name = getattr(session.bind.dialect, "name", "")
+        _rls_active = dialect_name == "postgresql"
+
+        if _rls_active:
+            from app.core.rls import clear_tenant_context, set_tenant_context
+            from app.core.tenant_context import get_current_tenant_id
+
+            tenant_id = get_current_tenant_id()
+            if tenant_id is not None:
+                try:
+                    await set_tenant_context(session, str(tenant_id))
+                except Exception:
+                    # RLS 设置失败不阻断请求（降级到应用层过滤）
+                    logger.debug("RLS set_tenant_context failed", exc_info=True)
         try:
             yield session
         finally:
+            if _rls_active:
+                from app.core.rls import clear_tenant_context
+
+                try:
+                    await clear_tenant_context(session)
+                except Exception:
+                    logger.debug("RLS clear_tenant_context failed", exc_info=True)
             await session.close()
 
 

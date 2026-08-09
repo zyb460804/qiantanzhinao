@@ -43,7 +43,9 @@ class ProductSKU(Base):
     shelf_life_hours: Mapped[int] = mapped_column(sa.Integer, default=72)
     default_sale_price: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))
     is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
 
 
 class ProductAlias(Base):
@@ -115,7 +117,9 @@ class UnitConversion(Base):
     to_unit: Mapped[str] = mapped_column(sa.String(10), nullable=False)
     factor: Mapped[Decimal] = mapped_column(sa.Numeric(12, 4), nullable=False)
     sku_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "from_unit", "to_unit", "sku_id", name="uq_unit_conv"),
     )
@@ -156,7 +160,9 @@ class Supplier(Base):
     total_orders: Mapped[int] = mapped_column(sa.Integer, default=0)  # 累计采购批次数
     is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
     is_blacklisted: Mapped[bool] = mapped_column(sa.Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
 
 
 class SupplierProduct(Base):
@@ -207,4 +213,6 @@ class PriceHistory(Base):
     )  # ai_discount / manual / clear_stock / supplier_cost
     source: Mapped[str] = mapped_column(sa.String(20), default="manual")
     changed_by: Mapped[str | None] = mapped_column(sa.String(50))  # merchant / employee / ai
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )

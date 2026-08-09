@@ -82,13 +82,15 @@ class TestSettlementLock:
         assert res.status_code == 200
         assert res.json()["data"]["status"] == "open"
 
-    async def test_reclose_idempotent(self, client, db_session):
-        """重复关闭日结不应报错（幂等）."""
+    async def test_reclose_rejected(self, client, db_session):
+        """重复关闭日结应被拒绝（H3 安全修复）."""
         await _seed_stock(db_session, quantity=20)
         settle_date = local_now().date().isoformat()
-        await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
+        first = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
+        assert first.status_code == 200
         res = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
-        assert res.status_code == 200
+        assert res.status_code == 409
+        assert "已关闭" in res.json()["detail"]
 
     async def test_past_date_settlement_also_blocks(self, client, db_session):
         """即使是过去的日期，关闭后也应拒绝新订单."""

@@ -116,41 +116,6 @@ Page({
     }
   },
 
-  _cancelCurrentStocktake: function (nextTab) {
-    var self = this;
-    var sessionId = this.data.sessionId;
-    if (!sessionId || this.data.submitting) return;
-    this.setData({ submitting: true });
-    wx.showLoading({ title: '正在取消' });
-    app.request({
-      url: '/inventory/stocktake/' + sessionId + '/cancel',
-      method: 'POST'
-    }).then(function () {
-      self.setData({
-        activeTab: nextTab || 'stocktake',
-        submitting: false,
-        sessionId: null,
-        stocktakeItems: [],
-        submittedMap: {},
-        completed: false,
-        result: null,
-        progressCount: 0,
-        totalVariance: 0,
-        lossAmount: 0,
-        notes: '',
-        progressPercent: 0
-      });
-      // 清理本会话的离线缓存
-      self._clearPendingSubmits(sessionId);
-      wx.showToast({ title: '盘点已取消', icon: 'success' });
-      if (nextTab === 'history') self.loadHistory(false);
-    }).catch(function (err) {
-      self.setData({ submitting: false });
-      wx.showToast({ title: self._errorText(err, '取消盘点失败'), icon: 'none' });
-    }).then(function () {
-      wx.hideLoading();
-    });
-  },
 
   // ── 开始盘点 ─────────────────────────────────────────
 

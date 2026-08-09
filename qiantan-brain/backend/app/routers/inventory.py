@@ -7,7 +7,7 @@ total_variance / total_loss_amount 等）不一致。因路由使用 response_mo
 """
 
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -30,6 +30,7 @@ from app.schemas.common import AnyResponse
 from app.services.batch import create_batch, get_active_batches, rollback_batch_on_void
 from app.services.lifecycle import calc_batch_status
 from app.services.offline_sync import upsert_offline_items
+from app.services.sku_service import resolve_sku_id
 
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
@@ -577,7 +578,11 @@ async def submit_stocktake_item(
 
     actual_qty = req.actual_qty
     book_qty = float(item.book_qty)
-    variance = round(actual_qty - book_qty, 2)
+    variance = float(
+        (Decimal(str(actual_qty)) - Decimal(str(book_qty))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    )
     item.actual_qty = actual_qty
     item.variance = variance
     item.variance_reason = req.variance_reason or req.diff_reason or ""
@@ -590,7 +595,7 @@ async def submit_stocktake_item(
             "item_id": str(item.id),
             "product_id": item.product_id,
             "book_qty": round(book_qty, 2),
-            "actual_qty": actual_qty,
+            "actual_qty": float(actual_qty),
             "variance": variance,
             "unit": item.unit,
         },
@@ -634,7 +639,11 @@ async def submit_stocktake_batch(
             continue
         actual_qty = float(entry.actual_qty)
         book_qty = float(item.book_qty)
-        variance = round(actual_qty - book_qty, 2)
+        variance = float(
+            (Decimal(str(actual_qty)) - Decimal(str(book_qty))).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        )
         item.actual_qty = actual_qty
         item.variance = variance
         item.variance_reason = entry.variance_reason or ""
@@ -741,13 +750,68 @@ async def complete_stocktake(
     total_loss_amount = 0.0
     adjustments = []
 
+    # 修复 F3：批量预加载本会话涉及的商品，避免循环内逐条查 ProductCategory 造成 N+1。
+    product_ids = {item.product_id for item in items}
+    product_map: dict[int, ProductCategory] = {}
+    if product_ids:
+        prod_result = await db.execute(
+            select(ProductCategory).where(ProductCategory.id.in_(product_ids))
+        )
+        product_map = {p.id: p for p in prod_result.scalars().all()}
+
+    # 修复 F1：批量预计算每个商品的加权均价，损耗按成本而非售价估算（与 /current 同口径）。
+    avg_costs: dict[int, float] = {}
+    if product_ids:
+        cost_result = await db.execute(
+            select(
+                InventoryRecord.product_id,
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                InventoryRecord.quantity > 0,
+                                InventoryRecord.unit_cost * InventoryRecord.quantity,
+                            ),
+                            else_=0,
+                        )
+                    )
+                    / func.nullif(
+                        func.sum(
+                            case(
+                                (
+                                    InventoryRecord.quantity > 0,
+                                    InventoryRecord.quantity,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    0,
+                ).label("avg_cost"),
+            )
+            .where(
+                InventoryRecord.product_id.in_(product_ids),
+                InventoryRecord.is_voided == False,  # noqa: E712
+            )
+            .group_by(InventoryRecord.product_id)
+        )
+        for row in cost_result:
+            avg_costs[row.product_id] = round(float(row.avg_cost), 2)
+
     for item in items:
         if item.actual_qty is None:
             raise HTTPException(status_code=409, detail="盘点数据不完整，请重新录入")
         actual_qty = float(item.actual_qty)
         book_qty = float(item.book_qty)
         variance = (
-            float(item.variance) if item.variance is not None else round(actual_qty - book_qty, 2)
+            float(item.variance)
+            if item.variance is not None
+            else float(
+                (Decimal(str(actual_qty)) - Decimal(str(book_qty))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+            )
         )
         if item.variance is None:
             item.variance = variance
@@ -757,14 +821,14 @@ async def complete_stocktake(
         if abs(variance) < 0.01 or item.adjustment_record_id:
             continue
 
-        prod_result = await db.execute(
-            select(ProductCategory).where(ProductCategory.id == item.product_id)
-        )
-        product = prod_result.scalar_one_or_none()
+        product = product_map.get(item.product_id)
         product_name = product.name if product else f"商品{item.product_id}"
+        # 修复 F2：调整记录需解析并填充 sku_id，保证账本与 SKU 体系对齐。
+        sku_id = await resolve_sku_id(db, session.merchant_id, product_id=item.product_id)
         record = InventoryRecord(
             merchant_id=session.merchant_id,
             product_id=item.product_id,
+            sku_id=sku_id,
             quantity=variance,
             unit=item.unit,
             event_type="adjustment",
@@ -780,7 +844,7 @@ async def complete_stocktake(
         item.adjustment_record_id = record.id
 
         if variance < 0:
-            total_loss_amount += abs(variance) * float(product.default_price or 0) if product else 0
+            total_loss_amount += abs(variance) * float(avg_costs.get(item.product_id, 0.0))
         else:
             await create_batch(
                 db,
@@ -790,6 +854,7 @@ async def complete_stocktake(
                 batch_label=f"盘点盘盈-{utc_now().strftime('%m%d%H%M')}",
                 quantity=Decimal(str(variance)),
                 unit_cost=None,
+                sku_id=sku_id,
             )
 
         adjustments.append(

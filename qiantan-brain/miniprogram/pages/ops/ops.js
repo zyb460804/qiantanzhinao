@@ -51,30 +51,33 @@ Page({
   },
 
   loadAll: function () {
-    this.loadWasteReasons();
-    this.loadWasteRecords();
-    this.loadProducts();
-    this.loadClearance();
-    this.loadCustomers();
+    // 返回 Promise，供 onPullDownRefresh 等待全部模块加载完成后再收起刷新动画
     var now = Date.now();
     this._tabLoadAt = this._tabLoadAt || {};
     this._tabLoadAt.waste = now;
     this._tabLoadAt.clearance = now;
     this._tabLoadAt.customers = now;
+    return Promise.all([
+      this.loadWasteReasons(),
+      this.loadWasteRecords(),
+      this.loadProducts(),
+      this.loadClearance(),
+      this.loadCustomers(),
+    ]);
   },
 
   onPullDownRefresh: function () {
-    // 下拉刷新强制清空时间戳并重新加载全部模块。
+    // 下拉刷新强制清空时间戳并重新加载全部模块；等待全部完成后再收起动画。
     this._lastFullLoadAt = 0;
     this._tabLoadAt = {};
-    this.loadAll();
-    wx.stopPullDownRefresh();
+    this.loadAll().then(function () { wx.stopPullDownRefresh(); })
+      .catch(function () { wx.stopPullDownRefresh(); });
   },
 
   // ── 报损 ──
   loadWasteReasons: function () {
     var self = this;
-    app.request({ url: '/ops/waste-reasons' }).then(function (data) {
+    return app.request({ url: '/ops/waste-reasons' }).then(function (data) {
       self.setData({ wasteReasons: data || [] });
     }).catch(function () {
       // fallback 必须与后端 WASTE_REASONS 字典保持一致，否则用户选了
@@ -84,7 +87,7 @@ Page({
   },
   loadProducts: function () {
     var self = this;
-    app.request({ url: '/inventory/current' }).then(function (data) {
+    return app.request({ url: '/inventory/current' }).then(function (data) {
       var products = (data || []).map(function (x) {
         var qty = Number(x.current_qty != null ? x.current_qty : x.total_qty) || 0;
         var normalized = {};
@@ -97,7 +100,7 @@ Page({
   },
   loadWasteRecords: function () {
     var self = this;
-    app.request({ url: '/ops/waste?limit=20' }).then(function (data) {
+    return app.request({ url: '/ops/waste?limit=20' }).then(function (data) {
       self.setData({ wasteRecords: data || [] });
     }).catch(function () { self.setData({ wasteRecords: [] }); wx.showToast({ title: '报损记录加载失败', icon: 'none' }); });
   },
@@ -138,7 +141,7 @@ Page({
   // ── 临期 ──
   loadClearance: function () {
     var self = this;
-    app.request({ url: '/ops/expiry/clearance?within_hours=' + this.data.clearanceHours }).then(function (data) {
+    return app.request({ url: '/ops/expiry/clearance?within_hours=' + this.data.clearanceHours }).then(function (data) {
       self.setData({ clearanceItems: (data && data.items) || [] });
     }).catch(function () { self.setData({ clearanceItems: [] }); wx.showToast({ title: '临期商品加载失败', icon: 'none' }); });
   },
@@ -181,7 +184,7 @@ Page({
   // ── 客户 ──
   loadCustomers: function () {
     var self = this;
-    app.request({ url: '/ops/customers' }).then(function (data) {
+    return app.request({ url: '/ops/customers' }).then(function (data) {
       var list = data || [];
       self.setData({ customers: list, filteredCustomers: list });
     }).catch(function () { self.setData({ customers: [], filteredCustomers: [] }); wx.showToast({ title: '客户账款加载失败', icon: 'none' }); });

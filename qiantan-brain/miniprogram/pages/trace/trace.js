@@ -146,6 +146,8 @@ Page({
   // ── 摊主模式 ──────────────────────────────────
 
   loadBatches: function (callback) {
+    // 重试按钮 bindtap 直接绑定本函数时，event 会被当作 callback 传入，需过滤
+    if (typeof callback !== 'function') callback = null;
     var self = this;
     this.setData({ batchesLoading: true });
     app.request({ url: '/food-safety/batches?limit=30' })

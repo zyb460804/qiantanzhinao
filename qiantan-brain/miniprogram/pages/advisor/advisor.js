@@ -19,7 +19,6 @@ Page({
 
     // AI 可执行动作
     aiActions: [],
-    aiActionsLoading: false,
     aiHistory: [],
   },
 
@@ -47,7 +46,7 @@ Page({
 
   applySkin: function (skin) {
     if (skin !== 'morning' && skin !== 'evening') skin = 'noon';
-    this.setData({ skin: skin });
+    this.setData({ skin: skin, skinLabel: app.getSkinLabel(skin) });
   },
 
   // ── 每日建议 + 主动推送 (数据驱动) ────────
@@ -95,7 +94,6 @@ Page({
         activePush: pushCards,
         pushLoading: false,
         aiActions: aiCards,
-        aiActionsLoading: false,
       });
 
       // 小智开口

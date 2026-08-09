@@ -3,7 +3,7 @@
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +18,11 @@ router = APIRouter(prefix="/api/v1/env", tags=["environment"])
 
 
 @router.get("/today", response_model=AnyResponse)
-async def get_today(city: str = "上海", db: AsyncSession = Depends(get_db)):
+async def get_today(
+    city: str = Query(default="上海", max_length=20),
+    merchant_id: uuid.UUID = Depends(get_merchant_id),
+    db: AsyncSession = Depends(get_db),
+):
     """Get today's environment data.
 
     Checks DB first. If not cached, fetches from QWeather API
@@ -59,8 +63,9 @@ async def get_today(city: str = "上海", db: AsyncSession = Depends(get_db)):
 
 @router.get("/forecast", response_model=AnyResponse)
 async def get_forecast(
-    city: str = "上海",
-    days: int = 3,
+    city: str = Query(default="上海", max_length=20),
+    days: int = Query(default=3, ge=1, le=30),
+    merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Get N-day weather forecast. Persists to DB for offline use."""
@@ -98,8 +103,9 @@ async def get_forecast(
 
 @router.get("/history", response_model=AnyResponse)
 async def get_history(
-    city: str = "上海",
-    days: int = 30,
+    city: str = Query(default="上海", max_length=20),
+    days: int = Query(default=30, ge=1, le=365),
+    merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Get recent environment records from DB."""
@@ -311,11 +317,10 @@ async def get_seasonal_advice(
     today = date.today()
     mmdd = today.strftime("%m%d")
 
-    # Find current solar term
-    current_term = "小暑"
-    for td, name in sorted(SOLAR_TERMS, key=lambda x: x[0]):
-        if td <= mmdd:
-            current_term = name
+    # Resolve the current solar term via the shared lookup so early-January dates
+    # correctly wrap back to the previous year's 冬至 instead of defaulting to 小暑
+    # (a mid-summer term that would surface heat-wave advice in mid-winter).
+    current_term = resolve_solar_term(mmdd)["solar_term"]
 
     products = SEASONAL_PRODUCTS.get(current_term, "西瓜·番茄·黄瓜")
     advice = SEASONAL_ADVICE.get(current_term, DEFAULT_ADVICE)

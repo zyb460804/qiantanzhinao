@@ -127,8 +127,18 @@ class Subscription(Base):
     )
 
     __table_args__ = (
-        # 一个租户同一时间只允许一个有效订阅
-        sa.UniqueConstraint("tenant_id", "status", name="uq_subscription_per_tenant_status"),
+        # 修复（F7）：原 UniqueConstraint(tenant_id, status) 阻止取消后重新订阅
+        # （canceled 行与新 trialing 行 status 不同不冲突，但若同 tenant 已有一个
+        # active 行则不能再有第二个 active）。改为 partial unique index：仅对
+        # trialing/active/past_due 状态的行强制 tenant_id 唯一，canceled/expired
+        # 不受限，支持取消后重新订阅。
+        sa.Index(
+            "uq_one_active_sub",
+            "tenant_id",
+            unique=True,
+            sqlite_where=sa.text("status IN ('trialing', 'active', 'past_due')"),
+            postgresql_where=sa.text("status IN ('trialing', 'active', 'past_due')"),
+        ),
     )
 
 

@@ -6,6 +6,7 @@
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,7 +34,7 @@ class Device(Base):
     last_error: Mapped[str | None] = mapped_column(sa.String(200))
     config: Mapped[str | None] = mapped_column(sa.Text)  # JSON config
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
     __table_args__ = (
@@ -54,7 +55,7 @@ class PriceDisplay(Base):
     sku_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, sa.ForeignKey("product_skus.id"), nullable=False
     )
-    current_price: Mapped[float] = mapped_column(sa.Float, default=0)
+    current_price: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2), default=Decimal("0"))
     price_source: Mapped[str] = mapped_column(
         sa.String(20), default="manual"
     )  # manual/ai_discount/clearance
@@ -64,7 +65,7 @@ class PriceDisplay(Base):
     sync_error: Mapped[str | None] = mapped_column(sa.String(200))
     last_synced: Mapped[datetime | None] = mapped_column(sa.DateTime)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
     __table_args__ = (
@@ -88,7 +89,7 @@ class DeviceFirmware(Base):
     rollout_percentage: Mapped[int] = mapped_column(sa.Integer, default=100)
     min_hardware_version: Mapped[str | None] = mapped_column(sa.String(20))
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
 
@@ -106,7 +107,7 @@ class DeviceModelVersion(Base):
     reported_at: Mapped[datetime] = mapped_column(sa.DateTime, nullable=False)
     metadata_: Mapped[dict | None] = mapped_column(sa.JSON)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
 
@@ -124,5 +125,5 @@ class DeviceRemoteLog(Base):
     source: Mapped[str | None] = mapped_column(sa.String(50))
     device_timestamp: Mapped[datetime | None] = mapped_column(sa.DateTime)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )

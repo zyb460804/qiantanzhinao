@@ -288,7 +288,6 @@ class DynamicPricingEngine:
         for step in sorted(
             self.markdown_steps,
             key=lambda s: s.trigger_hours_remaining,
-            reverse=True,
         ):
             if quality_pct <= step.trigger_hours_remaining:
                 discount = step.discount_pct * tier
@@ -490,7 +489,7 @@ class DynamicPricingEngine:
         floor = ctx.unit_cost / (1.0 - ctx.min_margin)
         # 但也允许赔本出清: 底价至少是成本的50%
         absolute_floor = ctx.unit_cost * 0.5
-        return min(floor, absolute_floor)
+        return max(floor, absolute_floor)
 
     def _urgency(self, quality: float, days_cover: float) -> str:
         """判定紧急程度。"""

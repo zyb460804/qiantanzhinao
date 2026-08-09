@@ -6,6 +6,7 @@ Models 已存在于 catalog.py，本路由提供摊主日常管理所需的全�
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -1006,10 +1007,22 @@ async def add_supplier_product(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 归属校验：供应商和 SKU 必须属于当前商户，防止跨租户串写关联。
+    supplier = await db.get(Supplier, supplier_id)
+    if not supplier or supplier.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="供应商不存在")
+    try:
+        sku_uuid = uuid.UUID(body["sku_id"])
+    except (KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="sku_id 缺失或格式错误") from exc
+    sku = await db.get(ProductSKU, sku_uuid)
+    if not sku or sku.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="SKU不存在")
+
     sp = SupplierProduct(
         merchant_id=merchant.id,
         supplier_id=supplier_id,
-        sku_id=uuid.UUID(body["sku_id"]),
+        sku_id=sku_uuid,
         last_price=Decimal(str(body["last_price"])) if body.get("last_price") else None,
         min_order_qty=Decimal(str(body["min_order_qty"])) if body.get("min_order_qty") else None,
     )
@@ -1110,7 +1123,7 @@ async def recalculate_supplier_score(
       (100 - shortage×0.25 - return×0.25 - quality×0.35 - late×0.15)
     - total_orders: count of distinct purchase lists
     """
-    from app.models.purchase import PurchaseItem
+    from app.models.purchase import PurchaseItem, PurchaseList
 
     supplier = await db.get(Supplier, supplier_id)
     if not supplier or supplier.merchant_id != merchant.id:
@@ -1140,6 +1153,13 @@ async def recalculate_supplier_score(
     # Count distinct purchase lists
     list_ids = set(item.list_id for item in items if item.list_id)
 
+    # 修复 F5：批量预加载相关采购单的预计到货时间，用于判定是否迟到。
+    expected_by_list: dict[uuid.UUID, datetime | None] = {}
+    if list_ids:
+        list_result = await db.execute(select(PurchaseList).where(PurchaseList.id.in_(list_ids)))
+        for pl in list_result.scalars().all():
+            expected_by_list[pl.id] = pl.expected_arrival_date
+
     total_expected = Decimal("0")
     total_shortage = Decimal("0")
     total_returned = Decimal("0")
@@ -1165,11 +1185,12 @@ async def recalculate_supplier_score(
             accepted_count += 1
             if item.quality_ok:
                 quality_ok_count += 1
-        # Late delivery: simplified heuristic (arrival > expected lead time)
-        if item.accepted_at and item.status == "accepted":
-            # This is simplified; real implementation would compare
-            # PurchaseList.expected_arrival vs actual acceptance date
-            pass
+            # 修复 F5：以 item.accepted_at vs plist.expected_arrival_date 判定迟到。
+            # 仅当采购单设置了预计到货时间且实际验收晚于该时间才计入迟到；
+            # 未设预计到货时间的单据不参与迟到率计算（不谎报 100%）。
+            expected_arrival = expected_by_list.get(item.list_id) if item.list_id else None
+            if expected_arrival is not None and item.accepted_at > expected_arrival:
+                late_count += 1
 
     # Calculate rates (0-100)
     shortage_rate = (total_shortage / total_expected * 100) if total_expected > 0 else Decimal("0")

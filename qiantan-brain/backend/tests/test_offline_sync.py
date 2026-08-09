@@ -107,6 +107,16 @@ async def test_offline_sync_endpoint_commits_and_is_idempotent(client, db_sessio
     payload = {
         "items": [
             {
+                "idempotency_key": "offline-integration-seed-001",
+                "event_type": "purchase",
+                "product_name": "白菜",
+                "quantity": 10,
+                "unit": "斤",
+                "unit_cost": 1.0,
+                "total_amount": 10,
+                "source": "offline",
+            },
+            {
                 "idempotency_key": "offline-integration-001",
                 "event_type": "sale",
                 "product_name": "白菜",
@@ -115,12 +125,12 @@ async def test_offline_sync_endpoint_commits_and_is_idempotent(client, db_sessio
                 "unit_price": 3.5,
                 "total_amount": 7,
                 "source": "offline",
-            }
+            },
         ]
     }
     first = await client.post("/api/v1/inventory/offline-sync", json=payload)
     assert first.status_code == 200
-    assert first.json()["data"]["created"] == 1
+    assert first.json()["data"]["created"] == 2
 
     async with db_session() as session:
         rows = (
@@ -138,7 +148,7 @@ async def test_offline_sync_endpoint_commits_and_is_idempotent(client, db_sessio
 
     retry = await client.post("/api/v1/inventory/offline-sync", json=payload)
     assert retry.status_code == 200
-    assert retry.json()["data"]["duplicate"] == 1
+    assert retry.json()["data"]["duplicate"] == 2
 
     async with db_session() as session:
         rows = (
@@ -166,6 +176,16 @@ async def test_same_idempotency_key_is_allowed_for_different_merchants(client, d
     payload = {
         "items": [
             {
+                "idempotency_key": "offline-shared-seed-001",
+                "event_type": "purchase",
+                "product_name": "白菜",
+                "quantity": 5,
+                "unit": "斤",
+                "unit_cost": 1.0,
+                "total_amount": 5,
+                "source": "offline",
+            },
+            {
                 "idempotency_key": shared_key,
                 "event_type": "sale",
                 "product_name": "白菜",
@@ -174,7 +194,7 @@ async def test_same_idempotency_key_is_allowed_for_different_merchants(client, d
                 "unit_price": 3.5,
                 "total_amount": 3.5,
                 "source": "offline",
-            }
+            },
         ]
     }
     first = await client.post("/api/v1/inventory/offline-sync", json=payload)
@@ -186,9 +206,9 @@ async def test_same_idempotency_key_is_allowed_for_different_merchants(client, d
     )
 
     assert first.status_code == 200
-    assert first.json()["data"]["created"] == 1
+    assert first.json()["data"]["created"] == 2
     assert second.status_code == 200
-    assert second.json()["data"]["created"] == 1
+    assert second.json()["data"]["created"] == 2
 
     async with db_session() as session:
         rows = (

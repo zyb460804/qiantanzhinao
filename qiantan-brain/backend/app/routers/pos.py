@@ -580,15 +580,18 @@ async def pay_sale_order(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    await _check_settlement_locked(db, merchant.id)
     order = await db.scalar(
-        select(SaleOrder).where(
+        select(SaleOrder)
+        .where(
             SaleOrder.id == order_id,
             SaleOrder.merchant_id == merchant.id,
         )
+        .with_for_update()
     )
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
-    if order.status in {"cancelled", "refunded", "partial_refund"}:
+    if order.status in {"cancelled", "refunded", "partial_refund", "held"}:
         raise HTTPException(status_code=409, detail="当前订单状态不可收款")
 
     if body.transaction_id:
@@ -789,11 +792,14 @@ async def refund_order(
     _perm=Depends(require_permission("order_refund")),
 ):
     """Refund an entire order or specific items. Generates reverse ledger entries."""
+    await _check_settlement_locked(db, merchant.id)
     order = await db.scalar(
-        select(SaleOrder).where(
+        select(SaleOrder)
+        .where(
             SaleOrder.id == order_id,
             SaleOrder.merchant_id == merchant.id,
         )
+        .with_for_update()
     )
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -981,6 +987,7 @@ async def hold_order(
     db: AsyncSession = Depends(get_db),
 ):
     """Hold (park) an order for later checkout. No payment or inventory deduction yet."""
+    await _check_settlement_locked(db, merchant.id)
     order = SaleOrder(
         merchant_id=merchant.id,
         order_no=_generate_order_no(),
@@ -1067,11 +1074,14 @@ async def resume_held_order(
       - discount_amount: float (updated discount)
       - note: str
     """
+    await _check_settlement_locked(db, merchant.id)
     order = await db.scalar(
-        select(SaleOrder).where(
+        select(SaleOrder)
+        .where(
             SaleOrder.id == order_id,
             SaleOrder.merchant_id == merchant.id,
         )
+        .with_for_update()
     )
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -1415,6 +1425,8 @@ async def _settlement_numbers(
     payments = cash + wechat + alipay + card
 
     # 采购付款（当日 supplier payments）
+    # F4: 排除退货抵扣（note 以"退货抵扣"开头）——这些是虚拟流水，把退货
+    # 当作冲减应付处理，商户并未实际付出现金，不应计入 net_cash_flow。
     from app.models.accounts import SupplierPayable
 
     purchase_paid_row = await db.execute(
@@ -1423,6 +1435,7 @@ async def _settlement_numbers(
             SupplierPayable.direction == "payment",
             SupplierPayable.created_at >= day_start,
             SupplierPayable.created_at <= day_end,
+            SupplierPayable.note.notlike("退货抵扣%"),
         )
     )
     purchase_paid = _decimal_value(purchase_paid_row.scalar())
@@ -1439,6 +1452,8 @@ async def _settlement_numbers(
     purchase_new_debt = _decimal_value(purchase_new_debt_row.scalar())
 
     # 客户回款
+    # F4: 排除退款对冲（note 以"退款"开头）——退款时赊账反向冲减应收，
+    # 但客户并未实际回款现金，不应计入 net_cash_flow。
     from app.models.accounts import CustomerReceivable
 
     customer_repay_row = await db.execute(
@@ -1447,6 +1462,7 @@ async def _settlement_numbers(
             CustomerReceivable.direction == "repay",
             CustomerReceivable.created_at >= day_start,
             CustomerReceivable.created_at <= day_end,
+            CustomerReceivable.note.notlike("退款%"),
         )
     )
     customer_repay = _decimal_value(customer_repay_row.scalar())
@@ -1494,6 +1510,8 @@ async def close_daily_settlement(
     db: AsyncSession = Depends(get_db),
     _perm=Depends(require_permission("daily_settle")),
 ):
+    if settle_date > local_now().date():
+        raise HTTPException(status_code=400, detail="不可关闭未来日期的日结")
     numbers = await _settlement_numbers(db, merchant.id, settle_date)
     settlement = await db.scalar(
         select(DailySettlement).where(
@@ -1501,6 +1519,8 @@ async def close_daily_settlement(
             DailySettlement.date == settle_date,
         )
     )
+    if settlement and settlement.status == "closed":
+        raise HTTPException(status_code=409, detail="该日结已关闭，不可重复关闭")
     if settlement is None:
         settlement = DailySettlement(merchant_id=merchant.id, date=settle_date)
         db.add(settlement)

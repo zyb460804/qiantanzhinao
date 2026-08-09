@@ -94,21 +94,32 @@ def _apply_privacy(insight: dict, value_keys: list, sensitivity: float = 1.0) ->
 async def get_weather_impact_rules(
     db: AsyncSession,
     product_name: str | None = None,
+    city: str | None = None,
 ) -> list[dict]:
     """Aggregate weather impact patterns across all merchants.
 
     Returns insights like:
     "气温 >30°C 时, 西瓜销量平均 +32% (基于 12 家商户数据)"
+
+    ``city`` scopes the join to a single city so that inventory sales are only
+    correlated with environment records from the same city. Defaults to the
+    project's default city (``上海``) to avoid cross-city row multiplication
+    when multiple cities share the same date.
     """
     # This is a statistical query that correlates sales with temperature
     # For MVP, we return predefined rules from config.
     # In production, this runs on real aggregated data.
 
+    resolved_city = city or getattr(settings, "default_city", "上海")
+
     # Attempt to compute from actual data
     try:
         thirty_days_ago = local_days_ago(30)
 
-        # Join inventory with environment to correlate
+        # Join inventory with environment to correlate.
+        # The join includes BOTH date AND city so that a sale on 2026-01-15 in
+        # 上海 only matches the 上海 environment row (not the 北京 one for the
+        # same date), preventing duplicate-row inflation in the aggregates.
         corr_query = (
             select(
                 ProductCategory.name,
@@ -127,7 +138,8 @@ async def get_weather_impact_rules(
             .join(ProductCategory, InventoryRecord.product_id == ProductCategory.id)
             .join(
                 EnvironmentRecord,
-                func.date(InventoryRecord.event_time) == EnvironmentRecord.date,
+                (func.date(InventoryRecord.event_time) == EnvironmentRecord.date)
+                & (EnvironmentRecord.city == resolved_city),
             )
             .where(
                 InventoryRecord.event_type == "sale",

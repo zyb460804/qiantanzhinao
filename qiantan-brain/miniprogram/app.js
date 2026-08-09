@@ -446,6 +446,12 @@ App({
   getSkinByHour: function (h) { return h < 11 ? 'morning' : h < 17 ? 'noon' : 'evening'; },
   resolveSkin: function () { return this.globalData.skinManual || this.getSkinByHour(new Date().getHours()); },
 
+  /** 皮肤中文标签（早市/午市/晚市），供各页 hero eyebrow 统一展示。 */
+  getSkinLabel: function (skin) {
+    var labels = { morning: '早市', noon: '午市', evening: '晚市' };
+    return labels[skin || this.resolveSkin()] || '';
+  },
+
   /**
    * 设置手动皮肤（早市/午市/晚市），同时持久化与写入 globalData，
    * 保证 styleguide / index / profile 任何入口切换后全局一致。

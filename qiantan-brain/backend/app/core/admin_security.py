@@ -170,7 +170,15 @@ async def revoke_admin_token(
     jti: str,
     expires_at: datetime | int | float | None = None,
 ) -> None:
-    """幂等吊销管理员令牌（仅 add，由调用方统一 commit）。"""
+    """幂等吊销管理员令牌。
+
+    修复（F3）：参照 core/security.py 的 revoke_token，内部 commit + 捕获
+    IntegrityError → rollback 幂等返回。AuthRevokedToken.jti 是 primary key，
+    并发场景（如重放 logout）两次 INSERT 同 jti → IntegrityError → 500。
+    与 revoke_token 行为对齐。
+    """
+    from sqlalchemy.exc import IntegrityError
+
     from app.models.auth import AuthRevokedToken
 
     if await _is_admin_token_revoked(db, jti):
@@ -180,3 +188,8 @@ async def revoke_admin_token(
     if isinstance(expires_at, datetime) and expires_at.tzinfo is not None:
         expires_at = expires_at.astimezone(UTC).replace(tzinfo=None)
     db.add(AuthRevokedToken(jti=jti, expires_at=expires_at))
+    try:
+        await db.commit()
+    except IntegrityError:
+        # jti 已存在（并发吊销/重放 logout），吊销语义已达成，幂等返回
+        await db.rollback()

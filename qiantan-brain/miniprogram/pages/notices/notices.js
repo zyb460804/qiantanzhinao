@@ -30,6 +30,8 @@ Page({
    *    5 个市场，避免极端情况下请求扇出过大。
    */
   loadNotices: function (callback) {
+    // 重试按钮 bindtap 直接绑定本函数时，event 会被当作 callback 传入，需过滤
+    if (typeof callback !== 'function') callback = null;
     var self = this;
     this.setData({ loading: true, loadError: false });
 

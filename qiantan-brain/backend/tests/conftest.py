@@ -97,6 +97,10 @@ async def _override_get_current_merchant(
     """测试依赖覆盖：默认返回 TEST 商户；带 X-Test-Merchant-Id 头时返回对应商户。
 
     用于多租户隔离测试。未播种的商户自动创建，使隔离测试无需手动建表。
+
+    测试角色模拟：带 X-Test-Token-Role 头时，把对应角色注入 merchant._token_role，
+    模拟生产链路中 get_current_merchant 从 JWT claim 写入的 _token_role。
+    用于 market_admin 等依赖 _token_role 做权限判断的路由测试。
     """
     raw = request.headers.get("X-Test-Merchant-Id") or TEST_MERCHANT_ID
     mid = uuid.UUID(raw)
@@ -106,12 +110,24 @@ async def _override_get_current_merchant(
         db.add(merchant)
         await db.commit()
         await db.refresh(merchant)
+    # 测试角色模拟：注入 _token_role，与生产 get_current_merchant 行为对齐
+    test_role = request.headers.get("X-Test-Token-Role")
+    if test_role:
+        setattr(merchant, "_token_role", test_role)
+    else:
+        # 与生产默认行为一致：无 token 时 _token_role 默认 "owner"
+        setattr(merchant, "_token_role", "owner")
     return merchant
 
 
 @pytest_asyncio.fixture(scope="function")
 async def client(db_session):
     """Async HTTP client with DB dependency overridden to test database."""
+
+    # 重置限流后端，防止跨测试状态污染（staff_login 等限流路径）
+    from app.core import rate_limiter as _rl
+
+    _rl._backend = None
 
     async def override_get_db():
         async with db_session() as session:
@@ -136,6 +152,11 @@ async def auth_client(db_session):
 
     用于鉴权路由本身的测试（登录/刷新/登出/越权隔离）。
     """
+
+    # 重置限流后端，防止跨测试状态污染
+    from app.core import rate_limiter as _rl
+
+    _rl._backend = None
 
     async def override_get_db():
         async with db_session() as session:

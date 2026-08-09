@@ -48,7 +48,7 @@ class StocktakeItem(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, sa.ForeignKey("stocktake_sessions.id"), nullable=False
+        sa.Uuid, sa.ForeignKey("stocktake_sessions.id", ondelete="CASCADE"), nullable=False
     )
     merchant_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, sa.ForeignKey("merchants.id"), nullable=False
@@ -65,4 +65,6 @@ class StocktakeItem(Base):
     # Possible cause: natural_loss / unrecorded_sale / weighing_error / theft / unknown
     variance_reason: Mapped[str | None] = mapped_column(sa.String(50))
     adjustment_record_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )

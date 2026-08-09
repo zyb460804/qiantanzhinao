@@ -24,6 +24,17 @@ class PurchaseList(Base):
     """
 
     __tablename__ = "purchase_lists"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "status IN ('draft','confirmed','partial_arrival','accepted',"
+            "'stored','completed','cancelled','returned')",
+            name="ck_purchase_list_status",
+        ),
+        sa.CheckConstraint(
+            "payment_status IN ('unpaid','partial','credit','paid')",
+            name="ck_purchase_list_payment_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(
@@ -40,7 +51,9 @@ class PurchaseList(Base):
     # 付款状态: unpaid / partial / credit / paid
     payment_status: Mapped[str] = mapped_column(sa.String(20), default="unpaid")
     paid_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
     confirmed_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
     purchased_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
     accepted_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
@@ -55,7 +68,7 @@ class PurchaseItem(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     list_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, sa.ForeignKey("purchase_lists.id"), nullable=False
+        sa.Uuid, sa.ForeignKey("purchase_lists.id", ondelete="CASCADE"), nullable=False
     )
     merchant_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, sa.ForeignKey("merchants.id"), nullable=False
@@ -100,6 +113,8 @@ class PurchaseItem(Base):
     acceptance_notes: Mapped[str | None] = mapped_column(sa.Text)  # 验收备注
     # Inventory record generated on confirm (idempotency)
     inventory_record_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
     purchased_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
     accepted_at: Mapped[datetime | None] = mapped_column(sa.DateTime)

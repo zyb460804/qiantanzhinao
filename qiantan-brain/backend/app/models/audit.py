@@ -31,4 +31,6 @@ class AuditLog(Base):
     reason: Mapped[str | None] = mapped_column(sa.String(500))
     operator: Mapped[str] = mapped_column(sa.String(50), default="merchant")
     request_id: Mapped[str | None] = mapped_column(sa.String(64))  # §5.14: 请求追踪
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )

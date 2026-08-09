@@ -110,10 +110,9 @@ Page({
       self.setData({ suppliers: items.map(function (s) {
         return { supplier_id: s.supplier_id, supplier_name: s.name, balance: s.current_balance || 0 };
       }) });
-    }).catch(function (err) {
+    }).catch(function () {
       // 供应商列表失败不弹 toast（次要数据），但在打开付款/选择弹窗时
       // 若列表为空会触发空态提示，用户感知到失败后可重试。
-      console.warn('loadSuppliers failed', err);
     });
   },
 

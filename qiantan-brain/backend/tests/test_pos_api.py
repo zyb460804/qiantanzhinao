@@ -156,8 +156,8 @@ async def test_daily_settlement_breaks_down_payment_channels_and_recloses(client
     settle_date = local_now().date().isoformat()
     first = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
     second = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
-    assert first.status_code == 200 and second.status_code == 200
-    data = second.json()["data"]
+    assert first.status_code == 200
+    data = first.json()["data"]
     assert data["order_count"] == 2
     assert data["total_sales"] == 14.0
     assert data["cash_amount"] == 7.0
@@ -165,11 +165,13 @@ async def test_daily_settlement_breaks_down_payment_channels_and_recloses(client
     assert data["estimated_cogs"] == 8.0
     assert data["estimated_gross_profit"] == 6.0
     assert data["diff_amount"] == 0.0
+    # F2: 重复关闭应被拒绝
+    assert second.status_code == 409
 
 
 @pytest.mark.asyncio
 async def test_daily_settlement_without_business_data_returns_decimal_zeroes(client):
-    settle_date = (utc_now().date() + timedelta(days=30)).isoformat()
+    settle_date = (utc_now().date() - timedelta(days=30)).isoformat()
     response = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
     assert response.status_code == 200
     data = response.json()["data"]

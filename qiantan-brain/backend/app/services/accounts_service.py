@@ -429,15 +429,15 @@ async def get_supplier_statement(
     items = []
     total_purchases = Decimal("0")
     total_payments = Decimal("0")
-    total_returns = Decimal("0")
 
     for row in rows:
         if row.direction == "purchase":
             total_purchases += row.amount
         elif row.direction == "payment":
             total_payments += row.amount
-        elif row.direction == "return":
-            total_returns += row.amount
+        # SupplierPayable 仅用 purchase/payment 两种方向（见 models/accounts.py）；
+        # 退货抵扣记为 direction="payment" + note 以"退货抵扣"开头，已被 total_payments
+        # 覆盖。此处不再统计 direction=="return"——该分支恒不命中。
 
         settled_amount = row.settled_amount or Decimal("0")
         remaining_amount = max(row.amount - settled_amount, Decimal("0"))
@@ -455,14 +455,16 @@ async def get_supplier_statement(
             }
         )
 
-    current_balance = total_purchases - total_payments - total_returns
+    current_balance = total_purchases - total_payments
 
     return {
         "supplier_id": str(supplier_id),
         "supplier_name": supplier_name,
         "total_purchases": float(total_purchases),
         "total_payments": float(total_payments),
-        "total_returns": float(total_returns),
+        # SupplierPayable 不产生 direction="return" 流水（退货抵扣已计入 payment），
+        # 保留字段为 0 以维持 API 契约稳定。
+        "total_returns": 0.0,
         "current_balance": float(current_balance),
         "items": items,
     }

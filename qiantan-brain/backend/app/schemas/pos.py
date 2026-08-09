@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, DecimalNum
 
 
 PaymentMethod = Literal["cash", "wechat", "alipay", "card", "credit"]
@@ -22,14 +23,14 @@ class PaymentItem(BaseModel):
     """单笔支付项 — 组合支付时一笔订单可拆成多笔。"""
 
     method: PaymentMethod
-    amount: float = Field(gt=0, le=1000000)
+    amount: DecimalNum = Field(gt=0, le=1000000)
 
 
 class CreateSaleOrderItem(BaseModel):
     product_id: int
     sku_id: uuid.UUID | None = None
-    quantity: float = Field(gt=0, le=100000)
-    unit_price: float | None = Field(default=None, gt=0)
+    quantity: DecimalNum = Field(gt=0, le=100000)
+    unit_price: DecimalNum | None = Field(default=None, gt=0)
     unit: str = Field(default="斤", min_length=1, max_length=20)
 
 
@@ -39,7 +40,7 @@ class CreateSaleOrderRequest(BaseModel):
     payments: list[PaymentItem] | None = Field(
         default=None, max_length=10
     )  # 新：组合支付（优先于 payment_method）
-    discount_amount: float = Field(default=0, ge=0)
+    discount_amount: DecimalNum = Field(default=Decimal("0"), ge=0)
     customer_name: str | None = Field(default=None, max_length=100)
     client_id: str | None = Field(default=None, min_length=8, max_length=64)
     note: str | None = Field(default=None, max_length=500)
@@ -56,7 +57,7 @@ class CreateSaleOrderRequest(BaseModel):
 
 
 class PaySaleOrderRequest(BaseModel):
-    amount: float = Field(gt=0)
+    amount: DecimalNum = Field(gt=0)
     method: Literal["cash", "wechat", "alipay", "card"] = "cash"
     payments: list[PaymentItem] | None = Field(
         default=None, max_length=10
@@ -74,7 +75,7 @@ class RefundItemRequest(BaseModel):
     """单品退款行。不传 items 则整单退款。"""
 
     item_id: uuid.UUID
-    quantity: float = Field(gt=0)  # 退款数量，不能超过原购买量
+    quantity: DecimalNum = Field(gt=0)  # 退款数量，不能超过原购买量
     return_to_stock: bool = True  # 是否退回可售库存
 
 
@@ -87,17 +88,17 @@ class RefundOrderRequest(BaseModel):
 class RefundResultItem(BaseModel):
     item_id: str
     product_name: str
-    original_qty: float
-    refund_qty: float
-    refund_amount: float
+    original_qty: DecimalNum
+    refund_qty: DecimalNum
+    refund_amount: DecimalNum
     returned_to_stock: bool
 
 
 class RefundResult(BaseModel):
     order_id: str
     order_no: str
-    refunded_amount: float
-    remaining_amount: float
+    refunded_amount: DecimalNum
+    remaining_amount: DecimalNum
     new_status: str
     items: list[RefundResultItem]
 
@@ -109,7 +110,7 @@ class RefundResult(BaseModel):
 
 class HoldOrderRequest(BaseModel):
     items: list[CreateSaleOrderItem] = Field(min_length=1, max_length=100)
-    discount_amount: float = Field(default=0, ge=0)
+    discount_amount: DecimalNum = Field(default=Decimal("0"), ge=0)
     customer_name: str | None = Field(default=None, max_length=100)
     client_id: str | None = Field(default=None, min_length=8, max_length=64)
     note: str | None = Field(default=None, max_length=500)
@@ -119,7 +120,7 @@ class ResumeHeldOrderRequest(BaseModel):
     payment_method: PaymentMethod = "cash"
     payments: list[PaymentItem] | None = Field(default=None, max_length=10)
     customer_name: str | None = Field(default=None, max_length=100)
-    discount_amount: float | None = Field(default=None, ge=0)
+    discount_amount: DecimalNum | None = Field(default=None, ge=0)
     note: str | None = Field(default=None, max_length=500)
 
 
@@ -127,7 +128,7 @@ class HeldOrderSummary(BaseModel):
     order_id: str
     order_no: str
     item_count: int
-    total_amount: float
+    total_amount: DecimalNum
     customer_name: str | None = None
     held_at: str | None = None
 
@@ -140,18 +141,18 @@ class HeldOrderSummary(BaseModel):
 class SaleOrderItemData(BaseModel):
     product_id: int
     product_name: str
-    quantity: float
-    unit_price: float
-    line_total: float
+    quantity: DecimalNum
+    unit_price: DecimalNum
+    line_total: DecimalNum
 
 
 class SaleOrderData(BaseModel):
     order_id: str
     order_no: str
     status: str
-    total_amount: float
-    paid_amount: float
-    refunded_amount: float | None = None
+    total_amount: DecimalNum
+    paid_amount: DecimalNum
+    refunded_amount: DecimalNum | None = None
     item_count: int
     items: list[dict] | None = None
     created_at: str | None = None
@@ -160,7 +161,7 @@ class SaleOrderData(BaseModel):
 class PaymentData(BaseModel):
     payment_id: str
     order_id: str
-    amount: float
+    amount: DecimalNum
     method: str
     paid_at: str | None = None
 
@@ -169,9 +170,9 @@ class DailySettlementData(BaseModel):
     settle_date: str
     status: str
     total_orders: int
-    total_revenue: float
-    total_cost: float
-    gross_profit: float
+    total_revenue: DecimalNum
+    total_cost: DecimalNum
+    gross_profit: DecimalNum
     payments: list[dict] | None = None
     reconciliation: dict | None = None
 
@@ -180,7 +181,7 @@ class OrderListItem(BaseModel):
     id: str
     order_no: str
     status: str
-    total_amount: float
+    total_amount: DecimalNum
     created_at: str | None = None
 
 

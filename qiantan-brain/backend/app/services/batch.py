@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.timezone import utc_now
 from app.models.batch import BATCH_TRANSITIONS, BatchLifecycle
 from app.models.inventory import InventoryRecord
+from app.models.product import ProductCategory
 from app.services.lifecycle import get_product_lifecycle
 
 
@@ -139,6 +140,28 @@ async def recall_batch(
     if "recalled" not in valid_targets:
         raise ValueError(f"当前状态 {batch.status} 不允许召回")
     batch.status = "recalled"
+    # Mark remaining stock as frozen so the ledger reflects the recall.
+    # destroy_batch later writes the final waste record; this is the freeze audit trail.
+    if batch.remaining_qty > 0:
+        product = await db.get(ProductCategory, batch.product_id)
+        unit = product.unit if product else "斤"
+        db.add(
+            InventoryRecord(
+                merchant_id=merchant_id,
+                product_id=batch.product_id,
+                sku_id=batch.sku_id,
+                quantity=-batch.remaining_qty,
+                unit=unit,
+                unit_cost=batch.unit_cost,
+                total_amount=(batch.remaining_qty * (batch.unit_cost or Decimal("0"))),
+                event_type="recall",
+                event_time=utc_now(),
+                source="food_safety",
+                batch_label=batch.batch_label,
+                notes=f"召回冻结: {reason}",
+                idempotency_key=f"recall:{batch_id}",
+            )
+        )
     return batch
 
 
@@ -160,13 +183,15 @@ async def destroy_batch(
     batch.destroyed_reason = reason
     # Record as waste in inventory
     if batch.remaining_qty > 0:
+        product = await db.get(ProductCategory, batch.product_id)
+        unit = product.unit if product else "斤"
         db.add(
             InventoryRecord(
                 merchant_id=merchant_id,
                 product_id=batch.product_id,
                 sku_id=batch.sku_id,
                 quantity=-batch.remaining_qty,
-                unit="斤",
+                unit=unit,
                 unit_cost=batch.unit_cost,
                 total_amount=(batch.remaining_qty * (batch.unit_cost or Decimal("0"))),
                 event_type="waste",
@@ -288,14 +313,27 @@ async def consume_batches_fifo_costed(
     filters = [
         BatchLifecycle.merchant_id == merchant_id,
         BatchLifecycle.remaining_qty > 0,
-        BatchLifecycle.status.not_in(("spoiled", "locked", "recalled", "destroyed", "removed")),
+        # Food-safety whitelist: only sellable / near_expiry batches may be consumed.
+        # Expired, locked, recalled, destroyed, removed, wasted, returned, pending_acceptance
+        # are all excluded — this is the food safety red line.
+        BatchLifecycle.status.in_(("sellable", "near_expiry")),
     ]
     if sku_id is not None:
         filters.append(BatchLifecycle.sku_id == sku_id)
     else:
         filters.append(BatchLifecycle.product_id == product_id)
 
-    query = select(BatchLifecycle).where(*filters).order_by(BatchLifecycle.purchase_date.asc())
+    # FEFO (First-Expiry-First-Out): earliest expiry wins, NULL expiry last.
+    # with_for_update() acquires row-level locks on PostgreSQL (SQLite ignores it silently).
+    query = (
+        select(BatchLifecycle)
+        .where(*filters)
+        .order_by(
+            BatchLifecycle.expiry_date.asc().nullslast(),
+            BatchLifecycle.purchase_date.asc(),
+        )
+        .with_for_update()
+    )
     result = await db.execute(query)
     batches = result.scalars().all()
 
@@ -388,7 +426,9 @@ async def rollback_batch_on_void(
             .where(
                 BatchLifecycle.merchant_id == merchant_id,
                 BatchLifecycle.product_id == product_id,
-                BatchLifecycle.status != "spoiled",
+                BatchLifecycle.status.not_in(
+                    ("wasted", "destroyed", "removed", "recalled", "returned")
+                ),
             )
             .order_by(BatchLifecycle.purchase_date.desc())  # newest first (reverse FIFO)
         )
@@ -435,7 +475,7 @@ async def return_to_batches(
 
     filters = [
         BatchLifecycle.merchant_id == merchant_id,
-        BatchLifecycle.status != "spoiled",
+        BatchLifecycle.status.not_in(("wasted", "destroyed", "removed", "recalled", "returned")),
         # Only target batches that had consumption (remaining < purchase)
         BatchLifecycle.remaining_qty < BatchLifecycle.purchase_qty,
     ]
@@ -463,15 +503,30 @@ async def return_to_batches(
         returned += add
 
     if to_return > 0:
+        # Surplus: returned qty exceeds total consumed across all batches.
+        # Create a new sellable batch so the excess doesn't vanish from the ledger.
+        product = await db.get(ProductCategory, product_id)
+        product_name = product.name if product else f"product-{product_id}"
+        await create_batch(
+            db,
+            merchant_id=merchant_id,
+            product_id=product_id,
+            product_name=product_name,
+            batch_label=f"return-surplus-{utc_now().strftime('%Y%m%d%H%M%S')}",
+            quantity=to_return,
+            sku_id=sku_id,
+        )
         logger.info(
             "Batch return exceeded consumption for merchant=%s product=%s sku=%s: "
-            "returned=%s remainder=%s (creates overage)",
+            "returned=%s surplus_batch=%s",
             merchant_id,
             product_id,
             sku_id,
             returned,
             to_return,
         )
+        returned += to_return
+        to_return = Decimal("0")
 
     return returned.quantize(Decimal("0.01"))
 
@@ -486,7 +541,9 @@ async def get_active_batches(
         .where(
             BatchLifecycle.merchant_id == merchant_id,
             BatchLifecycle.remaining_qty > 0,
-            BatchLifecycle.status != "spoiled",
+            BatchLifecycle.status.not_in(
+                ("wasted", "destroyed", "removed", "recalled", "returned")
+            ),
         )
         .order_by(BatchLifecycle.expiry_date.asc())
     )
@@ -507,7 +564,7 @@ async def count_expiring_batches(
         BatchLifecycle.remaining_qty > 0,
         BatchLifecycle.expiry_date.isnot(None),
         BatchLifecycle.expiry_date <= threshold,
-        BatchLifecycle.status != "spoiled",
+        BatchLifecycle.status.not_in(("wasted", "destroyed", "removed", "recalled", "returned")),
     )
     result = await db.execute(query)
     return int(result.scalar() or 0)

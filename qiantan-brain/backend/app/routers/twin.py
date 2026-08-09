@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models.catalog import ProductSKU
 from app.models.environment import EnvironmentRecord
 from app.models.inventory import InventoryRecord
+from app.models.merchant import Merchant
 from app.models.product import ProductCategory
 from app.schemas.common import AnyResponse
 from app.services.batch import count_expiring_batches, get_active_batches
@@ -310,8 +311,17 @@ async def get_risk_mirror(
     """Risk radar chart data — all 6 dimensions calculated from real data."""
     today = date.today()
 
-    # Environment risk from today's weather
-    env_query = select(EnvironmentRecord).where(EnvironmentRecord.date == today)
+    # Resolve merchant city from preferences (default "上海") so the weather
+    # risk reflects the right city instead of picking an arbitrary env row.
+    merchant_result = await db.execute(select(Merchant).where(Merchant.id == merchant_id))
+    merchant = merchant_result.scalar_one_or_none()
+    city = (merchant.preferences or {}).get("merchant_city", "上海") if merchant else "上海"
+
+    # Environment risk from today's weather for the merchant's city
+    env_query = select(EnvironmentRecord).where(
+        EnvironmentRecord.date == today,
+        EnvironmentRecord.city == city,
+    )
     env_result = await db.execute(env_query)
     env_row = env_result.scalar_one_or_none()
 

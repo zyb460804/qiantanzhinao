@@ -57,6 +57,13 @@ def simulate_what_if(
     Returns:
         Dict with simulation output and comparison.
     """
+    # Normalize Decimal inputs (from schema layer) to float for internal arithmetic
+    purchase_qty = float(purchase_qty)
+    unit_cost = float(unit_cost)
+    unit_price = float(unit_price)
+    if avg_historical_price is not None:
+        avg_historical_price = float(avg_historical_price)
+
     product_info = _get_product_info(product_name)
 
     # Step 2: Price elasticity adjustment
@@ -82,9 +89,12 @@ def simulate_what_if(
     # Step 4: Profit calculation
     revenue = est_sales * unit_price
     cost = purchase_qty * unit_cost
-    waste_loss = waste_qty * unit_cost * 0.5
+    # Unsold stock is a full-cost loss: the cash was already spent on inventory
+    # that cannot be recovered at full price once it perishes.
+    waste_loss = waste_qty * unit_cost
     net_profit = revenue - cost - waste_loss
-    margin_rate = round(net_profit / cost, 4) if cost > 0 else 0.0
+    # margin_rate is a true gross-margin (profit / revenue), not ROI on cost.
+    margin_rate = round(net_profit / revenue, 4) if revenue > 0 else 0.0
     waste_rate = round(waste_qty / purchase_qty, 2) if purchase_qty > 0 else 0.0
 
     output = {
@@ -103,9 +113,7 @@ def simulate_what_if(
     baseline_est_sales = min(estimated_sales_base * sales_mult, baseline_qty)
     baseline_waste = max(0, baseline_qty - baseline_est_sales) * waste_prob
     baseline_profit = (
-        baseline_est_sales * unit_price
-        - baseline_qty * unit_cost
-        - baseline_waste * unit_cost * 0.5
+        baseline_est_sales * unit_price - baseline_qty * unit_cost - baseline_waste * unit_cost
     )
 
     improvement = round(net_profit - baseline_profit, 2)

@@ -19,6 +19,7 @@ from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
 from app.models.product import ProductCategory
 from app.models.voice import VoiceLog
+from app.routers.staff import require_permission
 from app.schemas.voice import (
     VoiceConfirmRequest,
     VoiceConfirmResponse,
@@ -46,6 +47,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/voice", tags=["voice"])
 
 _RULES_DIR = Path(__file__).parent.parent / "rules"
+
+# 修复 C-9：音频上传大小/类型上限（参照 vision.py 的 _MAX_IMAGE_SIZE 模式）。
+_MAX_AUDIO_SIZE = 25 * 1024 * 1024
+_AUDIO_EXT_WHITELIST = {".wav", ".mp3", ".m4a", ".amr", ".aac", ".ogg", ".opus"}
 
 
 def _load_product_names() -> list[str]:
@@ -85,7 +90,14 @@ async def upload_voice(
     audio_dir.mkdir(parents=True, exist_ok=True)
 
     audio_bytes = await audio.read()
+    # 修复 C-9：校验大小 / 扩展名 / content-type，参照 vision.py 的防护模式。
+    if len(audio_bytes) > _MAX_AUDIO_SIZE:
+        raise HTTPException(413, "音频文件不能超过25MB")
     ext = Path(audio.filename or "").suffix.lower() or ".wav"
+    if ext not in _AUDIO_EXT_WHITELIST:
+        raise HTTPException(400, f"不支持的音频格式: {ext}")
+    if audio.content_type and not audio.content_type.startswith("audio/"):
+        raise HTTPException(400, "仅支持音频文件")
     saved_name = f"{uuid.uuid4()}{ext}"
     saved_path = audio_dir / saved_name
     saved_path.write_bytes(audio_bytes)
@@ -254,13 +266,16 @@ async def correct_voice(
         raise HTTPException(status_code=404, detail="Voice log not found")
 
     if log.parsed_event:
-        log.parsed_event.update(body.corrections)
+        # 修复 C-1：corrections 已是强类型 VoiceCorrection，白名单字段 + 范围约束。
+        # 只取非 None 字段 update 进 parsed_event，杜绝任意键注入。
+        updates = body.corrections.model_dump(exclude_none=True)
+        log.parsed_event.update(updates)
         log.parsed_event["missing_fields"] = []
         log.parsed_event["confidence"] = 1.0
 
         # Re-lookup product_id if product name was corrected
-        if "product" in body.corrections:
-            pid = await _lookup_product(db, body.corrections["product"])
+        if "product" in updates:
+            pid = await _lookup_product(db, updates["product"])
             log.parsed_event["product_id"] = pid
 
     log.status = "parsed"
@@ -312,6 +327,11 @@ async def confirm_voice(
             },
         }
     event_type = parsed.get("event_type", "purchase")
+    # 修复 C-1：白名单校验 event_type。非 sale/waste/purchase 直接 400，
+    # 防止注入任意类型时 else 分支（record_qty=qty 不取 abs）落负库存。
+    ALLOWED_EVENT_TYPES = ("purchase", "sale", "waste")
+    if event_type not in ALLOWED_EVENT_TYPES:
+        raise HTTPException(400, f"不支持的事件类型: {event_type}")
     product_name = parsed.get("product") or "未知商品"
 
     # Resolve product_id: use cached value from parsing, or look up fresh
@@ -381,9 +401,21 @@ async def confirm_voice(
             unit_cost=unit_cost,
         )
     elif event_type in ("sale", "waste"):
+        requested_qty = Decimal(str(abs(qty)))
         consumed_from_batches = await consume_batches_fifo(
-            db, log.merchant_id, product_id, Decimal(str(abs(qty)))
+            db, log.merchant_id, product_id, requested_qty
         )
+        # F3: reject instead of silently under-consuming — otherwise the
+        # InventoryRecord (already db.add-ed above) would book a sale/waste
+        # that FIFO could not fulfil, driving stock negative.
+        if consumed_from_batches < requested_qty:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"库存不足，需要{float(requested_qty)}{parsed.get('unit', '斤')}，"
+                    f"可用{float(consumed_from_batches)}"
+                ),
+            )
 
     # P1-D: 语音记账触发的往来账流水。
     # 解析到交易对手 & 赊账/回款关键词时，分别落客户应收或供应商付款。
@@ -442,6 +474,7 @@ async def void_voice_record(
     body: VoiceVoidRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("void_record")),
 ):
     """Void a confirmed voice record — rolls back inventory and batches.
 
@@ -521,6 +554,7 @@ async def edit_confirmed_record(
     body: VoiceEditRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("void_record")),
 ):
     """Edit a confirmed record: void old + create corrected record (full audit trail).
 

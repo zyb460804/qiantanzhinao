@@ -92,8 +92,13 @@ async def create_market(
       1. 新增 platform_admin / market_admin 角色与登录链路
       2. 通过 OAuth/邀请码校验后才能创建市场
     """
-    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
-        raise HTTPException(status_code=403, detail="仅平台管理员可创建市场")
+    # 修复（审计 C-3）：角色从 token claim 读取（_token_role），不再依赖 DB 列。
+    # wechat_login 硬编码 role="owner"，原 getattr(merchant, "role", ...) 对所有
+    # 微信登录用户恒为 "owner" → 等价于无权限校验。摊主不是市场管理员，故将
+    # "owner" 从允许角色中移除。
+    role = getattr(merchant, "_token_role", None) or "owner"
+    if role not in ("market_admin", "tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅市场/租户管理员可操作")
     m = Market(name=body["name"], address=body.get("address"), contact=body.get("contact"))
     db.add(m)
     await db.commit()
@@ -139,11 +144,24 @@ async def register_merchant(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    # 仅 owner/tenant_admin 可登记商户入场（审计 P0-1：原实现任意商户可塞任意商户进任意市场）
-    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
-        raise HTTPException(status_code=403, detail="仅管理员可登记商户入场")
+    # 修复（审计 C-3）：角色从 token claim 读取，owner 不在允许列表中。
+    role = getattr(merchant, "_token_role", None) or "owner"
+    if role not in ("market_admin", "tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅市场/租户管理员可操作")
     market_id = uuid.UUID(body["market_id"])
     await _require_market_member(db, merchant.id, market_id)
+    # 修复（审计 C-10）：跨租户保护 — 目标商户必须与操作者同租户。
+    # 原实现允许 market_admin 把任意租户的商户塞进自己市场，破坏 SaaS 行级隔离。
+    target = await db.get(Merchant, uuid.UUID(body["merchant_id"]))
+    if target is None:
+        raise HTTPException(status_code=404, detail="目标商户不存在")
+    # 修复（F4 双 None 误判）：原 `!=` 比较在双方 tenant_id 均为 None 时返回 False
+    # （None == None 为 True），校验通过。存量数据 tenant_id 可为 None，破坏隔离。
+    # 改为 fail-closed：任一方为 None 即拒绝。
+    merchant_tid = getattr(merchant, "tenant_id", None)
+    target_tid = getattr(target, "tenant_id", None)
+    if merchant_tid is None or target_tid is None or merchant_tid != target_tid:
+        raise HTTPException(status_code=403, detail="跨租户操作禁止")
     mm = MarketMerchant(
         market_id=uuid.UUID(body["market_id"]),
         merchant_id=uuid.UUID(body["merchant_id"]),
@@ -349,10 +367,10 @@ async def create_notice(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    # 仅 owner/tenant_admin 可发布公告，且须属于该市场
-    # （审计 P0-1：原实现任意商户可向任意市场发布公告）
-    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
-        raise HTTPException(status_code=403, detail="仅管理员可发布公告")
+    # 修复（审计 C-3）：角色从 token claim 读取，owner 不在允许列表中。
+    role = getattr(merchant, "_token_role", None) or "owner"
+    if role not in ("market_admin", "tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅市场/租户管理员可操作")
     market_id = uuid.UUID(body["market_id"])
     await _require_market_member(db, merchant.id, market_id)
     n = MarketNotice(

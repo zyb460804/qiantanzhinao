@@ -18,9 +18,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.device_auth import DeviceAuth
-from app.core.security import get_merchant_id
+from app.core.security import get_current_merchant
 from app.database import get_db
 from app.models.edge_event import EdgeEvent
+from app.models.merchant import Merchant
 from app.schemas.edge import EdgeIngestResponse
 
 
@@ -134,7 +135,7 @@ async def _persist_ingest(
 @router.post("/ingest", response_model=EdgeIngestResponse)
 async def ingest_edge_record(
     request: Request,
-    merchant_id: uuid.UUID = Depends(get_merchant_id),
+    merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
     body: dict = Body(...),
 ):
@@ -143,7 +144,13 @@ async def ingest_edge_record(
 
     适用于小程序触发的数据上报或开发调试场景。
     """
-    return await _persist_ingest(db, body, merchant_id, allow_generated_event_id=True)
+    return await _persist_ingest(
+        db,
+        body,
+        merchant.id,
+        tenant_id=getattr(merchant, "tenant_id", None),
+        allow_generated_event_id=True,
+    )
 
 
 @router.post("/ingest/device", response_model=EdgeIngestResponse)

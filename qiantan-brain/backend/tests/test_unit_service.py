@@ -1,5 +1,7 @@
 """单位换算服务测试 — 验证账本口径统一逻辑（不依赖数据库）。"""
 
+from decimal import Decimal
+
 import pytest
 
 from app.services.unit_service import convert, is_package_unit
@@ -13,9 +15,11 @@ def fake_lookup(merchant_id, from_unit, to_unit, sku_id=None):
 
 
 def test_weight_to_weight_builtin():
-    assert convert(2, "公斤", "斤") == 4.0
-    assert convert(100, "克", "斤") == pytest.approx(0.2)
-    assert convert(1, "斤", "斤") == 1.0
+    # convert 返回 Decimal（对齐 Numeric(12,4)），与 float/int 经 == 比较时
+    # Python 自动归一化，无需 approx。
+    assert convert(2, "公斤", "斤") == Decimal("4")
+    assert convert(100, "克", "斤") == Decimal("0.2")
+    assert convert(1, "斤", "斤") == Decimal("1")
 
 
 def test_package_requires_lookup():

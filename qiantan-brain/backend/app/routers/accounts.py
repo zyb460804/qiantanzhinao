@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant
@@ -17,6 +17,7 @@ from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.catalog import Supplier
 from app.models.merchant import Merchant
+from app.routers.staff import require_permission
 from app.schemas.accounts import (
     CustomerBalanceDetail,
     CustomerBalanceDetailResponse,
@@ -30,6 +31,7 @@ from app.schemas.accounts import (
     SupplierBalanceRow,
 )
 from app.schemas.common import AnyResponse
+from app.schemas.purchase import SupplierPaymentRequest
 from app.services.accounts_service import (
     get_customer_balance,
     get_supplier_balance,
@@ -121,20 +123,19 @@ async def customer_balance_detail(
 
 @router.post("/supplier-payment", response_model=AnyResponse)
 async def pay_supplier(
-    body: dict = Body(...),
+    body: SupplierPaymentRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("supplier_payment")),
 ):
     """Record a payment to a supplier, reducing the outstanding payable."""
-    supplier_id = uuid.UUID(body["supplier_id"])
-    amount = Decimal(str(body["amount"]))
-    method = body.get("method", "cash")
-    note = body.get("note")
-    idempotency_key = body.get("idempotency_key")
-    try:
-        payable_ids = [uuid.UUID(value) for value in body.get("payable_ids", [])]
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="应付账款ID格式错误") from exc
+    supplier_id = body.supplier_id
+    # schemas/purchase.py 的 amount 是 float（le=10000000），服务层需要 Decimal
+    amount = Decimal(str(body.amount))
+    method = body.method
+    note = body.note
+    idempotency_key = body.idempotency_key
+    payable_ids = body.payable_ids or []
     if not payable_ids:
         raise HTTPException(status_code=400, detail="付款必须选择应付账款")
 

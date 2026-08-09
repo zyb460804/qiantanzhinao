@@ -29,6 +29,11 @@ class SaleOrder(Base):
     __tablename__ = "sale_orders"
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "client_id", name="uq_sale_order_client_per_merchant"),
+        sa.CheckConstraint(
+            "status IN ('pending','paid','credit','partial',"
+            "'held','cancelled','partial_refund','refunded')",
+            name="ck_sale_order_status",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
@@ -54,7 +59,9 @@ class SaleOrder(Base):
     # --- 退款（P0: POS 退款/退货）---
     refund_reason: Mapped[str | None] = mapped_column(sa.String(500))
     refunded_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
     paid_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
 
 
@@ -65,7 +72,7 @@ class SaleOrderItem(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     order_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, sa.ForeignKey("sale_orders.id"), nullable=False
+        sa.Uuid, sa.ForeignKey("sale_orders.id", ondelete="CASCADE"), nullable=False
     )
     merchant_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, sa.ForeignKey("merchants.id"), nullable=False
@@ -82,19 +89,33 @@ class SaleOrderItem(Base):
     # --- 退款追踪（P0: POS 退款/退货）---
     refund_quantity: Mapped[Decimal] = mapped_column(sa.Numeric(10, 2), default=Decimal("0"))
     return_to_stock: Mapped[bool] = mapped_column(sa.Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
 
 
 class Payment(Base):
     """支付流水。"""
 
     __tablename__ = "payments"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "method IN ('cash','wechat','alipay','card','credit')",
+            name="ck_payment_method",
+        ),
+        sa.CheckConstraint(
+            "status IN ('success','failed','refunded')",
+            name="ck_payment_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, sa.ForeignKey("merchants.id"), nullable=False
     )
-    order_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, sa.ForeignKey("sale_orders.id"))
+    order_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid, sa.ForeignKey("sale_orders.id", ondelete="CASCADE")
+    )
     amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), nullable=False)
     method: Mapped[str] = mapped_column(
         sa.String(20), nullable=False
@@ -104,7 +125,9 @@ class Payment(Base):
     )  # success / failed / refunded
     transaction_id: Mapped[str | None] = mapped_column(sa.String(64), unique=True)
     note: Mapped[str | None] = mapped_column(sa.Text)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
 
 
 class DailySettlement(Base):
@@ -127,7 +150,9 @@ class DailySettlement(Base):
     # 差异 = 销售总额 - 实收总额（赊账单独列）
     diff_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     status: Mapped[str] = mapped_column(sa.String(20), default="open")  # open / closed
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
     closed_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
 
     __table_args__ = (sa.UniqueConstraint("merchant_id", "date", name="uq_settlement_per_day"),)
@@ -151,6 +176,8 @@ class Reconciliation(Base):
         sa.String(20), default="pending"
     )  # pending / balanced / exception
     note: Mapped[str | None] = mapped_column(sa.Text)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
 
     __table_args__ = (sa.UniqueConstraint("merchant_id", "date", name="uq_reconciliation_per_day"),)

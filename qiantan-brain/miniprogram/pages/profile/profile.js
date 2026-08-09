@@ -85,7 +85,7 @@ Page({
   },
 
   // ── 员工身份切换（权限体系）──────────────────────────────
-  _ROLE_LABELS: { owner: '老板', manager: '店长', cashier: '收银员', market_admin: '市场管理员' },
+  _ROLE_LABELS: { owner: '老板', manager: '店长', cashier: '收银员', market_admin: '市场管理' },
 
   _syncStaffMode: function () {
     var staff = app.globalData.currentStaff;

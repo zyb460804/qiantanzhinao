@@ -20,6 +20,7 @@ from app.models.audit import AuditLog
 from app.models.catalog import PriceHistory, ProductSKU
 from app.models.merchant import Merchant
 from app.models.purchase import PurchaseItem, PurchaseList
+from app.schemas.ai_action import GenerateActionsRequest
 from app.schemas.common import AnyResponse
 
 
@@ -246,7 +247,10 @@ async def execute_action(
 
         action.status = "executed"
         action.result = result_data
-        action.executed_by = body.get("executed_by", "merchant")
+        # 身份只来自可信凭证（token）：不再从 body 读取 executed_by，
+        # 防止客户端伪造操作人。staff_id 在 get_current_merchant 中由 JWT 注入。
+        staff_id = getattr(merchant, "_token_staff_id", None)
+        action.executed_by = str(staff_id) if staff_id else "merchant"
         action.executed_at = utc_now()
 
         db.add(
@@ -284,22 +288,23 @@ async def execute_action(
 
 @router.post("/generate", response_model=AnyResponse)
 async def generate_actions(
-    body: dict,
+    body: GenerateActionsRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate AI actions from analysis (called by the advice engine).
 
-    Body: {actions: [{action_type, title, payload}]}
+    Body: {actions: [{action_type, title, payload}]} — 强类型校验，
+    action_type 仅允许 price/purchase/clearance/lock_batch，title 长度 1-100，
+    单次最多 20 条。
     """
-    actions_data = body.get("actions", [])
     created = []
-    for a in actions_data:
+    for a in body.actions:
         action = AIAction(
             merchant_id=merchant.id,
-            action_type=a["action_type"],
-            title=a["title"],
-            payload=a.get("payload"),
+            action_type=a.action_type,
+            title=a.title,
+            payload=a.payload,
         )
         db.add(action)
         created.append(action)

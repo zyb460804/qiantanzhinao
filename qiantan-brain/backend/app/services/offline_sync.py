@@ -188,13 +188,19 @@ async def upsert_offline_item(
     elif event_type in ("sale", "waste"):
         qty = Decimal(str(abs(item.quantity))) if item.quantity else Decimal("0")
         if qty > 0:
-            await consume_batches_fifo_costed(
+            # F3: validate FIFO can cover the full quantity. On shortage, raise
+            # so the caller's begin_nested() savepoint rolls back the already-
+            # flushed InventoryRecord and the item is dead-lettered — the rest
+            # of the batch continues uninterrupted.
+            consumption = await consume_batches_fifo_costed(
                 db,
                 merchant_id,
                 product_id,
                 qty,
                 sku_id=sku_id,
             )
+            if consumption["quantity"] < qty:
+                raise ValueError(f"库存不足，需要{qty}，可用{consumption['quantity']}")
 
     return {
         "idempotency_key": item.idempotency_key,

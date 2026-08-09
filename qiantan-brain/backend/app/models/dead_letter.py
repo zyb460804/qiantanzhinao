@@ -32,6 +32,6 @@ class DeadLetterEvent(Base):
     status: Mapped[str] = mapped_column(sa.String(20), default="pending")
     # pending / retrying / permanent_failure / resolved
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
     resolved_at: Mapped[datetime | None] = mapped_column(sa.DateTime)

@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Literal, TypedDict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -474,7 +474,7 @@ async def weekly_report(
 @router.get("/trends", response_model=AnyResponse)
 async def trends_report(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
-    days: int = 7,
+    days: int = Query(default=7, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
 ):
     """Revenue and profit trends over N days."""
@@ -544,7 +544,7 @@ async def trends_report(
 @router.get("/product-ranking", response_model=AnyResponse)
 async def product_ranking(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
-    days: int = 7,
+    days: int = Query(default=7, ge=1, le=365),
     metric: str = "revenue",
     db: AsyncSession = Depends(get_db),
 ):
@@ -661,6 +661,30 @@ async def monthly_report(
     if prev_revenue > 0:
         revenue_change = round((month_revenue - prev_revenue) / prev_revenue * 100, 1)
 
+    # Pre-compute average purchase cost per product for daily COGS estimation.
+    # Uses 60-day window to match the aggregate _estimate_cogs cutoff above.
+    sale_products = {r.product_id for r in month_records if r.event_type == "sale"}
+    avg_costs = {}
+    if sale_products:
+        cutoff = local_days_ago(60)
+        cost_query = (
+            select(
+                InventoryRecord.product_id,
+                func.avg(InventoryRecord.unit_cost).label("avg_cost"),
+            )
+            .where(
+                InventoryRecord.merchant_id == merchant_id,
+                InventoryRecord.is_voided == False,  # noqa: E712
+                InventoryRecord.event_type == "purchase",
+                InventoryRecord.unit_cost.isnot(None),
+                InventoryRecord.product_id.in_(sale_products),
+                InventoryRecord.event_time >= cutoff,
+            )
+            .group_by(InventoryRecord.product_id)
+        )
+        cost_result = await db.execute(cost_query)
+        avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
+
     # Daily trends
     daily_trends = []
     for i in range(days):
@@ -674,9 +698,14 @@ async def monthly_report(
         day_cost = sum(
             float(r.total_amount or 0) for r in day_records if r.event_type == "purchase"
         )
+        # Per-day COGS: prefer actual FIFO unit_cost, fall back to 60-day avg.
+        # Matches _estimate_cogs semantics so daily gross profit is real, not zero.
         day_cogs = sum(
-            abs(float(r.quantity)) * 0 for r in day_sale_records
-        )  # COGS approximated at aggregate level
+            abs(float(r.quantity)) * float(r.unit_cost)
+            if r.unit_cost is not None
+            else abs(float(r.quantity)) * avg_costs.get(r.product_id, 0)
+            for r in day_sale_records
+        )
         # 客单价 = 当日营业额 / 当日销售笔数(与 /reports/trends 口径保持一致)
         day_sale_count = len(day_sale_records)
         day_customer_price = round(day_revenue / day_sale_count, 2) if day_sale_count > 0 else 0

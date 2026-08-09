@@ -32,7 +32,7 @@ class Expense(Base):
     payment_method: Mapped[str | None] = mapped_column(sa.String(20))  # cash/wechat/bank_transfer
     invoice_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
 
@@ -56,7 +56,7 @@ class Invoice(Base):
     file_url: Mapped[str | None] = mapped_column(sa.String(500))
     notes: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
     __table_args__ = (

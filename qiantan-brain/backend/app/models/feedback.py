@@ -1,7 +1,7 @@
 """Merchant feedback model."""
 
 import uuid as _uuid
-from datetime import date as _date
+from datetime import datetime
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
@@ -25,4 +25,4 @@ class MerchantFeedback(Base):
     content: Mapped[str] = mapped_column(sa.Text, nullable=False)
     page: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     app_version: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
-    created_at: Mapped[_date] = mapped_column(sa.Date, nullable=False, default=_date.today)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime, nullable=False, default=datetime.now)

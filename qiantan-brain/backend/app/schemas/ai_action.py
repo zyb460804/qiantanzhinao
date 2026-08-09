@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ApiResponse, PaginatedResponse
 
@@ -33,6 +35,20 @@ class ExecuteActionRequest(BaseModel):
     status: str = "executed"  # executed / failed / rejected
     result: dict | None = None
     executed_by: str = "merchant"
+
+
+class ActionInput(BaseModel):
+    """单个 AI 动作的强类型入参 —— 取代 generate_actions 端点的裸 dict。"""
+
+    action_type: Literal["price", "purchase", "clearance", "lock_batch"]
+    title: str = Field(min_length=1, max_length=100)
+    payload: dict | None = Field(default=None)
+
+
+class GenerateActionsRequest(BaseModel):
+    """批量生成 AI 动作的请求信封。"""
+
+    actions: list[ActionInput] = Field(default_factory=list, max_length=20)
 
 
 # ── 响应信封类型别名 ──────────────────────────────────────

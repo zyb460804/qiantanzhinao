@@ -21,7 +21,6 @@ Page({
     result: null,
 
     // ECharts
-    ecReady: false,
     chartInstance: null,
     skinClass: '',
   },
@@ -32,7 +31,6 @@ Page({
   },
 
   onReady: function () {
-    this.setData({ ecReady: true });
     if (this.data.result) this.renderChart();
   },
 

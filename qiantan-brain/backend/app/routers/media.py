@@ -59,6 +59,16 @@ MIME_WHITELIST: dict[str, set[str]] = {
 
 MAX_FILE_SIZE_MB = 20  # Max per-file size
 
+# Allowed file extensions per media type (defense-in-depth with MIME check).
+# Extension comes from the client filename, so this is a first-line filter;
+# the MIME whitelist below is a second check (although Content-Type is also
+# client-controlled, both layers together raise the bar).
+_EXT_WHITELIST: dict[str, set[str]] = {
+    "image": {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"},
+    "audio": {".mp3", ".m4a", ".wav", ".aac", ".ogg", ".amr"},
+    "document": {".pdf", ".jpg", ".jpeg", ".png"},
+}
+
 
 @router.post("/upload", response_model=AnyResponse)
 async def upload_media(
@@ -98,7 +108,16 @@ async def upload_media(
                 },
             }
 
-    # 2. Validate MIME
+    # 2. Validate extension (first-line filter; ext comes from client filename)
+    ext = (os.path.splitext(file.filename or "file")[1] or "").lower()
+    allowed_exts = _EXT_WHITELIST.get(media_type, set())
+    if allowed_exts and ext not in allowed_exts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"禁止的文件扩展名: {ext or '(无)'}",
+        )
+
+    # 3. Validate MIME (defense-in-depth; Content-Type is also client-controlled)
     mime = (
         file.content_type
         or mimetypes.guess_type(file.filename or "")[0]
@@ -111,37 +130,43 @@ async def upload_media(
             detail=f"不支持的文件类型: {mime}。允许的类型: {', '.join(sorted(allowed_mimes))}",
         )
 
-    # 3. Validate size (read into memory with cap)
-    contents = await file.read()
-    if len(contents) > MAX_FILE_SIZE_MB * 1024 * 1024:
-        raise HTTPException(status_code=400, detail=f"文件大小不能超过 {MAX_FILE_SIZE_MB}MB")
+    # 4. Validate size with chunked read (prevents OOM from oversized payloads)
+    max_size = MAX_FILE_SIZE_MB * 1024 * 1024
+    contents = bytearray()
+    while chunk := await file.read(64 * 1024):
+        if len(contents) + len(chunk) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"文件大小不能超过 {MAX_FILE_SIZE_MB}MB",
+            )
+        contents.extend(chunk)
+    contents = bytes(contents)
 
-    # 4. Generate UUID-based filename
-    ext = os.path.splitext(file.filename or "file")[1] or ".bin"
-    stored_name = f"{uuid.uuid4()}{ext}"
+    # 5. Generate UUID-based filename (ext already validated above; default to .bin)
+    stored_name = f"{uuid.uuid4()}{ext or '.bin'}"
 
-    # 5. Write to upload dir (dev-local; production should use object storage)
+    # 6. Write to upload dir (dev-local; production should use object storage)
     upload_dir = os.path.join(settings.upload_dir, merchant.id.hex)
     os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, stored_name)
     with open(file_path, "wb") as f:
         f.write(contents)
 
-    # 6. Parse business payload
+    # 7. Parse business payload
     payload: dict[str, Any] = {}
     try:
         payload = _json.loads(business_payload) if business_payload else {}
     except _json.JSONDecodeError:
         pass
 
-    # 7. Determine retention (certificates keep longer)
+    # 8. Determine retention (certificates keep longer)
     retention_days = None
     if business_type in ("purchase_cert", "quality_cert", "inspection_cert"):
         retention_days = 365 * 2  # 2 years for compliance docs
     elif business_type in ("waste_photo", "stocktake_photo"):
         retention_days = 90
 
-    # 8. Save record
+    # 9. Save record
     record = MediaFile(
         merchant_id=merchant.id,
         original_name=file.filename or "unknown",

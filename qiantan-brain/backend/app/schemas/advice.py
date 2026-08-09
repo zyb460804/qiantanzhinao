@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, DecimalNum
 
 
 class BasisItem(BaseModel):
@@ -19,7 +19,7 @@ class DailyAdviceItem(BaseModel):
     suggestion: str
     basis: list[BasisItem] = []
     risk_warning: str | None = None
-    recommended_qty: float | None = None
+    recommended_qty: DecimalNum | None = None
     confidence: float | None = None
 
 
@@ -28,19 +28,19 @@ class DailyAdviceResponse(BaseModel):
     generated_at: str
 
 
+class ScenarioInput(BaseModel):
+    purchase_qty: DecimalNum
+    unit_cost: DecimalNum
+    unit_price: DecimalNum
+    product_name: str | None = None
+    estimated_sales_base: DecimalNum | None = None
+    avg_historical_price: DecimalNum | None = None
+
+
 class WhatIfRequest(BaseModel):
     product_id: int
-    scenario: dict  # {"purchase_qty": 50, "unit_cost": 0.3, "unit_price": 1.5}
+    scenario: ScenarioInput  # 强类型校验：取代原先的裸 dict
     # merchant_id 由 get_merchant_id 依赖注入（token），不在 body 中传递
-
-
-class ScenarioInput(BaseModel):
-    purchase_qty: float
-    unit_cost: float
-    unit_price: float
-    product_name: str | None = None
-    estimated_sales_base: float | None = None
-    avg_historical_price: float | None = None
 
 
 class ScenarioBatchRequest(BaseModel):
@@ -50,12 +50,12 @@ class ScenarioBatchRequest(BaseModel):
 
 
 class SimulationOutput(BaseModel):
-    estimated_sales: float
-    estimated_revenue: float
-    total_cost: float
-    waste_qty: float
-    waste_loss: float
-    net_profit: float
+    estimated_sales: DecimalNum
+    estimated_revenue: DecimalNum
+    total_cost: DecimalNum
+    waste_qty: DecimalNum
+    waste_loss: DecimalNum
+    net_profit: DecimalNum
     margin_rate: float
     waste_rate: float
 
@@ -68,8 +68,8 @@ class ScenarioResponse(BaseModel):
 
 
 class SimulationComparison(BaseModel):
-    baseline_net_profit: float
-    improvement: float
+    baseline_net_profit: DecimalNum
+    improvement: DecimalNum
     recommendation: str
 
 
@@ -82,7 +82,7 @@ class WhatIfResponse(BaseModel):
 class AdviceFeedbackRequest(BaseModel):
     recommendation_id: UUID
     was_adopted: bool
-    actual_qty: float | None = None
+    actual_qty: DecimalNum | None = None
 
 
 # ── 响应信封 ─────────────────────────────────────────────

@@ -6,12 +6,18 @@
 - require_permission 依赖：路由级权限执行
 """
 
+import hmac
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.rate_limiter import (
+    check_rate_limit,
+    clear_attempts,
+    record_failed_attempt,
+)
 from app.core.security import create_access_token, get_current_merchant
 from app.database import get_db
 from app.models.merchant import Merchant
@@ -78,6 +84,10 @@ def require_permission(permission: str):
                 if staff and staff.merchant_id == merchant.id and staff.is_active:
                     role = staff.role
                     staff_id = sid
+                else:
+                    # 修复（F1）：token 携带 staff_id 但员工已停用/不存在/不属于此商户 → 拒绝。
+                    # 原实现仅不进入 if 分支，role 仍保持 token 中的角色，权限残留。
+                    raise HTTPException(status_code=403, detail="员工账号已停用或不存在")
             except (ValueError, TypeError):
                 pass
 
@@ -129,6 +139,7 @@ async def list_roles():
 @router.post("/login", response_model=AnyResponse)
 async def staff_login(
     body: dict,
+    request: Request,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -137,6 +148,17 @@ async def staff_login(
     商户（owner）已登录状态下，员工输入 PIN 切换身份。前端拿到 staff token
     后替换 owner token，后续请求的 require_permission 会从 token 读
     role/staff_id 执行权限拦截。
+
+    修复（审计 C-6/H2）：
+      - 接入登录限流（staff_id 作为 key，5 次失败锁 15 分钟），防止 PIN 暴力破解。
+      - PIN 比较改为 hmac.compare_digest 常量时间比较，杜绝时序侧信道。
+
+    修复（F2 限流投毒 DoS）：
+      - 限流 key 改为 f"{merchant.id}:{staff_id}"。原 key 仅用 staff_id（全局），
+        恶意 owner 可对任意员工 UUID 发 10 次错 PIN 把该员工在所有商户下锁定 1 小时。
+        加 merchant_id 前缀后，限流维度与归属校验保持一致。
+      - 顺序调整：先做 staff 存在性 + 归属校验（404），通过后才进入限流/PIN 校验。
+        避免攻击者用 404 探测的方式把不存在的 staff_id 计入失败次数。
     """
     staff_id = body.get("staff_id")
     pin_code = body.get("pin_code")
@@ -146,13 +168,23 @@ async def staff_login(
         sid = uuid.UUID(str(staff_id))
     except (ValueError, TypeError) as err:
         raise HTTPException(status_code=400, detail="staff_id 格式无效") from err
+    # 限流 key 加 merchant_id 前缀，防止跨商户投毒锁定他人员工
+    rl_key = f"{merchant.id}:{sid}"
+    # 先做归属校验：员工不存在/不属于此商户 → 404，不计入限流（避免 404 探测投毒）
     staff = await db.get(StaffMember, sid)
     if not staff or staff.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="员工不存在")
+    # 通过归属校验后再检查限流（C-6）：超限抛 429
+    await check_rate_limit(request, rl_key)
     if not staff.is_active:
+        await record_failed_attempt(request, rl_key)
         raise HTTPException(status_code=403, detail="员工已停用")
-    if not staff.pin_code or staff.pin_code != str(pin_code):
+    # 常量时间比较（H2）：避免时序侧信道泄露正确 PIN 的前缀
+    if not staff.pin_code or not hmac.compare_digest(staff.pin_code, str(pin_code)):
+        await record_failed_attempt(request, rl_key)
         raise HTTPException(status_code=401, detail="PIN 码错误")
+    # 登录成功，清除该限流 key 的失败记录
+    await clear_attempts(request, rl_key)
     token = create_access_token(merchant.id, role=staff.role, staff_id=staff.id)
     return {
         "code": 0,

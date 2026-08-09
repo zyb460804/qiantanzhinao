@@ -180,9 +180,26 @@ def _normalize_cn_numbers(text: str) -> str:
     text = re.sub(r"([一二三四五六七八九])十", tens, text)
     text = re.sub(r"十([一二三四五六七八九])", ten_plus, text)
     text = re.sub(r"十", "10", text)
-    # 处理孤立的中文数字（如「三筐」→「3筐」；「五十」已被上面的规则转成 50）
+
+    # 处理「百/千/万」位（如「三百」→「300」、「两万」→「20000」）
+    def hundreds(m):
+        return str(CN_NUM.get(m.group(1), 0) * 100)
+
+    def thousands(m):
+        return str(CN_NUM.get(m.group(1), 0) * 1000)
+
+    def ten_thousands(m):
+        return str(CN_NUM.get(m.group(1), 0) * 10000)
+
+    text = re.sub(r"([一二三四五六七八九两])百", hundreds, text)
+    text = re.sub(r"([一二三四五六七八九两])千", thousands, text)
+    text = re.sub(r"([一二三四五六七八九两])万", ten_thousands, text)
+    text = re.sub(r"百", "100", text)
+    text = re.sub(r"千", "1000", text)
+    text = re.sub(r"万", "10000", text)
+    # 处理孤立的中文数字（如「三筐」→「3筐」；「五十」「三百」已被上面的规则转成 50/300）
     for ch, val in CN_NUM.items():
-        if ch == "十":
+        if ch in ("十", "百", "千", "万"):
             continue
         text = text.replace(ch, str(val))
     return text

@@ -15,16 +15,32 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from decimal import Decimal
+
+
+# 4 位小数对齐模型层 Numeric(12,4)，避免 service 层丢精度。
+_QUANTIZE = Decimal("0.0001")
+
+
+def _to_decimal(value) -> Decimal:
+    """把任意数值安全转为 Decimal。
+
+    DB Numeric 列返回的 Decimal 直接用；测试/旧代码传入的 float/int 经由
+    str(...) 转换，避免 float→Decimal 的二进制尾数误差。
+    """
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
 
 
 # 内置回退：1 个 from_unit = ? 斤。包装/计件（筐/袋/件…）为 None，必须走 DB。
-BUILTIN_FACTORS: dict[str, float | None] = {
-    "斤": 1.0,
-    "公斤": 2.0,
-    "千克": 2.0,
-    "两": 0.1,
-    "克": 0.002,
-    "钱": 0.01,
+BUILTIN_FACTORS: dict[str, Decimal | None] = {
+    "斤": Decimal("1"),
+    "公斤": Decimal("2"),
+    "千克": Decimal("2"),
+    "两": Decimal("0.1"),
+    "克": Decimal("0.002"),
+    "钱": Decimal("0.01"),
     "筐": None,
     "箱": None,
     "袋": None,
@@ -36,24 +52,27 @@ BUILTIN_FACTORS: dict[str, float | None] = {
 }
 
 # 换算因子查询函数签名：(merchant_id, from_unit, to_unit, sku_id|None) -> factor|None
-ConversionLookup = Callable[[str, str, str, str | None], float | None]
+ConversionLookup = Callable[[str, str, str, str | None], Decimal | None]
 
 
 def convert(
-    quantity: float,
+    quantity,
     from_unit: str,
     to_unit: str,
     *,
     lookup: ConversionLookup | None = None,
     sku_id: str | None = None,
     merchant_id: str | None = None,
-) -> float:
+) -> Decimal:
     """把 quantity 从 from_unit 换算到 to_unit，返回标准单位下的数量。
 
     规则：
     - from == to：直接返回。
     - 同为标准重量单位（斤/公斤/克…）：用因子连乘到 斤 再转出。
     - 涉及包装/计件（筐/袋…）：必须提供 lookup（DB），否则抛 ValueError。
+
+    全程使用 Decimal 运算（对齐 Numeric(12,4)），避免 float 精度损失；
+    结果 quantize 到 4 位小数。
     """
     if quantity is None:
         raise ValueError("quantity 不能为空")
@@ -62,21 +81,23 @@ def convert(
     if not from_unit or not to_unit:
         raise ValueError("from_unit / to_unit 不能为空")
 
+    qty = _to_decimal(quantity)
+
     if from_unit == to_unit:
-        return float(quantity)
+        return qty.quantize(_QUANTIZE)
 
     # 1) 尝试 DB 直接换算（最准确，含商品级因子）
     if lookup is not None and merchant_id is not None:
         direct = lookup(merchant_id, from_unit, to_unit, sku_id)
         if direct is not None:
-            return round(float(quantity) * float(direct), 4)
+            return (qty * _to_decimal(direct)).quantize(_QUANTIZE)
 
     # 2) 走「以斤为中介」的通用路径
     f_from = _factor_to_jin(from_unit, lookup, merchant_id, sku_id)
     f_to = _factor_to_jin(to_unit, lookup, merchant_id, sku_id)
     # 斤数 = quantity * f_from；再 / f_to 得到目标单位
-    jin = float(quantity) * f_from
-    return round(jin / f_to, 4)
+    jin = qty * f_from
+    return (jin / f_to).quantize(_QUANTIZE)
 
 
 def _factor_to_jin(
@@ -84,17 +105,17 @@ def _factor_to_jin(
     lookup: ConversionLookup | None,
     merchant_id: str | None,
     sku_id: str | None,
-) -> float:
+) -> Decimal:
     """返回 1 个 unit 等于多少 斤。包装单位必须能从 lookup 拿到因子。"""
     # DB 优先：包装/计件单位在内置表里是 None，必须查 DB
     if lookup is not None and merchant_id is not None:
         db_factor = lookup(merchant_id, unit, "斤", sku_id)
         if db_factor is not None:
-            return float(db_factor)
+            return _to_decimal(db_factor)
     builtin = BUILTIN_FACTORS.get(unit)
     if builtin is None:
         raise ValueError(f"未知单位 '{unit}'，且无数据库换算因子；包装/计件单位必须配置换算关系")
-    return float(builtin)
+    return builtin
 
 
 def is_package_unit(unit: str) -> bool:

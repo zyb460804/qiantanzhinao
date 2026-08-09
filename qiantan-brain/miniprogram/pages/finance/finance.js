@@ -28,7 +28,8 @@ Page({
   },
 
   onShow: function () {
-    this.setData({ skin: 'skin-' + app.resolveSkin(), month: this.data.month || localMonth() });
+    var skin = app.resolveSkin();
+    this.setData({ skin: 'skin-' + skin, skinLabel: app.getSkinLabel(skin), month: this.data.month || localMonth() });
     this.loadTab();
   },
 

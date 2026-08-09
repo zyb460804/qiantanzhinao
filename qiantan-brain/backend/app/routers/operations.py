@@ -12,7 +12,6 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -377,6 +376,7 @@ async def set_clearance_promotion(
     body: ClearancePromotionRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("change_price")),
 ):
     """Set a temporary promotion on one batch without changing SKU base price."""
     result = await db.execute(
@@ -566,6 +566,7 @@ async def customer_repay(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("credit_sale")),
 ):
     """Record a customer repayment."""
     customer_name = (body.get("customer_name") or "").strip()
@@ -655,6 +656,7 @@ async def upsert_customer_credit_profile(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("credit_sale")),
 ):
     """Create or update a customer credit profile (§4.8).
 
@@ -808,13 +810,36 @@ async def check_customer_credit(
 # ═══════════════════════════════════════════════════════════
 
 
+def _sanitize_csv_cell(v) -> str:
+    """净化 CSV 单元格防公式注入：= / + / - / @ / \\t / \\r 前缀加单引号。
+
+    CWE-1236：Excel/WPS 打开 CSV 时会执行以 =/+/-/@ 开头的公式，
+    恶意 customer_name 如 =CMD(...) 可借此执行命令。
+    在写入前对危险前缀加单引号转义，读取时由 Excel 自动忽略。
+
+    负数（- 后紧跟数字或小数点）是合法业务数据，不转义。
+    """
+    s = str(v) if v is not None else ""
+    if not s:
+        return s
+    # 负数（-50.0 / -.5）是合法数值，不转义
+    if s[0] == "-" and len(s) > 1 and (s[1].isdigit() or s[1] == "."):
+        return s
+    if s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
+
+
 def _rows_to_csv(headers: list[str], rows: list[list]) -> str:
-    """生成 UTF-8 BOM CSV 字符串，供前端直接写文件分享。"""
+    """生成 UTF-8 BOM CSV 字符串，供前端直接写文件分享。
+
+    安全：每个单元格均经 _sanitize_csv_cell 净化，防 CSV 公式注入。
+    """
     output = io.StringIO()
     w = csv.writer(output)
     w.writerow(headers)
     for row in rows:
-        w.writerow(row)
+        w.writerow([_sanitize_csv_cell(c) for c in row])
     return "﻿" + output.getvalue()
 
 
@@ -989,29 +1014,39 @@ async def export_accounts(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Export supplier and customer balances as CSV."""
+    """Export supplier and customer balances as JSON envelope {code:0, data:{rows, csv, filename}}.
+
+    与 /export/sales 等保持一致：前端 app.request 期待 {code:0} JSON 信封，
+    原始 CSV 流会让小程序端 JSON.parse 失败（parse_error）。
+    """
     from app.services.accounts_service import list_customer_balances, list_supplier_balances
 
     sup_rows = await list_supplier_balances(db, merchant.id)
     cust_rows = await list_customer_balances(db, merchant.id)
 
-    output = io.StringIO()
-    w = csv.writer(output)
+    rows = [
+        {
+            "类型": "供应商应付",
+            "往来对象": r.get("name", r.get("supplier_id")),
+            "当前欠款": float(r["balance"]),
+        }
+        for r in sup_rows
+    ]
+    rows += [
+        {
+            "类型": "客户应收",
+            "往来对象": r["customer_name"],
+            "当前欠款": float(r["balance"]),
+        }
+        for r in cust_rows
+    ]
 
-    w.writerow(["=== 供应商应付 ==="])
-    w.writerow(["供应商", "当前欠款"])
-    for r in sup_rows:
-        w.writerow([r.get("name", r.get("supplier_id")), r["balance"]])
-
-    w.writerow([])
-    w.writerow(["=== 客户应收 ==="])
-    w.writerow(["客户", "当前欠款"])
-    for r in cust_rows:
-        w.writerow([r["customer_name"], r["balance"]])
-
-    output.seek(0)
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=accounts.csv"},
-    )
+    headers = ["类型", "往来对象", "当前欠款"]
+    return {
+        "code": 0,
+        "data": {
+            "rows": rows,
+            "csv": _rows_to_csv(headers, [[r[h] for h in headers] for r in rows]),
+            "filename": "accounts.csv",
+        },
+    }

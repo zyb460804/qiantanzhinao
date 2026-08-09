@@ -31,6 +31,7 @@ from app.models.merchant import Merchant
 from app.models.product import ProductCategory
 from app.models.purchase import PurchaseItem, PurchaseList
 from app.models.recommendation import Recommendation
+from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 from app.schemas.purchase import (
     ConfirmAcceptanceRequest,
@@ -931,6 +932,7 @@ async def pay_supplier(
     body: SupplierPaymentRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("supplier_payment")),
 ):
     """Record a payment to a supplier."""
     supplier = await db.get(Supplier, body.supplier_id)
@@ -1039,10 +1041,12 @@ async def return_purchase_item(
 ):
     """Return purchased goods to supplier, optionally offset payable."""
     item = await db.scalar(
-        select(PurchaseItem).where(
+        select(PurchaseItem)
+        .where(
             PurchaseItem.id == item_id,
             PurchaseItem.merchant_id == merchant.id,
         )
+        .with_for_update()
     )
     if not item:
         raise HTTPException(status_code=404, detail="采购项不存在")
@@ -1056,6 +1060,12 @@ async def return_purchase_item(
 
     unit_cost = item.actual_unit_cost or item.estimated_unit_cost or Decimal("0")
     return_amount = (return_qty * unit_cost).quantize(Decimal("0.01"))
+
+    # F1: idempotency keys include the accumulated returned_qty (BEFORE this
+    # return) so multiple returns on the same item never collide on the unique
+    # constraint. item.returned_qty is updated below after the records are
+    # created, so reading it here yields the pre-update value.
+    prior_returned = item.returned_qty or Decimal("0")
 
     # Reverse inventory
     db.add(
@@ -1071,24 +1081,66 @@ async def return_purchase_item(
             event_time=utc_now(),
             source="purchase_list",
             notes=f"退货给供应商: {body.reason}",
-            idempotency_key=f"purchase-return:{item.id}:{return_qty}",
+            idempotency_key=f"purchase-return:{item.id}:{prior_returned}:{return_qty}",
         )
     )
 
-    # Offset payable if requested
-    if body.offset_payable and item.supplier_id:
-        db.add(
-            SupplierPayable(
+    # F2: Offset payable — reconcile the original purchase-direction SupplierPayable
+    # instead of inserting a bare payment row that leaves settled_amount stale.
+    if body.offset_payable and item.supplier_id and return_amount > 0:
+        # Find purchase-direction payables for this supplier + list that still
+        # carry an outstanding balance.
+        purchase_payables = (
+            (
+                await db.execute(
+                    select(SupplierPayable)
+                    .where(
+                        SupplierPayable.merchant_id == merchant.id,
+                        SupplierPayable.supplier_id == item.supplier_id,
+                        SupplierPayable.purchase_list_id == item.list_id,
+                        SupplierPayable.direction == "purchase",
+                    )
+                    .order_by(SupplierPayable.created_at, SupplierPayable.id)
+                    .with_for_update()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        payable_ids = [
+            p.id for p in purchase_payables if (p.amount - (p.settled_amount or Decimal("0"))) > 0
+        ]
+
+        if payable_ids:
+            # Reuse the payment reconciliation logic — it creates the payment
+            # row, increases settled_amount on the purchase rows, and syncs the
+            # PurchaseList payment status. This keeps supplier_balance and
+            # remaining_total consistent.
+            await record_supplier_payment(
+                db,
                 merchant_id=merchant.id,
                 supplier_id=item.supplier_id,
-                direction="payment",  # 退货 = 减少应付，等同于付款方向
+                payable_ids=payable_ids,
                 amount=return_amount,
-                purchase_list_id=item.list_id,
                 note=f"退货抵扣: {body.reason}",
-                settled=True,
-                idempotency_key=f"purchase-return-payable:{item.id}",
+                idempotency_key=f"purchase-return-payable:{item.id}:{prior_returned}",
             )
-        )
+        else:
+            # No outstanding purchase payable to offset (e.g. already fully paid
+            # or item has no linked payable) — record a standalone payment so the
+            # supplier balance still reflects the refund.
+            db.add(
+                SupplierPayable(
+                    merchant_id=merchant.id,
+                    supplier_id=item.supplier_id,
+                    direction="payment",
+                    amount=return_amount,
+                    purchase_list_id=item.list_id,
+                    note=f"退货抵扣: {body.reason}",
+                    settled=True,
+                    idempotency_key=f"purchase-return-payable:{item.id}:{prior_returned}",
+                )
+            )
 
     item.returned_qty = (item.returned_qty or Decimal("0")) + return_qty
     remaining = (item.accepted_qty or item.actual_qty) - (item.returned_qty or Decimal("0"))

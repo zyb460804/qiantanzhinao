@@ -63,9 +63,14 @@ async def check_anomaly(
                 {
                     "type": s.anomaly_type.value,
                     "severity": s.severity.value,
-                    "description": s.description,
-                    "value": s.value,
-                    "threshold": s.threshold,
+                    "date": s.date,
+                    "product_name": s.product_name,
+                    "actual_value": s.actual_value,
+                    "expected_value": s.expected_value,
+                    "deviation": s.deviation,
+                    "detector": s.detector,
+                    "details": s.details,
+                    "suggestion": s.suggestion,
                 }
                 for s in report.signals
             ],
