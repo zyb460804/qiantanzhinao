@@ -230,13 +230,20 @@ async def require_quota_check(
     tenant: Tenant = Depends(require_active_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """门禁 4：检查配额未超限，并自动记录用量。
+    """门禁 4：检查配额未超限，并自动记录用量（软限额语义）。
 
     用法：Depends(lambda: require_quota_check("api_calls"))
     或：  Depends(lambda: require_quota_check("storage_mb", increment=5))
 
     返回配额状态 dict：{exceeded, current, limit, remaining, metric}
-    超限时抛 429 Too Many Requests。
+
+    限额语义（有意设计，非缺陷）：
+      - 入口检查发现已超限 → 429 阻断（粗粒度闸门）。
+      - check→record 窗口内的并发请求可把用量推过上限 —— 这是软限额：
+        计量用于计费与运营告警，不是硬配额。超限不回滚、不阻断本次请求，
+        仅在 record 后复核并 logger.warning（含 tenant/metric/超限量），
+        供运营侧跟进升级套餐或风控。若未来要改为硬配额，需在 DB 侧
+        用条件 UPSERT（WHERE value + inc <= limit）原子收口。
     过渡期：租户为 None 时放行。
     """
     _ = metric  # 闭包捕获
@@ -254,8 +261,22 @@ async def require_quota_check(
             f"请升级套餐或等待下个计费周期",
         )
 
-    # 后记录（增量）
+    # 后记录（增量，原子 UPSERT —— 见 app/core/quota.py record_usage）
     await record_usage(db, tenant.id, metric, _inc)
+
+    # 复核（软限额）：并发窗口可能已把用量推过上限 —— 告警但不阻断。
+    post_record = await check_quota(db, tenant.id, metric)
+    if post_record["exceeded"]:
+        logger.warning(
+            "quota soft-limit exceeded after usage record: "
+            "tenant=%s metric=%s current=%d limit=%d overage=+%d "
+            "(soft limit by design: metering only, request not blocked)",
+            tenant.id,
+            metric,
+            post_record["current"],
+            post_record["limit"],
+            post_record["current"] - post_record["limit"],
+        )
     return quota_info
 
 

@@ -6,7 +6,7 @@ merchant-facing reports with clear calculation logic.
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Literal, TypedDict
 
 from fastapi import APIRouter, Depends, Query
@@ -14,7 +14,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_merchant_id
-from app.core.timezone import local_days_ago, local_now, local_today_start, utc_now, utc_today_start
+from app.core.timezone import (
+    cst_day_bounds_utc,
+    cst_days_ago_bounds_utc,
+    cst_today,
+    utc_now,
+    utc_today_start,
+)
 from app.database import get_db
 from app.models.batch import BatchLifecycle
 from app.models.inventory import InventoryRecord
@@ -51,10 +57,12 @@ class ProductRankingRow(TypedDict):
 
 
 def _date_range(days: int):
-    """Return (start, end) for the last N days (local time, used for event_time)."""
-    end = local_now()
-    start = end - timedelta(days=days)
-    return start, end
+    """Return (start, end) for the last N CST business days, as naive UTC.
+
+    event_time 在 DB 中为 naive UTC，日界按 CST 业务日切（审计 C4），
+    否则 CST 凌晨 0-8 点的销售会被归入前一天。
+    """
+    return cst_days_ago_bounds_utc(days)
 
 
 async def _estimate_cogs(
@@ -82,7 +90,7 @@ async def _estimate_cogs(
             unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
 
     if unknown_products:
-        cutoff = local_days_ago(cutoff_days)
+        cutoff = cst_days_ago_bounds_utc(cutoff_days)[0]
         cost_query = (
             select(
                 InventoryRecord.product_id,
@@ -113,14 +121,15 @@ async def daily_report(
     db: AsyncSession = Depends(get_db),
 ):
     """Daily business report — revenue, cost, profit, top products, AI summary."""
-    today_start_local = local_today_start()
-    yesterday_start_local = today_start_local - timedelta(days=1)
+    today_start, today_end = cst_day_bounds_utc(cst_today())
+    yesterday_start = cst_day_bounds_utc(cst_today() - timedelta(days=1))[0]
 
-    # --- Today's records (event_time is in local time) ---
+    # --- Today's records (event_time is naive UTC; day boundary is CST) ---
     today_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
-        InventoryRecord.event_time >= today_start_local,
+        InventoryRecord.event_time >= today_start,
+        InventoryRecord.event_time < today_end,
     )
     today_result = await db.execute(today_query)
     today_records = today_result.scalars().all()
@@ -142,8 +151,8 @@ async def daily_report(
     yesterday_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
-        InventoryRecord.event_time >= yesterday_start_local,
-        InventoryRecord.event_time < today_start_local,
+        InventoryRecord.event_time >= yesterday_start,
+        InventoryRecord.event_time < today_start,
     )
     yesterday_result = await db.execute(yesterday_query)
     yesterday_records = yesterday_result.scalars().all()
@@ -268,7 +277,7 @@ async def daily_report(
     return {
         "code": 0,
         "data": {
-            "date": local_now().date().isoformat(),
+            "date": cst_today().isoformat(),
             "revenue": round(revenue, 2),
             "cost": round(cost, 2),
             "profit": round(profit, 2),
@@ -298,8 +307,8 @@ async def weekly_report(
     db: AsyncSession = Depends(get_db),
 ):
     """Weekly report — 7-day trends, rankings, weather impact, health score."""
-    start_7d, end_now = _date_range(7)
-    start_14d = end_now - timedelta(days=14)
+    start_7d, _end = _date_range(7)
+    start_14d = cst_day_bounds_utc(cst_today() - timedelta(days=13))[0]
 
     # This week's records
     week_query = select(InventoryRecord).where(
@@ -335,11 +344,12 @@ async def weekly_report(
     if last_week_revenue > 0:
         revenue_change = round((week_revenue - last_week_revenue) / last_week_revenue * 100, 1)
 
-    # Daily trends
+    # Daily trends (per CST business day)
+    today = cst_today()
     daily_trends = []
     for i in range(7):
-        day_start = datetime.combine((end_now - timedelta(days=6 - i)).date(), datetime.min.time())
-        day_end = day_start + timedelta(days=1)
+        d = today - timedelta(days=6 - i)
+        day_start, day_end = cst_day_bounds_utc(d)
         day_sale_records = [
             r
             for r in week_records
@@ -356,7 +366,7 @@ async def weekly_report(
         day_customer_price = round(day_revenue / day_sale_count, 2) if day_sale_count > 0 else 0
         daily_trends.append(
             {
-                "date": day_start.date().isoformat(),
+                "date": d.isoformat(),
                 "revenue": round(day_revenue, 2),
                 "cost": round(day_cost, 2),
                 "profit": round(day_revenue - day_cost, 2),
@@ -478,7 +488,7 @@ async def trends_report(
     db: AsyncSession = Depends(get_db),
 ):
     """Revenue and profit trends over N days."""
-    start, end = _date_range(days)
+    start, _end = _date_range(days)
 
     query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
@@ -492,7 +502,7 @@ async def trends_report(
     sale_products = {r.product_id for r in records if r.event_type == "sale"}
     avg_costs = {}
     if sale_products:
-        cutoff = local_days_ago(30)
+        cutoff = cst_days_ago_bounds_utc(30)[0]
         cost_query = (
             select(
                 InventoryRecord.product_id,
@@ -511,11 +521,10 @@ async def trends_report(
         avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
 
     trends = []
+    today = cst_today()
     for i in range(days):
-        day_start = datetime.combine(
-            (end - timedelta(days=days - 1 - i)).date(), datetime.min.time()
-        )
-        day_end = day_start + timedelta(days=1)
+        d = today - timedelta(days=days - 1 - i)
+        day_start, day_end = cst_day_bounds_utc(d)
         day_records = [r for r in records if day_start <= r.event_time < day_end]
         revenue = sum(float(r.total_amount or 0) for r in day_records if r.event_type == "sale")
         cost = sum(float(r.total_amount or 0) for r in day_records if r.event_type == "purchase")
@@ -528,7 +537,7 @@ async def trends_report(
         )
         trends.append(
             {
-                "date": day_start.date().isoformat(),
+                "date": d.isoformat(),
                 "revenue": round(revenue, 2),
                 "cost": round(cost, 2),
                 "profit": round(revenue - cost, 2),
@@ -549,7 +558,7 @@ async def product_ranking(
     db: AsyncSession = Depends(get_db),
 ):
     """Product ranking by revenue, sales volume, or waste."""
-    start, end = _date_range(days)
+    start, _end = _date_range(days)
 
     query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
@@ -626,8 +635,8 @@ async def monthly_report(
     AI summary server-side, giving the monthly tab the same depth as weekly.
     """
     days = 30
-    start, end = _date_range(days)
-    start_60d = end - timedelta(days=60)
+    start, _end = _date_range(days)
+    start_60d = cst_day_bounds_utc(cst_today() - timedelta(days=59))[0]
 
     # This month's records
     month_query = select(InventoryRecord).where(
@@ -666,7 +675,7 @@ async def monthly_report(
     sale_products = {r.product_id for r in month_records if r.event_type == "sale"}
     avg_costs = {}
     if sale_products:
-        cutoff = local_days_ago(60)
+        cutoff = cst_days_ago_bounds_utc(60)[0]
         cost_query = (
             select(
                 InventoryRecord.product_id,
@@ -685,13 +694,12 @@ async def monthly_report(
         cost_result = await db.execute(cost_query)
         avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
 
-    # Daily trends
+    # Daily trends (per CST business day)
+    today = cst_today()
     daily_trends = []
     for i in range(days):
-        day_start = datetime.combine(
-            (end - timedelta(days=days - 1 - i)).date(), datetime.min.time()
-        )
-        day_end = day_start + timedelta(days=1)
+        d = today - timedelta(days=days - 1 - i)
+        day_start, day_end = cst_day_bounds_utc(d)
         day_records = [r for r in month_records if day_start <= r.event_time < day_end]
         day_sale_records = [r for r in day_records if r.event_type == "sale"]
         day_revenue = sum(float(r.total_amount or 0) for r in day_sale_records)
@@ -711,7 +719,7 @@ async def monthly_report(
         day_customer_price = round(day_revenue / day_sale_count, 2) if day_sale_count > 0 else 0
         daily_trends.append(
             {
-                "date": day_start.date().isoformat(),
+                "date": d.isoformat(),
                 "revenue": round(day_revenue, 2),
                 "cost": round(day_cost, 2),
                 "profit": round(day_revenue - day_cost, 2),

@@ -4,7 +4,9 @@
   1. 商户 Bearer Token（用于小程序/开发调试）—— 走 get_merchant_id
   2. 设备 API Key（用于生产边缘端）—— 走 DeviceAuth.require("edge:ingest")
 
-每条事件必须携带全局唯一 event_id，后端通过唯一约束实现幂等去重。
+每条事件必须携带 event_id，幂等去重键为 (merchant_id, event_id)：
+event_id 只在商户范围内唯一（审计 M-5：设备序列号各自生成，
+全局唯一会让商户 B 误吞商户 A 的事件、且可被用于探测他人 event_id 占用）。
 仅在事务提交成功后返回 accepted，确保 Edge 不会误标记未持久化数据为已同步。
 """
 
@@ -15,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.device_auth import DeviceAuth
@@ -28,6 +31,20 @@ from app.schemas.edge import EdgeIngestResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/edge", tags=["edge"])
+
+
+def _duplicate_response(merchant_id: uuid.UUID, event_id: str) -> dict:
+    """幂等命中重复时的友好响应（结构须满足 EdgeIngestResponse 响应模型）。"""
+    return {
+        "code": 0,
+        "data": {
+            "accepted": True,
+            "merchant_id": str(merchant_id),
+            "event_id": event_id,
+            "detection_count": 0,
+            "duplicate": True,
+        },
+    }
 
 
 async def _persist_ingest(
@@ -61,19 +78,19 @@ async def _persist_ingest(
             )
         event_id = str(uuid.uuid4())
 
-    # 幂等去重：相同 event_id 直接返回已接受
-    existing = await db.scalar(select(EdgeEvent.id).where(EdgeEvent.event_id == event_id))
+    # 幂等去重：去重键为 (merchant_id, event_id) —— 相同商户重复上报直接返回已接受；
+    # 不同商户复用同一 event_id 属正常事件，各自入库（审计 M-5）。
+    existing = await db.scalar(
+        select(EdgeEvent.id).where(
+            EdgeEvent.merchant_id == merchant_id,
+            EdgeEvent.event_id == event_id,
+        )
+    )
     if existing:
-        logger.info("edge ingest: duplicate event_id=%s, skipped", event_id)
-        return {
-            "code": 0,
-            "data": {
-                "accepted": True,
-                "merchant_id": str(merchant_id),
-                "event_id": event_id,
-                "duplicate": True,
-            },
-        }
+        logger.info(
+            "edge ingest: duplicate event_id=%s merchant=%s, skipped", event_id, merchant_id
+        )
+        return _duplicate_response(merchant_id, event_id)
 
     detections = body.get("detections", [])
     weight = body.get("weight_g")
@@ -110,7 +127,18 @@ async def _persist_ingest(
         sequence=body.get("sequence"),
     )
     db.add(event)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 并发重复：检查与提交之间同 (merchant_id, event_id) 先落库 → 唯一约束兜底，
+        # 幂等返回 duplicate（不向设备报错，避免其重试风暴）。
+        await db.rollback()
+        logger.info(
+            "edge ingest: concurrent duplicate event_id=%s merchant=%s, skipped",
+            event_id,
+            merchant_id,
+        )
+        return _duplicate_response(merchant_id, event_id)
     await db.refresh(event)
 
     logger.info(
@@ -166,7 +194,7 @@ async def ingest_edge_record_device(
     适用于生产环境树莓派自主上报。需要设备预先在管理后台创建 API Key，
     并在边缘端配置 X-Api-Key / X-Device-Id / X-Timestamp / X-Nonce 请求头。
 
-    每条事件必须包含全局唯一 event_id，后端通过唯一约束自动去重。
+    每条事件必须包含 event_id，后端通过 (merchant_id, event_id) 唯一约束自动去重。
     ACK 仅在事务持久化成功后返回。
     """
     merchant_id = uuid.UUID(str(device["merchant_id"]))

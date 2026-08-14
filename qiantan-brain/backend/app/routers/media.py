@@ -15,7 +15,7 @@ from __future__ import annotations
 import json as _json
 import os
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
@@ -32,6 +32,9 @@ from app.schemas.common import AnyResponse
 
 
 router = APIRouter(prefix="/api/v1/media", tags=["media"])
+
+# media_type 枚举（审计 H-2 fail-closed）：Form 参数用 Literal 校验，未知值直接 422；
+# 下方两个白名单字典的键必须与 Literal 的取值保持一致（miss 时按拒绝处理）。
 
 # Allowed MIME types per media type
 MIME_WHITELIST: dict[str, set[str]] = {
@@ -73,7 +76,7 @@ _EXT_WHITELIST: dict[str, set[str]] = {
 @router.post("/upload", response_model=AnyResponse)
 async def upload_media(
     file: UploadFile = File(...),
-    media_type: str = Form(default="image"),
+    media_type: Literal["image", "audio", "document"] = Form(default="image"),
     business_type: str = Form(default="other"),
     business_payload: str = Form(default="{}"),
     idempotency_key: str = Form(default=""),
@@ -109,9 +112,11 @@ async def upload_media(
             }
 
     # 2. Validate extension (first-line filter; ext comes from client filename)
+    #    修复（审计 H-2 fail-open）：字典 miss（空集）按「拒绝」处理，
+    #    任何文件必须命中白名单才接受，杜绝未知 media_type 绕过校验落盘。
     ext = (os.path.splitext(file.filename or "file")[1] or "").lower()
-    allowed_exts = _EXT_WHITELIST.get(media_type, set())
-    if allowed_exts and ext not in allowed_exts:
+    allowed_exts = _EXT_WHITELIST.get(media_type)
+    if not allowed_exts or ext not in allowed_exts:
         raise HTTPException(
             status_code=400,
             detail=f"禁止的文件扩展名: {ext or '(无)'}",
@@ -123,8 +128,8 @@ async def upload_media(
         or mimetypes.guess_type(file.filename or "")[0]
         or "application/octet-stream"
     )
-    allowed_mimes = MIME_WHITELIST.get(media_type, set())
-    if allowed_mimes and mime not in allowed_mimes:
+    allowed_mimes = MIME_WHITELIST.get(media_type)
+    if not allowed_mimes or mime not in allowed_mimes:
         raise HTTPException(
             status_code=400,
             detail=f"不支持的文件类型: {mime}。允许的类型: {', '.join(sorted(allowed_mimes))}",

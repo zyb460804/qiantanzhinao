@@ -5,6 +5,11 @@ import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# 仓库内置默认 JWT 密钥（源码公开 = 零鉴权）。任何环境沿用它都是致命误配：
+# dev/test+DEBUG 的豁免也不覆盖此项（审计 M-6 fail-closed）。
+_DEFAULT_JWT_SECRET = "dev-secret-please-override-with-env-in-prod"
+
+
 def _safe_int(name: str, default: int) -> int:
     """读取环境变量并转为 int，失败时报出具体变量名与原值，避免堆栈指向类定义。
 
@@ -98,8 +103,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # JWT（P0-1 鉴权）：身份只来自 token，绝不来自请求体
     # ------------------------------------------------------------------
-    # 默认 dev 密钥（仅本地用）；生产务必通过环境变量 JWT_SECRET 注入 ≥32 字节的强密钥。
-    jwt_secret: str = os.getenv("JWT_SECRET", "dev-secret-please-override-with-env-in-prod")
+    # 默认 dev 密钥（仅源码占位，任何环境都不允许实际使用 —— 见 validate_security）；
+    # 生产务必通过环境变量 JWT_SECRET 注入 ≥32 字节的强密钥。
+    jwt_secret: str = os.getenv("JWT_SECRET", _DEFAULT_JWT_SECRET)
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = _safe_int("JWT_EXPIRE_MINUTES", 10080)  # 默认 7 天
 
@@ -157,11 +163,21 @@ class Settings(BaseSettings):
           1. JWT_SECRET 沿用默认/弱密钥 —— 源码公开即等于零鉴权，可被任意伪造 token。
           2. auth_allow_fallback=True —— 允许从 query/header 取 merchant_id，越权黑洞重现。
           3. CORS_ORIGINS='*' —— 即便已自动关闭 credentials，仍应明确前端白名单。
-        dev/test 环境（app_env in development/test 且 debug=True）跳过，避免本地开发被拦截。
+        dev/test 环境（app_env in development/test 且 debug=True）跳过其余检查以保本地便利，
+        但默认 JWT_SECRET 不在豁免之列（审计 M-6）：dev+debug 组合最容易被带上真实
+        微信凭证/公网暴露，源码公开的密钥等于把 token 签发权交给所有人。
         """
         # 修复（审计 P1-4）：原实现 `if self.debug: return` + debug 默认 True = 永远跳过。
         # 现按 app_env 判定，且仅当显式 dev/test 环境且 debug=True 时才跳过。
         if self.app_env in ("development", "test") and self.debug:
+            # 修复（审计 M-6）：dev+debug 豁免不覆盖默认密钥 —— 一律拒绝启动。
+            if self.jwt_secret == _DEFAULT_JWT_SECRET:
+                raise RuntimeError(
+                    "JWT_SECRET 仍为仓库内置默认值，development/test+DEBUG 下同样禁止启动。"
+                    "请在 .env 或环境变量中设置 JWT_SECRET（≥32 字节强密钥），"
+                    '例如执行 python -c "import secrets; print(secrets.token_hex(32))" '
+                    "并把输出写入 JWT_SECRET"
+                )
             return
 
         # 致命组合：debug=True 且生产环境 —— 直接拒绝启动
@@ -171,7 +187,7 @@ class Settings(BaseSettings):
         import logging
 
         # 1) JWT 密钥：默认密钥（源码公开）或长度 <32 字节都视为不安全
-        if self.jwt_secret == "dev-secret-please-override-with-env-in-prod":
+        if self.jwt_secret == _DEFAULT_JWT_SECRET:
             raise RuntimeError(
                 "生产环境禁止使用默认 JWT_SECRET，请通过环境变量 JWT_SECRET 注入 ≥32 字节强密钥"
             )

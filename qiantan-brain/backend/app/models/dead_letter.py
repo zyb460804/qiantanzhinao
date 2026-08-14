@@ -35,3 +35,10 @@ class DeadLetterEvent(Base):
         sa.DateTime, server_default=sa.func.now(), nullable=False
     )
     resolved_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
+
+    # 对齐 m4b5c6d7e8f9 建库迁移已建的索引（ORM 未声明导致 alembic 漂移），
+    # 补声明而非删索引：保住按商户/按状态的死信查询性能。
+    __table_args__ = (
+        sa.Index("ix_dead_letter_events_merchant_id", "merchant_id"),
+        sa.Index("ix_dead_letter_events_status", "status"),
+    )

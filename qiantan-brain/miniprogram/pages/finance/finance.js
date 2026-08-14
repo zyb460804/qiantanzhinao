@@ -107,7 +107,8 @@ Page({
     var self = this, ef = this.data.expForm;
     if (this.data.expenseSubmitting) return;
     var amount = Number(ef.amount);
-    if (!amount || amount <= 0) { wx.showToast({ title: '请输入有效金额', icon: 'none' }); return; }
+    // M6：isFinite 拦截 NaN/Infinity（如 1e999），金额上界 1000 万，防异常值落库
+    if (!isFinite(amount) || amount <= 0 || amount > 1e7) { wx.showToast({ title: '请输入有效金额（不超过1000万）', icon: 'none' }); return; }
     this.setData({ expenseSubmitting: true });
     var payload = {}; Object.keys(ef).forEach(function (key) { payload[key] = ef[key]; }); payload.amount = amount;
     app.request({ url: '/expenses', method: 'POST', data: payload }).then(function () {
@@ -210,7 +211,8 @@ Page({
     var self = this, inv = this.data.invForm;
     if (this.data.invoiceSubmitting) return;
     var amount = Number(inv.amount);
-    if (!inv.invoice_number || !inv.supplier_name || !amount || amount <= 0 || !inv.invoice_date) { wx.showToast({ title: '请填写完整且有效的发票信息', icon: 'none' }); return; }
+    // M6：isFinite 拦截 NaN/Infinity，金额上界 1000 万
+    if (!inv.invoice_number || !inv.supplier_name || !isFinite(amount) || amount <= 0 || amount > 1e7 || !inv.invoice_date) { wx.showToast({ title: '请填写完整且有效的发票信息', icon: 'none' }); return; }
     this.setData({ invoiceSubmitting: true });
     var payload = {}; Object.keys(inv).forEach(function (key) { payload[key] = inv[key]; }); payload.amount = amount;
     app.request({ url: '/expenses/invoices', method: 'POST', data: payload }).then(function () {

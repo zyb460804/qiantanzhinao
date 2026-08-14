@@ -270,13 +270,15 @@ async def cancel_subscription(
     db: AsyncSession = Depends(get_db),
     admin: PlatformAdmin = Depends(get_current_admin),
     _perm=Depends(require_admin_permission(SUBSCRIPTION_CHANGE)),
-    reason: str | None = Body(None),
+    reason: str | dict[str, str] | None = Body(None),
 ):
     """取消订阅。"""
     sub = await db.get(Subscription, sub_id)
     if sub is None:
         raise HTTPException(status_code=404, detail="订阅不存在")
 
+    # 兼容两种请求体：裸 JSON 字符串或 {"reason": "..."} 对象
+    reason = reason.get("reason") if isinstance(reason, dict) else reason
     validate_subscription_transition(sub.status, "canceled")
     old_status = sub.status
     sub.status = "canceled"

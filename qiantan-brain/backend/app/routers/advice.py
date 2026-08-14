@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant, get_merchant_id
-from app.core.timezone import local_days_ago
+from app.core.timezone import cst_days_ago_bounds_utc
 from app.database import get_db
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
@@ -56,8 +56,8 @@ async def simulate_what_if_endpoint(
     product = prod_result.scalar_one_or_none()
     product_name = product.name if product else "白菜"
 
-    # Get 7-day average sales as baseline
-    seven_days_ago = local_days_ago(7)
+    # Get 7-day average sales as baseline (CST business-day window; event_time is naive UTC)
+    seven_days_ago = cst_days_ago_bounds_utc(7)[0]
     sales_query = select(func.sum(func.abs(InventoryRecord.quantity))).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.product_id == product_id,

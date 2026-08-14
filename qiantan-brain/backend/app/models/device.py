@@ -110,6 +110,9 @@ class DeviceModelVersion(Base):
         sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
+    # 对齐 m4b5c6d7e8f9 建库迁移已建的索引（ORM 未声明导致 alembic 漂移）。
+    __table_args__ = (sa.Index("ix_device_model_versions_device_id", "device_id"),)
+
 
 class DeviceRemoteLog(Base):
     """设备远程日志收集."""
@@ -127,3 +130,6 @@ class DeviceRemoteLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime, server_default=sa.func.now(), nullable=False
     )
+
+    # 对齐 m4b5c6d7e8f9 建库迁移已建的索引（ORM 未声明导致 alembic 漂移）。
+    __table_args__ = (sa.Index("ix_device_remote_logs_device_id", "device_id"),)

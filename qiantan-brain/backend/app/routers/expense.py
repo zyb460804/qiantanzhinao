@@ -1,7 +1,5 @@
 """费用管理 + 月度利润报表 API (sections 4.19)."""
 
-import csv
-import io
 import uuid
 from datetime import date
 from datetime import datetime as dt
@@ -13,7 +11,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.export import export_csv
 from app.core.security import get_current_merchant
+from app.core.timezone import cst_month_bounds_utc
 from app.database import get_db
 from app.models.accounts import SupplierPayable
 from app.models.expense import Expense, Invoice
@@ -148,8 +148,10 @@ async def monthly_report(
     # 原口径只在手动日结后有收入数据，摊主不日结时月报收入恒为 0；改用订单源数据
     # 保证语音/POS 记账即可反映收入。cancelled 与 held 订单不计入收入（held 尚未
     # 完成交易，没有实际资金流入，计入会把挂单虚增为收入）。
-    month_start = dt.combine(start, dt.min.time())
-    month_end = dt.combine(end, dt.min.time())
+    # 审计 C4：SaleOrder/SupplierPayable 的 created_at 为 naive UTC，月界按 CST
+    # 业务月切——把 CST 月初 00:00 换算成 naive UTC 再比较，否则 CST 月初 0-8 点
+    # 的订单会串到上个月。Expense.expense_date 是 Date 列，无需换算。
+    month_start, month_end = cst_month_bounds_utc(y, m)
     excluded_statuses = ("cancelled", "held")
     gross_row = (
         await db.execute(
@@ -179,8 +181,8 @@ async def monthly_report(
             select(func.coalesce(func.sum(SupplierPayable.amount), Decimal("0"))).where(
                 SupplierPayable.merchant_id == merchant.id,
                 SupplierPayable.direction == "purchase",
-                SupplierPayable.created_at >= dt.combine(start, dt.min.time()),
-                SupplierPayable.created_at < dt.combine(end, dt.min.time()),
+                SupplierPayable.created_at >= month_start,
+                SupplierPayable.created_at < month_end,
             )
         )
     ).scalar() or Decimal("0")
@@ -253,17 +255,20 @@ async def export_monthly(
         .all()
     )
 
-    output = io.StringIO()
-    w = csv.writer(output)
-    w.writerow(["千摊智脑 — 月度经营报表", month])
-    w.writerow([])
-    w.writerow(["日期", "类别", "金额", "描述"])
-    for e in expenses:
-        w.writerow([e.expense_date.isoformat(), e.category, float(e.amount), e.description or ""])
-
-    output.seek(0)
+    # 走统一导出工具（审计顺手项）：UTF-8 BOM + 公式注入净化——描述等文本
+    # 字段以 =/+/-/@ 开头时加单引号，防 Excel/WPS 把单元格解释成公式。
+    # 月份信息已在文件名与 Content-Disposition 中。
+    rows = [
+        {
+            "日期": e.expense_date.isoformat(),
+            "类别": e.category,
+            "金额": float(e.amount),
+            "描述": e.description or "",
+        }
+        for e in expenses
+    ]
     return StreamingResponse(
-        iter([output.getvalue()]),
+        iter([export_csv(rows, filename=f"monthly_report_{month}")]),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=monthly_report_{month}.csv"},
     )

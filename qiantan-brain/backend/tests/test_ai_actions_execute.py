@@ -250,3 +250,125 @@ class TestExecuteLockBatchAction:
 
 class TestUnauthenticated:
     """Auth tests covered in test_ai_actions_api.py — skip here."""
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 员工权限门禁（审计 M-1）：action_type → 权限点映射
+#   price/clearance → change_price；purchase → purchase_confirm；
+#   lock_batch → inventory_adjust；未知 → view_profit
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestActionPermissionGate:
+    async def _generate(self, client, action_type: str, payload: dict) -> str:
+        gen = await client.post("/api/v1/ai-actions/generate", json={
+            "actions": [{
+                "action_type": action_type,
+                "title": f"{action_type} 权限测试",
+                "payload": payload,
+            }],
+        })
+        assert gen.status_code == 200, gen.text
+        return gen.json()["data"][0]["id"]
+
+    async def test_cashier_cannot_execute_price_action(self, client, db_session):
+        """cashier 无 change_price 权限 → 执行改价类动作 403，动作保持 pending。"""
+        sku_ids = await _seed_skus(db_session, count=1)
+        action_id = await self._generate(
+            client, "price", {"sku_id": sku_ids[0], "new_price": 2.5}
+        )
+
+        res = await client.post(
+            f"/api/v1/ai-actions/{action_id}/execute",
+            headers={"X-Test-Token-Role": "cashier"},
+        )
+        assert res.status_code == 403
+        assert "change_price" in res.json()["detail"]
+
+        async with db_session() as session:
+            action = await session.get(AIAction, uuid.UUID(action_id))
+            assert action.status == "pending"  # 未被执行也未标失败
+
+    async def test_cashier_cannot_execute_purchase_or_lock_batch(self, client, db_session):
+        """cashier 无 purchase_confirm / inventory_adjust → 同样 403。"""
+        purchase_id = await self._generate(
+            client, "purchase",
+            {"items": [{"product_id": 1, "qty": 5, "cost": 1.0}], "total_cost": 5},
+        )
+        res = await client.post(
+            f"/api/v1/ai-actions/{purchase_id}/execute",
+            headers={"X-Test-Token-Role": "cashier"},
+        )
+        assert res.status_code == 403
+
+        lock_id = await self._generate(
+            client, "lock_batch", {"batch_id": str(uuid.uuid4())}
+        )
+        res = await client.post(
+            f"/api/v1/ai-actions/{lock_id}/execute",
+            headers={"X-Test-Token-Role": "cashier"},
+        )
+        assert res.status_code == 403
+
+    async def test_manager_can_execute_price_action(self, client, db_session):
+        """manager 拥有 change_price → 不被误拦（owner/manager 路径不锁死）。"""
+        sku_ids = await _seed_skus(db_session, count=1)
+        action_id = await self._generate(
+            client, "price", {"sku_id": sku_ids[0], "new_price": 3.5}
+        )
+
+        res = await client.post(
+            f"/api/v1/ai-actions/{action_id}/execute",
+            headers={"X-Test-Token-Role": "manager"},
+        )
+        assert res.status_code == 200
+        assert res.json()["data"]["status"] == "executed"
+
+    async def test_stocker_can_execute_lock_batch(self, client, db_session):
+        """stocker 拥有 inventory_adjust → lock_batch 映射正确放行。"""
+        batch_id = await _seed_batch_for_lock(db_session)
+        action_id = await self._generate(
+            client, "lock_batch", {"batch_id": batch_id, "reason": "权限映射测试"}
+        )
+
+        res = await client.post(
+            f"/api/v1/ai-actions/{action_id}/execute",
+            headers={"X-Test-Token-Role": "stocker"},
+        )
+        assert res.status_code == 200
+        assert res.json()["data"]["status"] == "executed"
+
+
+class TestExecuteInternalErrorSanitized:
+    async def test_500_detail_does_not_leak_internal_exception(
+        self, client, db_session, monkeypatch
+    ):
+        """审计 M-1：内部异常 detail 固定文案 + 追踪号，不泄露异常内容；
+        详情（异常串 + request_id）只落在服务端日志与动作记录。"""
+        batch_id = await _seed_batch_for_lock(db_session)
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("boom-secret-internal-detail: db://user:pass@host")
+
+        monkeypatch.setattr("app.services.batch.lock_batch", _boom)
+
+        gen = await client.post("/api/v1/ai-actions/generate", json={
+            "actions": [{
+                "action_type": "lock_batch",
+                "title": "触发内部错误",
+                "payload": {"batch_id": batch_id},
+            }],
+        })
+        action_id = gen.json()["data"][0]["id"]
+
+        res = await client.post(f"/api/v1/ai-actions/{action_id}/execute")
+        assert res.status_code == 500
+        detail = res.json()["detail"]
+        assert "执行失败" in detail
+        assert "boom-secret-internal-detail" not in detail
+
+        async with db_session() as session:
+            action = await session.get(AIAction, uuid.UUID(action_id))
+            assert action.status == "failed"
+            assert action.result["request_id"]
+            assert "boom-secret-internal-detail" in action.result["error"]

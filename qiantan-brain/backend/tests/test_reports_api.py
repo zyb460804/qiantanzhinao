@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
@@ -46,7 +46,8 @@ async def _create_record(
         unit_price=unit_price,
         total_amount=total_amount,
         event_type=event_type,
-        event_time=datetime.now(),
+        # DB 约定：event_time 存 naive UTC（写入端走 utc_now()），测试播种保持一致
+        event_time=datetime.now(UTC).replace(tzinfo=None),
     )
     session.add(record)
     await session.commit()

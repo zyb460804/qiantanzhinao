@@ -358,6 +358,13 @@ async def update_tenant(
 # ── 设备与同步 ──────────────────────────────────────────────
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """SQLite 回读 naive / PostgreSQL(timestamptz) 回读 aware — 统一成 aware 再做差。"""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
 @router.get("/{tenant_id}/devices", response_model=TenantDevicesResponse)
 async def get_tenant_devices(
     tenant_id: uuid.UUID,
@@ -365,6 +372,10 @@ async def get_tenant_devices(
     _perm=Depends(require_admin_permission(USAGE_READ)),
 ):
     """获取租户下所有设备及同步状态。"""
+    tenant = await db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="租户不存在")
+
     # 获取该租户下所有商户的设备
     result = await db.execute(
         select(Device, Merchant.name)
@@ -413,7 +424,7 @@ async def get_tenant_devices(
         did_str = str(device.id)
         online = (
             device.last_heartbeat is not None
-            and (now - device.last_heartbeat).total_seconds() < 3600
+            and (now - _as_utc(device.last_heartbeat)).total_seconds() < 3600
         )
         items.append(
             DeviceItem(
@@ -440,6 +451,10 @@ async def get_tenant_ai_usage(
     _perm=Depends(require_admin_permission(USAGE_READ)),
 ):
     """获取租户近 30 天 AI 使用统计（视觉识别、语音识别、AI 建议）。"""
+    tenant = await db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="租户不存在")
+
     start_dt = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
         days=29
     )
@@ -528,6 +543,10 @@ async def get_tenant_risk_audit(
     _perm=Depends(require_admin_permission(AUDIT_READ)),
 ):
     """获取租户安全/风险概览。"""
+    tenant = await db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="租户不存在")
+
     thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
 
     # 商户数

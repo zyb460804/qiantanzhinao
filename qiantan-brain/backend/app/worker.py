@@ -29,10 +29,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import func, select, update
 
 from app.config import settings
+from app.core.invoicing import insert_invoice
 from app.database import async_session
 from app.models.auth import AuthRevokedToken
 from app.models.saas import (
-    Invoice,
     Plan,
     Subscription,
     Tenant,
@@ -128,7 +128,13 @@ async def check_subscription_expiry():
 
 
 async def generate_invoices():
-    """每天检查需要生成账单的订阅。"""
+    """每天检查需要生成账单的订阅 — 同订阅同周期只出一票。
+
+    幂等保证：插入走方言感知 INSERT ... ON CONFLICT DO NOTHING +
+    (subscription_id, period_start) 唯一约束（uq_invoice_subscription_period），
+    两个 worker 并发跑同一周期也只出一票；invoice_no 数据库侧 MAX+1 发号，
+    撞号竞态自动重试（见 app/core/invoicing.py）。
+    """
     async with async_session() as db:
         now = datetime.now(UTC)
         # 查找 period_end 在 3 天内的 active 订阅
@@ -147,42 +153,41 @@ async def generate_invoices():
             plan = await db.get(Plan, sub.plan_id)
             if not plan:
                 continue
+            if sub.current_period_end is None:
+                continue  # 上方过滤已保证，防御性兜底
 
-            # 检查是否已有该周期的账单
-            existing = await db.execute(
-                select(Invoice).where(
-                    Invoice.subscription_id == sub.id,
-                    Invoice.period_start == sub.current_period_end,
-                )
-            )
-            if existing.scalar_one_or_none():
-                continue
-
+            period_start = sub.current_period_end
             amount = plan.price_yearly if sub.billing_cycle == "yearly" else plan.price_monthly
-            inv = Invoice(
-                tenant_id=sub.tenant_id,
-                subscription_id=sub.id,
-                invoice_no=_next_invoice_no(now),
-                amount=amount,
-                currency="CNY",
-                status="draft",
-                period_start=sub.current_period_end,
-                period_end=sub.current_period_end + timedelta(days=30),
-                due_date=sub.current_period_end + timedelta(days=7),
-                line_items=[
+            values = {
+                "tenant_id": sub.tenant_id,
+                "subscription_id": sub.id,
+                "amount": amount,
+                "currency": "CNY",
+                "status": "draft",
+                "period_start": period_start,
+                "period_end": period_start + timedelta(days=30),
+                "due_date": period_start + timedelta(days=7),
+                "line_items": [
                     {
                         "name": f"{plan.name} - {sub.billing_cycle}",
                         "amount": str(amount),
                     }
                 ],
-            )
-            db.add(inv)
-            logger.info(
-                "generated invoice=%s for tenant=%s amount=%s",
-                inv.invoice_no,
-                sub.tenant_id,
-                amount,
-            )
+            }
+            inv, created = await insert_invoice(db, values, now=now)
+            if created:
+                logger.info(
+                    "generated invoice=%s for tenant=%s amount=%s",
+                    inv.invoice_no,
+                    sub.tenant_id,
+                    amount,
+                )
+            else:
+                logger.info(
+                    "invoice already exists for tenant=%s period=%s, skipped (idempotent)",
+                    sub.tenant_id,
+                    period_start,
+                )
 
         await db.commit()
 
@@ -221,13 +226,8 @@ async def clean_expired_tokens():
 
 
 # ── 辅助 ──
-
-
-def _next_invoice_no(now: datetime | None = None) -> str:
-    """生成账单编号 INV-YYYYMM-XXXX（简单递增，生产改用 DB sequence）。"""
-    now = now or datetime.now(UTC)
-    ts = int(now.timestamp() * 1000)
-    return f"INV-{now.strftime('%Y%m')}-{ts % 10000:04d}"
+# 发号已迁移至 app/core/invoicing.py（数据库侧 MAX+1，进程重启/双副本安全），
+# 原 _next_invoice_no 的 ts % 10000 在同秒多票/跨进程下必然撞号，已移除。
 
 
 # ═══════════════════════════════════════════════════════════════

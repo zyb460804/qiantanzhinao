@@ -25,18 +25,20 @@ logger = logging.getLogger(__name__)
 
 # Dialect → iFlytek `pd` (language) parameter.
 # `None` means普通话 uses default (no extra `pd` field needed).
-# 权威 key 与前端 miniprogram/pages/profile/profile.js 的 dialectValues 对齐；
-# 旧别名保留向后兼容（southwest/henan/sichuan）。
+# 权威 key 与前端 voice.js / stall-settings.js 统一的方言选项严格一致
+# （mandarin/sichuan/cantonese/henan/shandong 共 5 个）；
+# 旧别名保留向后兼容（sichuanese/shanghainese/southwest，覆盖历史存储值）。
 DIALECT_MAP = {
-    # 前端 profile 使用的 4 个权威 key
+    # 前端两个方言设置入口统一使用的权威 key
     "mandarin": None,  # 普通话
-    "sichuanese": "sichuanese",  # 四川话
+    "sichuan": "sichuanese",  # 四川话
     "cantonese": "cantonese",  # 粤语
-    "shanghainese": None,  # 上海话（讯飞暂无独立模型，降级普通话并告警）
-    # 向后兼容的旧别名
-    "sichuan": "sichuanese",  # 旧: 四川话
+    "henan": "mandarin",  # 河南话（讯飞无独立模型，用普通话模型）
+    "shandong": "mandarin",  # 山东话（讯飞无独立模型，显式映射普通话）
+    # 向后兼容的旧别名（历史存储值 / 旧版设置页 dialectValues）
+    "sichuanese": "sichuanese",  # 旧权威键: 四川话
+    "shanghainese": None,  # 旧权威键: 上海话（讯飞暂无独立模型，降级普通话）
     "southwest": "mandarin",  # 旧: 西南官话（用普通话模型）
-    "henan": "mandarin",  # 旧: 河南话（用普通话模型）
 }
 
 # Each audio frame sent to iFlytek must be 1280 bytes (40ms @ 16kHz/16bit/mono).
@@ -282,8 +284,8 @@ async def transcribe_audio(audio_path: str, dialect: str = "mandarin") -> str:
 
     Args:
         audio_path: Path to a 16kHz/16bit/mono WAV or raw PCM file.
-        dialect: One of DIALECT_MAP keys (mandarin, southwest, henan,
-            cantonese, sichuan).
+        dialect: One of DIALECT_MAP keys (mandarin, sichuan, cantonese,
+            henan, shandong; legacy aliases sichuanese/shanghainese/southwest).
 
     Returns:
         Recognized text (empty string on any failure or missing credentials).

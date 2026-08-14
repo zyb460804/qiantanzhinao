@@ -287,7 +287,9 @@ Page({
     var current = this.data.paySplit[method] || 0;
     wx.showModal({ title: paymentLabel(method) + '金额', editable: true, content: String(current), placeholderText: '输入金额', success: function (r) {
       var val = money(r.content);
-      if (r.confirm && val >= 0) { var split = Object.assign({}, self.data.paySplit); split[method] = val; self.setData({ paySplit: split }); }
+      // M6：isFinite 拦截 NaN/Infinity（money(1e999)=Infinity 原可通过 val>=0 校验），金额上界 1000 万
+      if (r.confirm && isFinite(val) && val >= 0 && val <= 1e7) { var split = Object.assign({}, self.data.paySplit); split[method] = val; self.setData({ paySplit: split }); }
+      else if (r.confirm) { wx.showToast({ title: '请输入有效金额（不超过1000万）', icon: 'none' }); }
     }});
   },
 
@@ -508,6 +510,10 @@ Page({
           app.request({ url: '/pos/orders/' + orderId, method: 'DELETE' }).then(function () {
             wx.showToast({ title: '挂单已取消', icon: 'none' });
             self.loadHeldOrders();
+          }).catch(function (err) {
+            // H2：取消挂单失败不再静默
+            var isNet = err && err.type === 'network_error';
+            wx.showToast({ title: isNet ? '网络异常，请检查网络后重试' : ((err.body && err.body.detail) || '取消挂单失败'), icon: 'none' });
           });
           return;
         }

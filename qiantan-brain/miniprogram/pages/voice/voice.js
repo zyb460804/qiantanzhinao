@@ -7,7 +7,7 @@
  *   - 流式打印只做视觉，parseText 立即并行触发，避免打字停留期延迟入账。
  *   - confirmRecord 增加缺失字段防呆与 antiDuplicate 防双击。
  *   - 上传 fail 时 wx.saveFile 暂存录音文件，pending_retry 状态下可手动重传。
- *   - wx.uploadFile 在 401 时调用 ensureLogin 重试一次，避免误导文案。
+ *   - 上传改走 app.uploadFile 统一上传层：员工身份 401 退出员工身份并提示，不静默回退 owner token。
  *   - onHide 中停止进行中的录音，防止页面隐藏后静默上传。
  *   - 新增 onPullDownRefresh、chooseDialect、retryUpload 入口。
  */
@@ -29,7 +29,7 @@ Page({
     debugMode: app.globalData && app.globalData.debugMode,
   },
 
-  // 方言代码与展示名映射（后端按需扩展）
+  // 方言代码与展示名映射（与后端 asr_iflytek.py DIALECT_MAP 权威键严格一致）
   _dialectOptions: [
     { code: 'mandarin', name: '普通话' },
     { code: 'cantonese', name: '粤语' },
@@ -37,6 +37,13 @@ Page({
     { code: 'henan', name: '河南话' },
     { code: 'shandong', name: '山东话' },
   ],
+
+  // 旧版设置页/历史存储值 → 权威 code（后端 DIALECT_MAP 同样保留这些兼容键）
+  _dialectAliases: {
+    sichuanese: 'sichuan',
+    shanghainese: 'mandarin',
+    southwest: 'mandarin',
+  },
 
   onShow: function () {
     this.applySkin(app.resolveSkin());
@@ -76,6 +83,9 @@ Page({
 
   _syncDialectLabel: function () {
     var code = storage.getVoiceDialect();
+    // 历史存储值（旧设置页的 sichuanese/shanghainese 等）先归一化再匹配
+    var aliasCode = this._dialectAliases[code];
+    if (aliasCode) code = aliasCode;
     var match = null;
     for (var i = 0; i < this._dialectOptions.length; i++) {
       if (this._dialectOptions[i].code === code) { match = this._dialectOptions[i]; break; }
@@ -175,78 +185,64 @@ Page({
   },
 
   // 上传录音文件；uploadPath 可重用，便于失败后从暂存路径重传。
+  // H1b：改走 app.uploadFile 统一上传层——不再硬取 owner accessToken，
+  // 员工身份 401 由 app 层退出员工身份并提示，杜绝身份静默回退 owner；
+  // 无员工身份的 401 由 app 层 ensureLogin 换 token 自动重试一次；
+  // 上传进度经 onProgressUpdate 回调透传。
   _uploadRecording: function (filePath) {
     var self = this;
     this.setData({ uploadProgress: 0 });
 
-    function attempt(retried) {
-      var uploadTask = wx.uploadFile({
-        url: app.globalData.apiBase + '/voice/upload',
-        filePath: filePath,
-        name: 'audio',
-        header: { 'Authorization': 'Bearer ' + (app.globalData.accessToken || '') },
-        formData: { dialect: storage.getVoiceDialect() },
-        success: function (res) {
-          // 修复：401 时先 ensureLogin 刷新 token 再重试一次，避免 token 过期落入"这次没有听清"误导文案。
-          if (res.statusCode === 401 && !retried) {
-            app.ensureLogin(true).then(function () { attempt(true); }).catch(function () {
-              self.setData({ state: 'error' });
-              wx.showToast({ title: '登录已过期，请重试', icon: 'none' });
-            });
-            return;
-          }
-          var body;
-          try { body = JSON.parse(res.data); } catch (e) { self.setData({ state: 'error' }); return; }
-          if (!body || body.code !== 0 || !body.data) { self.setData({ state: 'error' }); return; }
-          var data = body.data;
-          var asrText = data.asr_text || '';
-          var parsed = data.parsed;
-          if (asrText) {
-            self.setData({ asrText: asrText, uploadProgress: 100 });
-            if (parsed && parsed.voice_log_id) {
-              var conf = parsed.confidence || 0;
-              self.setData({ parsed: parsed, state: conf >= 0.8 ? 'success' : 'confirm_needed' });
-              self.loadTodayCount();
-            } else {
-              // 修复：fallback 路径立即发起 parseText，streamReply 仅做视觉。
-              // 删除原 _parseResult 守卫（其从未被赋值，恒真会导致双重 parseText 落两条 VoiceLog）。
-              self.setData({ state: 'processing' });
-              self.streamReply(asrText);
-              self.parseText(asrText);
-            }
-          } else {
-            self.setData({ state: 'idle', mode: 'text' });
-            wx.showToast({ title: '语音识别未成功，请使用文字输入', icon: 'none', duration: 2500 });
-          }
-        },
-        fail: function (err) {
-          // 修复：上传失败时用 wx.saveFile 持久化临时音频文件，避免断网即丢；提供重传入口。
-          // 注：offline-media.js 是完整离线队列但场景为通用媒体，未对接 /voice/upload；
-          // 在文件边界内采用最小化暂存策略：保存到本地、暴露 pending_retry 状态。
-          if (self._cancelledFlag) return;
-          wx.saveFile({
-            tempFilePath: filePath,
-            success: function (saveRes) {
-              self._pendingUploadPath = saveRes.savedFilePath;
-              self.setData({ state: 'pending_retry', pendingUploadExists: true });
-              wx.showToast({ title: '网络异常，已暂存录音，可点重新上传', icon: 'none', duration: 2500 });
-            },
-            fail: function () {
-              self.setData({ state: 'error' });
-              wx.showToast({ title: '上传失败，请重试', icon: 'none' });
-            },
-          });
-        },
-      });
-
-      if (uploadTask && uploadTask.onProgressUpdate) {
-        uploadTask.onProgressUpdate(function (res) {
-          self.setData({ uploadProgress: res.progress });
-        });
+    app.uploadFile({
+      url: '/voice/upload',
+      filePath: filePath,
+      name: 'audio',
+      formData: { dialect: storage.getVoiceDialect() },
+      onProgressUpdate: function (res) { self.setData({ uploadProgress: res.progress }); },
+    }).then(function (data) {
+      if (!data) { self.setData({ state: 'error' }); return; }
+      var asrText = data.asr_text || '';
+      var parsed = data.parsed;
+      if (asrText) {
+        self.setData({ asrText: asrText, uploadProgress: 100 });
+        if (parsed && parsed.voice_log_id) {
+          var conf = parsed.confidence || 0;
+          self.setData({ parsed: parsed, state: conf >= 0.8 ? 'success' : 'confirm_needed' });
+          self.loadTodayCount();
+        } else {
+          // 修复：fallback 路径立即发起 parseText，streamReply 仅做视觉。
+          // 删除原 _parseResult 守卫（其从未被赋值，恒真会导致双重 parseText 落两条 VoiceLog）。
+          self.streamReply(asrText);
+          self.parseText(asrText);
+        }
+      } else {
+        self.setData({ state: 'idle', mode: 'text' });
+        wx.showToast({ title: '语音识别未成功，请使用文字输入', icon: 'none', duration: 2500 });
       }
-    }
-
-    attempt(false);
+    }).catch(function (err) {
+      if (self._cancelledFlag) return;
+      // 员工身份过期：app 层已退出员工身份并 toast，这里只回到错误态，避免误导性的「网络异常」文案
+      if (err && err.type === 'staff_auth_expired') { self.setData({ state: 'error' }); return; }
+      // 网络失败：wx.saveFile 持久化临时音频文件，避免断网即丢；提供重传入口。
+      if (!err || err.type === 'network_error') {
+        wx.saveFile({
+          tempFilePath: filePath,
+          success: function (saveRes) {
+            self._pendingUploadPath = saveRes.savedFilePath;
+            self.setData({ state: 'pending_retry', pendingUploadExists: true });
+            wx.showToast({ title: '网络异常，已暂存录音，可点重新上传', icon: 'none', duration: 2500 });
+          },
+          fail: function () {
+            self.setData({ state: 'error' });
+            wx.showToast({ title: '上传失败，请重试', icon: 'none' });
+          },
+        });
+        return;
+      }
+      // 业务/服务端错误：直接提示，不暂存
+      self.setData({ state: 'error' });
+      wx.showToast({ title: (err.body && err.body.detail) || '上传失败，请重试', icon: 'none' });
+    });
   },
 
   // 错误面板"重试"按钮：从暂存路径重新上传（若有），否则回到 idle 让摊主重录。

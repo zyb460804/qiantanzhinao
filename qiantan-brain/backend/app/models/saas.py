@@ -185,6 +185,20 @@ class Invoice(Base):
         sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now()
     )
 
+    __table_args__ = (
+        # 修复（H6）：同订阅同计费周期只允许一张账单。周期生成入口
+        # （worker generate_invoices / admin generate-from-subscription）的
+        # SELECT-then-INSERT 在并发或重复执行下会重复出票，改由数据库唯一
+        # 约束兜底。两列保持可空：手工开票无订阅/无周期时 NULL 不参与唯一性
+        # 比较（PG16 与 SQLite 均按 NULLS DISTINCT 处理），不受影响；周期
+        # 生成入口保证两列均非空。
+        sa.UniqueConstraint(
+            "subscription_id",
+            "period_start",
+            name="uq_invoice_subscription_period",
+        ),
+    )
+
 
 class UsageRecord(Base):
     """用量计量 — 按指标按日聚合记录租户用量。

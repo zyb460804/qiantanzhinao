@@ -408,7 +408,7 @@ App({
       // 员工身份切换时优先用 staffToken
       var uploadToken = self.globalData.staffToken || self.globalData.accessToken;
       if (uploadToken) header.Authorization = 'Bearer ' + uploadToken;
-      wx.uploadFile({
+      var uploadTask = wx.uploadFile({
         url: self.globalData.apiBase + options.url,
         filePath: options.filePath,
         name: options.name || 'image',
@@ -420,11 +420,22 @@ App({
           try { body = JSON.parse(res.data); } catch (e) { reject({ type: 'parse_error', err: e }); return; }
           if (body && body.code === 0) resolve(body.data);
           else if (res.statusCode === 401 && !retried) {
+            // H1a：员工身份 token 过期 → 退出员工身份并提示，不静默回退 owner（对齐 _requestOnce）
+            if (self.globalData.staffToken) {
+              self.exitStaff();
+              self.showToast('员工登录已过期');
+              reject({ type: 'staff_auth_expired', statusCode: 401, body: body });
+              return;
+            }
             self.ensureLogin(true).then(function () { return self._uploadOnce(options, true); }).then(resolve).catch(reject);
           } else reject({ type: res.statusCode >= 500 ? 'server_error' : 'business_error', statusCode: res.statusCode, body: body });
         },
         fail: function (err) { reject({ type: 'network_error', err: err }); },
       });
+      // 进度回调透传（voice 页上传进度条用）；部分平台 uploadTask 可能为空，防御式调用
+      if (options.onProgressUpdate && uploadTask && uploadTask.onProgressUpdate) {
+        uploadTask.onProgressUpdate(options.onProgressUpdate);
+      }
     });
   },
 

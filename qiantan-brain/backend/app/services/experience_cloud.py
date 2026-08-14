@@ -16,7 +16,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.timezone import local_days_ago
+from app.core.timezone import cst_days_ago_bounds_utc
 from app.models.environment import EnvironmentRecord
 from app.models.inventory import InventoryRecord
 from app.models.product import ProductCategory
@@ -114,7 +114,7 @@ async def get_weather_impact_rules(
 
     # Attempt to compute from actual data
     try:
-        thirty_days_ago = local_days_ago(30)
+        thirty_days_ago = cst_days_ago_bounds_utc(30)[0]
 
         # Join inventory with environment to correlate.
         # The join includes BOTH date AND city so that a sale on 2026-01-15 in
@@ -203,7 +203,7 @@ async def get_weather_impact_rules(
 
 async def get_category_benchmarks(db: AsyncSession) -> list[dict]:
     """Get benchmarking data: average daily sales volume by product category."""
-    thirty_days_ago = local_days_ago(30)
+    thirty_days_ago = cst_days_ago_bounds_utc(30)[0]
 
     try:
         query = (
@@ -245,7 +245,7 @@ async def get_category_benchmarks(db: AsyncSession) -> list[dict]:
 
 async def get_top_products(db: AsyncSession, limit: int = 5) -> list[dict]:
     """Get most frequently traded products across all merchants."""
-    thirty_days_ago = local_days_ago(30)
+    thirty_days_ago = cst_days_ago_bounds_utc(30)[0]
 
     try:
         query = (

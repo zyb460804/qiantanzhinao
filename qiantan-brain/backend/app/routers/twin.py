@@ -2,14 +2,19 @@
 
 import uuid
 from collections.abc import Sequence
-from datetime import date, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_merchant_id
-from app.core.timezone import local_days_ago, local_today_start
+from app.core.timezone import (
+    cst_date_of_utc_naive,
+    cst_day_bounds_utc,
+    cst_days_ago_bounds_utc,
+    cst_today,
+)
 from app.database import get_db
 from app.models.catalog import ProductSKU
 from app.models.environment import EnvironmentRecord
@@ -46,7 +51,7 @@ async def _estimate_cogs_twin(
             unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
 
     if unknown_products:
-        cutoff = local_days_ago(cutoff_days)
+        cutoff = cst_days_ago_bounds_utc(cutoff_days)[0]
         cost_query = (
             select(
                 InventoryRecord.product_id,
@@ -80,7 +85,8 @@ async def get_dashboard(
 
     Profit = estimated gross profit (revenue - estimated COGS), not cash flow.
     """
-    today_start = local_today_start()
+    # event_time 为 naive UTC，日界按 CST 业务日切（审计 C4）
+    today_start, _today_end = cst_day_bounds_utc(cst_today())
 
     # Fetch today's non-voided records for COGS estimation
     today_query = select(InventoryRecord).where(
@@ -309,7 +315,8 @@ async def get_risk_mirror(
     db: AsyncSession = Depends(get_db),
 ):
     """Risk radar chart data — all 6 dimensions calculated from real data."""
-    today = date.today()
+    # EnvironmentRecord.date 是业务日（CST），取业务「今天」而非服务器本地日期
+    today = cst_today()
 
     # Resolve merchant city from preferences (default "上海") so the weather
     # risk reflects the right city instead of picking an arbitrary env row.
@@ -335,7 +342,7 @@ async def get_risk_mirror(
             weather_risk += 30
 
     # Inventory risk: ratio of total inventory to 7-day avg sales
-    seven_days_ago = local_days_ago(7)
+    seven_days_ago = cst_days_ago_bounds_utc(7)[0]
     sales_query = select(func.sum(func.abs(InventoryRecord.quantity))).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
@@ -361,7 +368,7 @@ async def get_risk_mirror(
         inventory_risk = 50
 
     # Waste risk: proportion of waste records in last 30 days
-    thirty_days_ago = local_days_ago(30)
+    thirty_days_ago = cst_days_ago_bounds_utc(30)[0]
     waste_query = select(func.sum(func.abs(InventoryRecord.quantity))).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
@@ -383,7 +390,7 @@ async def get_risk_mirror(
     waste_risk = min(90, int(total_waste / total_purchased * 100)) if total_purchased > 0 else 0
 
     # Capital risk: based on cash flow imbalance (purchases >> sales = capital tied up)
-    today_start = local_today_start()
+    today_start = cst_day_bounds_utc(cst_today())[0]
     today_sales_amt = float(
         (
             await db.execute(
@@ -478,58 +485,56 @@ async def get_risk_mirror(
 
 
 async def _daily_breakdown(db: AsyncSession, merchant_id: uuid.UUID, days: int) -> list[dict]:
-    """Return daily revenue, cost, profit, volume and customer metrics."""
-    start = local_today_start() - timedelta(days=days)
+    """Return daily revenue, cost, profit, volume and customer metrics.
 
-    q = (
-        select(
-            func.date(InventoryRecord.event_time).label("d"),
-            func.sum(
-                case(
-                    (InventoryRecord.event_type == "sale", func.abs(InventoryRecord.total_amount)),
-                    else_=0,
-                )
-            ).label("revenue"),
-            func.sum(
-                case(
-                    (
-                        InventoryRecord.event_type == "purchase",
-                        func.abs(InventoryRecord.total_amount),
-                    ),
-                    else_=0,
-                )
-            ).label("cost"),
-            func.sum(func.abs(InventoryRecord.quantity)).label("volume"),
-            func.sum(
-                case(
-                    (InventoryRecord.event_type == "sale", 1),
-                    else_=0,
-                )
-            ).label("sale_count"),
+    按日聚合拉到 Python 侧按 CST 业务日重算（审计 C4 / 方言陷阱）：
+    SQL 的 func.date(event_time) 在 SQLite/PG 下都只能得到 UTC 日期键
+    （SQLite 的 date(col,'+8 hours') 修饰符 PG 不支持），CST 00:00-08:00 的
+    销售会被记到前一天。单商户 ≤30 天数据量小，逐行聚合无性能压力。
+    """
+    start, _end = cst_days_ago_bounds_utc(days)
+
+    rows = (
+        await db.execute(
+            select(
+                InventoryRecord.event_type,
+                InventoryRecord.total_amount,
+                InventoryRecord.quantity,
+                InventoryRecord.event_time,
+            ).where(
+                InventoryRecord.merchant_id == merchant_id,
+                InventoryRecord.is_voided == False,  # noqa: E712
+                InventoryRecord.event_time >= start,
+            )
         )
-        .where(
-            InventoryRecord.merchant_id == merchant_id,
-            InventoryRecord.is_voided == False,  # noqa: E712
-            InventoryRecord.event_time >= start,
+    ).all()
+
+    daily: dict[str, dict] = {}
+    for event_type, total_amount, quantity, event_time in rows:
+        d_str = cst_date_of_utc_naive(event_time).isoformat()
+        bucket = daily.setdefault(
+            d_str, {"revenue": 0.0, "cost": 0.0, "volume": 0.0, "sale_count": 0}
         )
-        .group_by(func.date(InventoryRecord.event_time))
-        .order_by(func.date(InventoryRecord.event_time))
-    )
-    result = await db.execute(q)
-    rows = result.all()
+        amount = abs(float(total_amount or 0))
+        if event_type == "sale":
+            bucket["revenue"] += amount
+            bucket["sale_count"] += 1
+        elif event_type == "purchase":
+            bucket["cost"] += amount
+        bucket["volume"] += abs(float(quantity or 0))
 
     daily_data = []
-    for row in rows:
-        revenue = float(row.revenue or 0)
-        cost = float(row.cost or 0)
-        sale_count = int(row.sale_count or 0)
+    for d_str, bucket in daily.items():
+        revenue = bucket["revenue"]
+        cost = bucket["cost"]
+        sale_count = bucket["sale_count"]
         daily_data.append(
             {
-                "date": str(row.d),
+                "date": d_str,
                 "revenue": round(revenue, 2),
                 "cost": round(cost, 2),
                 "profit": round(revenue - cost, 2),
-                "volume": round(float(row.volume or 0), 1),
+                "volume": round(bucket["volume"], 1),
                 "sale_count": sale_count,
                 "customer_price": round(revenue / sale_count, 2) if sale_count > 0 else 0,
             }
@@ -538,8 +543,7 @@ async def _daily_breakdown(db: AsyncSession, merchant_id: uuid.UUID, days: int) 
     # Fill missing dates with zeros for continuous timeline
     filled = []
     for i in range(days):
-        d = (local_today_start() - timedelta(days=days - 1 - i)).date()
-        d_str = str(d)
+        d_str = (cst_today() - timedelta(days=days - 1 - i)).isoformat()
         existing = next((x for x in daily_data if x["date"] == d_str), None)
         if existing:
             filled.append(existing)

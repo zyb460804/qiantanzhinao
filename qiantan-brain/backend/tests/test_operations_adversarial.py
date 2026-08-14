@@ -6,8 +6,12 @@
     一旦漏洞被修复，测试转为 XPASS → strict 模式下报失败，提醒去掉 xfail 标记。
     这样漏洞既是文档又是待办哨兵。
 
+历史：本文件原有的 7 个资金校验 xfail 漏洞（非数字报损/缺字段/重复幂等键/
+非数字回款/负信用额度/负账期/负金额信用检查）已全部修复转正为实测试
+（请求 schema 化 + 路由显式校验 + IntegrityError 幂等回查）。
+
 覆盖维度：
-  1. 输入验证：负数/非数字/缺字段（body: dict 绕过 Pydantic 的代价）
+  1. 输入验证：负数/非数字/缺字段（Pydantic schema 挡协议错误，路由挡业务错误）
   2. 权限：角色越权（require_permission 一致性）
   3. 租户隔离：跨商户数据不可见
   4. 业务逻辑：停赊/超额还款/重复幂等
@@ -20,7 +24,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-import pytest
 from sqlalchemy import select
 from tests.conftest import TEST_MERCHANT_ID
 
@@ -74,26 +77,16 @@ class TestWasteAdversarial:
         )
         assert res.status_code == 400
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="漏洞: record_waste 用 body:dict 绕过 Pydantic，quantity='abc' → "
-        "Decimal('abc') 抛 InvalidOperation → 500。应由 Pydantic schema 返回 422。",
-    )
     async def test_non_numeric_quantity_rejected_as_422(self, client):
-        """非数字 quantity 字符串 → 应 422（当前 500，信息泄露）。"""
+        """非数字 quantity 字符串 → 422（WasteRecordRequest schema 挡住，不再 500 泄栈）。"""
         res = await client.post(
             "/api/v1/ops/waste",
             json={"product_id": 1, "quantity": "abc", "reason": "腐烂"},
         )
         assert res.status_code == 422
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="漏洞: record_waste 用 body['product_id'] 直接取值，缺字段 → "
-        "KeyError → 500。应由 Pydantic schema 返回 422（字段必填）。",
-    )
     async def test_missing_product_id_rejected_as_422(self, client):
-        """缺 product_id 字段 → 应 422（当前 KeyError → 500）。"""
+        """缺 product_id 字段 → 422（schema 必填，不再 KeyError → 500）。"""
         res = await client.post(
             "/api/v1/ops/waste",
             json={"quantity": 5, "reason": "腐烂"},
@@ -116,13 +109,12 @@ class TestWasteAdversarial:
         )
         assert res.status_code == 403
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="漏洞: record_waste 的 idempotency_key 唯一约束存在，但重复提交时 "
-        "IntegrityError 未被捕获 → 500。应捕获并返回 409/原记录（幂等语义）。",
-    )
     async def test_duplicate_idempotency_key_rejected_gracefully(self, client, db_session):
-        """相同 idempotency_key 重复报损 → 第二次应 409 或返回原结果（当前 500）。"""
+        """相同 idempotency_key 重复报损 → 幂等 200 返回原记录（不二次扣库存）。
+
+        已修复：路由入口按幂等键预检 + commit 捕获 IntegrityError 回查，
+        二次提交不再 500，库存只扣一次。
+        """
         mid = uuid.UUID(TEST_MERCHANT_ID)
         await _seed_batch_with_stock(db_session, mid, "idem-batch", Decimal("20"))
 
@@ -134,10 +126,22 @@ class TestWasteAdversarial:
         }
         first = await client.post("/api/v1/ops/waste", json=payload)
         assert first.status_code == 200
+        first_record_id = first.json()["data"]["record_id"]
 
         second = await client.post("/api/v1/ops/waste", json=payload)
         # 幂等语义：重复请求不应二次扣库存，应 409 或 200（返回原 record_id）
         assert second.status_code in (200, 409)
+        if second.status_code == 200:
+            assert second.json()["data"]["record_id"] == first_record_id
+
+        # 库存只扣一次：20 - 3 = 17（若第二次仍真实扣减会是 14）
+        async with db_session() as session:
+            batch = (
+                await session.execute(
+                    select(BatchLifecycle).where(BatchLifecycle.batch_label == "idem-batch")
+                )
+            ).scalar_one()
+            assert float(batch.remaining_qty) == 17
 
 
 # ═══════════════════════════════════════════════════════════
@@ -200,13 +204,8 @@ class TestCustomerCreditAdversarial:
         )
         assert res.status_code == 400
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="漏洞: customer_repay 用 Decimal(str(body.get('amount',0)))，"
-        "amount='abc' → InvalidOperation → 500。应由 Pydantic schema 返回 422。",
-    )
     async def test_repay_non_numeric_amount_rejected_as_422(self, client):
-        """非数字回款金额 → 应 422（当前 500）。"""
+        """非数字回款金额 → 422（CustomerRepayRequest schema 挡住，不再 500）。"""
         res = await client.post(
             "/api/v1/ops/customers/repay",
             json={"customer_name": "张记", "amount": "abc"},
@@ -226,39 +225,24 @@ class TestCustomerCreditAdversarial:
         assert res.status_code == 200
         assert res.json()["data"]["allowed"] is False
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="漏洞: upsert_customer_credit_profile 无 credit_limit 下限校验，"
-        "负数额度直接落库。应拒绝或约束 ge=0。",
-    )
     async def test_credit_profile_rejects_negative_limit(self, client):
-        """负数信用额度 → 应 400（当前落库，业务语义错误）。"""
+        """负数信用额度 → 400（路由显式拒绝，不再落库）。"""
         res = await client.post(
             "/api/v1/ops/customers/credit-profile",
             json={"customer_name": "负额度客户", "credit_limit": -9999},
         )
         assert res.status_code == 400
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="漏洞: upsert_customer_credit_profile 无 default_credit_days 范围校验，"
-        "负数账期直接落库（会导致所有客户立刻'未逾期'）。应约束 ge=0。",
-    )
     async def test_credit_profile_rejects_negative_days(self, client):
-        """负数默认账期天数 → 应 400（当前落库，绕过逾期检测）。"""
+        """负数默认账期天数 → 400（不再落库绕过逾期检测）。"""
         res = await client.post(
             "/api/v1/ops/customers/credit-profile",
             json={"customer_name": "负账期客户", "default_credit_days": -1},
         )
         assert res.status_code == 400
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="漏洞: check_customer_credit 无 amount<=0 校验，负金额会让 "
-        "remaining_credit = limit - balance - (-|amount|) 反向增加。应拒绝负金额。",
-    )
     async def test_check_credit_rejects_negative_amount(self, client):
-        """负金额信用检查 → 应拒绝（当前 allowed=True，remaining 反向增加）。"""
+        """负金额信用检查 → allowed=False（不再反向增加剩余额度）。"""
         await client.post(
             "/api/v1/ops/customers/credit-profile",
             json={"customer_name": "额度客户", "credit_limit": 500},

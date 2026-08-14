@@ -207,11 +207,26 @@ async def test_validate_security_ok_when_proper():
     s.validate_security()  # 不应抛异常
 
 
-async def test_validate_security_skipped_in_dev():
-    """dev 环境即便沿用默认密钥也不拦截，保持本地开发便利。"""
+async def test_validate_security_blocks_default_secret_in_dev_debug():
+    """审计 M-6：dev+debug 豁免不覆盖仓库默认 JWT_SECRET —— 同样拒绝启动，
+    错误文案需说清如何设置密钥。"""
     from app.config import Settings
 
     s = Settings()
     s.debug = True
+    s.app_env = "development"
     s.jwt_secret = "dev-secret-please-override-with-env-in-prod"
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        s.validate_security()
+
+
+async def test_validate_security_skipped_in_dev_with_real_secret():
+    """dev+debug 且已配置真实密钥 → 其余检查豁免，保持本地开发便利。"""
+    from app.config import Settings
+
+    s = Settings()
+    s.debug = True
+    s.app_env = "development"
+    s.jwt_secret = "x" * 40
+    s.auth_allow_fallback = True  # 若豁免失效此项会抛错，验证豁免仍然存在
     s.validate_security()  # 不应抛异常

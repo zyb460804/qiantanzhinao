@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from app.services.vision_model import Detection
 
@@ -26,6 +27,177 @@ if TYPE_CHECKING:
     from PIL import Image
 
 logger = logging.getLogger("vision_model_onnx")
+
+# Letterbox canvas fill — Ultralytics YOLO training pipeline and the edge
+# engine (edge/vision/inference.py) both pad with 114 gray; using black (0)
+# here would shift border-pixel statistics vs. what the model was trained on.
+_LETTERBOX_FILL = (114, 114, 114)
+
+# Greedy NMS IoU threshold (same value as edge/vision/inference.py).
+_NMS_IOU_THRESHOLD = 0.45
+
+
+class DecodedDetection(TypedDict):
+    """Fully decoded detection with pixel bbox (pre API-level trimming)."""
+
+    product_id: int
+    name: str
+    confidence: float
+    bbox: list[float]  # x, y, w, h (top-left + size, original-image pixels)
+
+
+def letterbox_params(
+    original_size: tuple[int, int], input_size: tuple[int, int]
+) -> tuple[float, float, float]:
+    """Aspect-preserving letterbox parameters — ``(scale, pad_x, pad_y)``.
+
+    Uses exactly the same math as the edge engine
+    (``edge/vision/inference.py::_preprocess``), so backend and edge map
+    coordinates identically:
+
+    * ``scale = min(tw / ow, th / oh)``
+    * ``new_w, new_h = int(ow * scale), int(oh * scale)``
+    * float pads centring the resized image on the canvas
+
+    Forward (original → letterbox): ``x_l = x_o * scale + pad_x``.
+    Inverse (letterbox → original): ``x_o = (x_l - pad_x) / scale``.
+    """
+    orig_w, orig_h = original_size
+    target_w, target_h = input_size
+    scale = min(target_w / orig_w, target_h / orig_h)
+    new_w, new_h = int(orig_w * scale), int(orig_h * scale)
+    pad_x = (target_w - new_w) / 2
+    pad_y = (target_h - new_h) / 2
+    return scale, pad_x, pad_y
+
+
+def decode_yolo_output(
+    output: np.ndarray,
+    *,
+    original_size: tuple[int, int],
+    input_size: tuple[int, int],
+    confidence_threshold: float,
+    iou_threshold: float = _NMS_IOU_THRESHOLD,
+) -> list[DecodedDetection]:
+    """Decode Ultralytics YOLOv8/v11 ONNX export output into detections.
+
+    ``ml/train_yolo.py`` exports via ``model.export(format="onnx")``, whose
+    prediction layout is ``[1, 4 + nc, num_boxes]`` (e.g. ``[1, 19, 8400]``
+    for 15 classes at 640px).  Rows are ``(cx, cy, w, h, cls_0 ... cls_{nc-1})``
+    in letterbox-pixel coordinates; class scores are already activated.
+
+    Mirrors ``edge/vision/inference.py::_postprocess``:
+
+    1. drop batch dim → ``[4 + nc, num_boxes]``; transpose → per-box rows
+    2. best class per box via ``argmax`` over the class-score columns
+    3. drop boxes whose best score is below ``confidence_threshold``
+    4. greedy NMS (xyxy IoU) in letterbox space
+    5. inverse letterbox map to original-image ``xywh``, clipped to bounds
+    6. sort by descending confidence
+    """
+    import numpy as np
+
+    if output.ndim == 3:
+        output = output[0]  # [1, 4+nc, num_boxes] → [4+nc, num_boxes]
+    if output.ndim != 2:
+        logger.warning("Unexpected YOLO output ndim=%s — no detections", output.ndim)
+        return []
+
+    preds = output.T  # [num_boxes, 4+nc]
+    num_classes = preds.shape[1] - 4
+    if num_classes <= 0:
+        logger.warning(
+            "YOLO output has %s channels — need >= 5 (4 box + >= 1 class)",
+            preds.shape[1],
+        )
+        return []
+
+    boxes = preds[:, :4]  # cx, cy, w, h (letterbox pixels)
+    class_scores = preds[:, 4:]
+
+    class_ids = np.argmax(class_scores, axis=1)
+    max_scores = np.max(class_scores, axis=1)
+
+    # --- confidence filter (per-box best class score) ----------------
+    mask = max_scores >= confidence_threshold
+    boxes = boxes[mask]
+    class_ids = class_ids[mask]
+    max_scores = max_scores[mask]
+    if boxes.shape[0] == 0:
+        return []
+
+    # --- greedy NMS in letterbox space (cxcywh → xyxy) ----------------
+    xyxy = np.empty_like(boxes)
+    xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
+    xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
+    xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2
+    xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2
+    keep = _greedy_nms(xyxy, max_scores, iou_threshold)
+    boxes = boxes[keep]
+    class_ids = class_ids[keep]
+    max_scores = max_scores[keep]
+
+    # --- inverse letterbox → original-image xywh ----------------------
+    orig_w, orig_h = original_size
+    scale, pad_x, pad_y = letterbox_params(original_size, input_size)
+
+    detections: list[DecodedDetection] = []
+    for (cx, cy, w, h), class_id, score in zip(boxes, class_ids, max_scores, strict=True):
+        cx_o = (float(cx) - pad_x) / scale
+        cy_o = (float(cy) - pad_y) / scale
+        w_o = float(w) / scale
+        h_o = float(h) / scale
+        x = max(0.0, min(float(orig_w), cx_o - w_o / 2))
+        y = max(0.0, min(float(orig_h), cy_o - h_o / 2))
+        w_o = max(0.0, min(float(orig_w) - x, w_o))
+        h_o = max(0.0, min(float(orig_h) - y, h_o))
+        detections.append(
+            DecodedDetection(
+                product_id=int(class_id),
+                name=f"product_{int(class_id)}",
+                confidence=round(float(score), 4),
+                bbox=[x, y, w_o, h_o],
+            )
+        )
+    detections.sort(key=lambda d: d["confidence"], reverse=True)
+    return detections
+
+
+def _greedy_nms(boxes_xyxy: np.ndarray, scores: np.ndarray, iou_threshold: float) -> list[int]:
+    """Greedy Non-Maximum Suppression on xyxy boxes + per-box scores.
+
+    Returns indices of boxes to keep (into ``boxes_xyxy`` / ``scores``),
+    ordered by descending confidence.
+    """
+    import numpy as np
+
+    if boxes_xyxy.shape[0] == 0:
+        return []
+
+    order = scores.argsort()[::-1]
+    areas = (boxes_xyxy[:, 2] - boxes_xyxy[:, 0]) * (boxes_xyxy[:, 3] - boxes_xyxy[:, 1])
+    kept: list[int] = []
+
+    while order.size > 0:
+        current = order[0]
+        kept.append(int(current))
+
+        if order.size == 1:
+            break
+
+        # IoU of current vs rest
+        x1 = np.maximum(boxes_xyxy[current, 0], boxes_xyxy[order[1:], 0])
+        y1 = np.maximum(boxes_xyxy[current, 1], boxes_xyxy[order[1:], 1])
+        x2 = np.minimum(boxes_xyxy[current, 2], boxes_xyxy[order[1:], 2])
+        y2 = np.minimum(boxes_xyxy[current, 3], boxes_xyxy[order[1:], 3])
+
+        inter = np.maximum(0.0, x2 - x1) * np.maximum(0.0, y2 - y1)
+        union = areas[current] + areas[order[1:]] - inter
+        iou = inter / np.maximum(union, 1e-7)
+
+        order = order[1:][iou <= iou_threshold]
+
+    return kept
 
 
 class OnnxVisionModelService:
@@ -141,11 +313,10 @@ class OnnxVisionModelService:
         Steps
         -----
         1. Decode JPEG/PNG via Pillow.
-        2. Resize + letterbox to model input dimensions.
-        3. Normalise to [0, 1].
-        4. Run ONNX session.
-        5. Non-Maximum Suppression (simple IoU threshold).
-        6. Map surviving boxes to ``Detection`` dicts.
+        2. Letterbox to model input dimensions, normalise to [0, 1].
+        3. Run ONNX session → ``[1, 4+nc, num_boxes]``.
+        4. ``decode_yolo_output``: class scores + NMS + inverse letterbox.
+        5. Map to ``Detection`` dicts.
         """
         # ``recognize()`` only dispatches here when ``is_available`` is True,
         # which is set iff the ONNX session loaded successfully.
@@ -154,44 +325,49 @@ class OnnxVisionModelService:
         # --- decode ---------------------------------------------------
         from PIL import Image as PILImage
 
-        image = PILImage.open(__import__("io").BytesIO(image_bytes)).convert("RGB")
+        image = PILImage.open(io.BytesIO(image_bytes)).convert("RGB")
 
         # --- preprocess ------------------------------------------------
         input_tensor = self._preprocess(image)
 
         # --- infer -----------------------------------------------------
         outputs = self._session.run(None, {self._input_name: input_tensor})
-        raw_boxes: np.ndarray = outputs[0]  # shape [N, 6] or [1, N, 6]
-
-        # Handle batched output — take first batch item
-        if raw_boxes.ndim == 3:
-            raw_boxes = raw_boxes[0]  # [1, N, 6] → [N, 6]
-
-        if raw_boxes.size == 0:
-            return []
 
         # --- postprocess -----------------------------------------------
-        detections = self._postprocess(raw_boxes, image.size)
-        return detections
+        decoded = decode_yolo_output(
+            outputs[0],
+            original_size=image.size,
+            input_size=self._input_size,
+            confidence_threshold=self._confidence_threshold,
+        )
+        return [
+            Detection(
+                product_id=d["product_id"],
+                name=d["name"],
+                confidence=d["confidence"],
+            )
+            for d in decoded
+        ]
 
     def _preprocess(self, image: Image.Image) -> np.ndarray:
-        """Resize, letterbox, normalise → (1, 3, H, W) float32 CHW."""
+        """Letterbox, normalise → (1, 3, H, W) float32 CHW.
+
+        Shares :func:`letterbox_params` with :func:`decode_yolo_output` so
+        the forward transform and the inverse map cannot drift apart.
+        """
         import numpy as np
         from PIL import Image as PILImage
 
         target_w, target_h = self._input_size
-
-        # Resize with aspect-ratio preserving letterbox
         img_w, img_h = image.size
-        scale = min(target_w / img_w, target_h / img_h)
+        scale, pad_x, pad_y = letterbox_params(image.size, self._input_size)
+        # Same expression as inside letterbox_params → identical new_w/new_h.
         new_w, new_h = int(img_w * scale), int(img_h * scale)
         resized = image.resize((new_w, new_h), PILImage.Resampling.BILINEAR)
 
-        # Centre on a black canvas
-        canvas = PILImage.new("RGB", (target_w, target_h), (0, 0, 0))
-        offset_x = (target_w - new_w) // 2
-        offset_y = (target_h - new_h) // 2
-        canvas.paste(resized, (offset_x, offset_y))
+        # Centre on the standard YOLO 114-gray canvas
+        canvas = PILImage.new("RGB", (target_w, target_h), _LETTERBOX_FILL)
+        canvas.paste(resized, (int(pad_x), int(pad_y)))
 
         # HWC → CHW, uint8 → float32, normalise to [0, 1]
         arr = np.array(canvas, dtype=np.float32)
@@ -199,94 +375,3 @@ class OnnxVisionModelService:
         arr /= 255.0
         arr = np.expand_dims(arr, axis=0)  # 1,3,H,W
         return arr
-
-    def _postprocess(
-        self, raw_boxes: np.ndarray, original_size: tuple[int, int]
-    ) -> list[Detection]:
-        """Convert raw model output to ``Detection`` dicts.
-
-        Expected *raw_boxes* format: [x1, y1, x2, y2, confidence, class_id]
-        or [cx, cy, w, h, confidence, class_id] depending on model export.
-
-        This implementation assumes YOLO-style xyxy format.
-        """
-        target_w, target_h = self._input_size
-        orig_w, orig_h = original_size
-        scale = min(target_w / orig_w, target_h / orig_h)
-        pad_x = (target_w - orig_w * scale) / 2
-        pad_y = (target_h - orig_h * scale) / 2
-
-        # --- confidence filter ----------------------------------------
-        mask = raw_boxes[:, 4] >= self._confidence_threshold
-        boxes = raw_boxes[mask]
-        if boxes.size == 0:
-            return []
-
-        # --- rescale from letterbox coords back to original image -----
-        boxes[:, 0] = (boxes[:, 0] - pad_x) / scale
-        boxes[:, 1] = (boxes[:, 1] - pad_y) / scale
-        boxes[:, 2] = (boxes[:, 2] - pad_x) / scale
-        boxes[:, 3] = (boxes[:, 3] - pad_y) / scale
-
-        # --- simple NMS (IoU threshold 0.45) ---------------------------
-        kept = self._nms(boxes, iou_threshold=0.45)
-
-        detections: list[Detection] = []
-        for idx in kept:
-            conf = float(boxes[idx, 4])
-            class_id = int(boxes[idx, 5])
-            detections.append(
-                Detection(
-                    product_id=class_id,
-                    name=f"product_{class_id}",
-                    confidence=round(conf, 4),
-                )
-            )
-        detections.sort(key=lambda d: d["confidence"], reverse=True)
-        return detections
-
-    @staticmethod
-    def _nms(boxes: np.ndarray, iou_threshold: float = 0.45) -> list[int]:
-        """Greedy Non-Maximum Suppression on xyxy boxes.
-
-        Returns indices of boxes to keep, ordered by descending confidence.
-        """
-        import numpy as np
-
-        if boxes.shape[0] == 0:
-            return []
-
-        # Sort by confidence descending
-        order = boxes[:, 4].argsort()[::-1]
-        kept: list[int] = []
-
-        while order.size > 0:
-            current = order[0]
-            kept.append(int(current))
-
-            if order.size == 1:
-                break
-
-            # IoU of current vs rest
-            x1 = np.maximum(boxes[current, 0], boxes[order[1:], 0])
-            y1 = np.maximum(boxes[current, 1], boxes[order[1:], 1])
-            x2 = np.minimum(boxes[current, 2], boxes[order[1:], 2])
-            y2 = np.minimum(boxes[current, 3], boxes[order[1:], 3])
-
-            inter_w = np.maximum(0.0, x2 - x1)
-            inter_h = np.maximum(0.0, y2 - y1)
-            inter_area = inter_w * inter_h
-
-            area_current = (boxes[current, 2] - boxes[current, 0]) * (
-                boxes[current, 3] - boxes[current, 1]
-            )
-            area_rest = (boxes[order[1:], 2] - boxes[order[1:], 0]) * (
-                boxes[order[1:], 3] - boxes[order[1:], 1]
-            )
-            union = area_current + area_rest - inter_area
-            iou = inter_area / np.maximum(union, 1e-7)
-
-            keep_mask = iou <= iou_threshold
-            order = order[1:][keep_mask]
-
-        return kept

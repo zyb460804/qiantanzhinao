@@ -76,6 +76,44 @@ class TestMediaUpload:
         })
         assert res.status_code == 400
 
+    async def test_upload_unknown_media_type_rejected(self, client):
+        """审计 H-2 fail-open 回归：未知 media_type 必须整体拒绝（422），
+        不允许绕过扩展名/MIME 白名单把 .html 落盘。"""
+        evil = BytesIO(b"<html><script>alert(1)</script></html>")
+        res = await client.post("/api/v1/media/upload", files={
+            "file": ("evil.html", evil, "text/html"),
+        }, data={
+            "media_type": "foo",
+            "idempotency_key": str(uuid.uuid4()),
+        })
+        assert res.status_code == 422
+
+    async def test_upload_html_with_valid_media_type_rejected(self, client):
+        """合法 media_type 下，白名单外的扩展名/MIME 仍必须拒绝（fail-closed）。"""
+        evil = BytesIO(b"<html><script>alert(1)</script></html>")
+        res = await client.post("/api/v1/media/upload", files={
+            "file": ("evil.html", evil, "text/html"),
+        }, data={
+            "media_type": "image",
+            "idempotency_key": str(uuid.uuid4()),
+        })
+        assert res.status_code == 400
+
+    async def test_upload_document_pdf_accepted(self, client):
+        """合法 document 类型（PDF）照常可传 —— 白名单收紧不误伤正常流程。"""
+        fake_pdf = BytesIO(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj<</Type/Catalog>>endobj")
+        res = await client.post("/api/v1/media/upload", files={
+            "file": ("invoice.pdf", fake_pdf, "application/pdf"),
+        }, data={
+            "media_type": "document",
+            "business_type": "purchase_cert",
+            "idempotency_key": str(uuid.uuid4()),
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["code"] == 0
+        assert data["data"]["media_type"] == "document"
+
     async def test_upload_no_file(self, client):
         """Missing file should be rejected."""
         res = await client.post("/api/v1/media/upload", data={

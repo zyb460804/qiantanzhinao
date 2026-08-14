@@ -14,6 +14,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant
@@ -27,7 +28,7 @@ from app.models.merchant import Merchant
 from app.models.pos import SaleOrder
 from app.models.product import ProductCategory
 from app.routers.staff import require_permission
-from app.schemas.common import AnyResponse
+from app.schemas.common import AnyResponse, DecimalNum
 from app.services.accounts_service import get_customer_balance, record_customer_receivable
 from app.services.batch import consume_batches_fifo
 
@@ -36,6 +37,55 @@ class ClearancePromotionRequest(BaseModel):
     promotion_price: Decimal = Field(gt=0)
     start_at: datetime | None = None
     end_at: datetime | None = None
+
+
+class WasteRecordRequest(BaseModel):
+    """报损请求 schema — 协议错误（非数字/缺字段/非法 UUID）→ 422。
+
+    quantity 不加 gt=0：负数/零是业务语义错误，走路由显式校验返回
+    400 中文报错（保持既有 API 契约），而非 Pydantic 的 422。
+    """
+
+    product_id: int
+    sku_id: uuid.UUID | None = None
+    quantity: DecimalNum
+    unit: str | None = Field(default=None, max_length=20)
+    reason: str = "其他"
+    notes: str | None = Field(default=None, max_length=500)
+    photos: str | None = Field(default=None, max_length=2000)
+    idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+class CustomerRepayRequest(BaseModel):
+    """客户回款请求 schema — 非数字金额/缺字段 → 422；负数/零金额 → 路由 400。"""
+
+    customer_name: str = Field(max_length=50)
+    amount: DecimalNum
+    note: str | None = Field(default=None, max_length=500)
+    idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+class CreditProfileUpsertRequest(BaseModel):
+    """信用档案 upsert 请求 schema。
+
+    负额度/负账期是业务语义错误 → 路由显式 400 中文报错（不用 ge=0，
+    那会变成 422，破坏既有契约）。更新路径用 model_fields_set 区分
+    「未传字段」与「显式传 false/null」，保持原 body:dict 部分更新语义。
+    """
+
+    customer_name: str = Field(max_length=50)
+    credit_limit: DecimalNum | None = None
+    default_credit_days: int | None = None
+    is_blocked: bool = False
+    block_reason: str | None = Field(default=None, max_length=200)
+    notes: str | None = None
+
+
+class CreditCheckRequest(BaseModel):
+    """赊账信用检查请求 schema — 非数字金额/缺字段 → 422。"""
+
+    customer_name: str = Field(max_length=50)
+    amount: DecimalNum
 
 
 def _naive_utc(value: datetime | None) -> datetime | None:
@@ -77,9 +127,32 @@ async def list_waste_reasons():
     return {"code": 0, "data": WASTE_REASONS}
 
 
+async def _find_inventory_by_idempotency_key(
+    db: AsyncSession, merchant_id: uuid.UUID, key: str
+) -> InventoryRecord | None:
+    """按幂等键回查库存流水（唯一约束 uq_inventory_idempotency_per_merchant）。"""
+    return (
+        await db.execute(
+            select(InventoryRecord).where(
+                InventoryRecord.merchant_id == merchant_id,
+                InventoryRecord.idempotency_key == key,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def _waste_idempotent_replay(record: InventoryRecord) -> dict:
+    """幂等键命中已存在流水：返回原记录语义（200），不重复扣库存、不重复审计。"""
+    return {
+        "code": 0,
+        "message": "重复报损请求：幂等键已存在，已返回原报损记录（未重复扣库存）",
+        "data": {"record_id": str(record.id), "consumed": float(abs(record.quantity))},
+    }
+
+
 @router.post("/waste", response_model=AnyResponse)
 async def record_waste(
-    body: dict,
+    body: WasteRecordRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
     _perm=Depends(require_permission("record_waste")),
@@ -88,12 +161,15 @@ async def record_waste(
 
     Body: {product_id, sku_id?, quantity, unit, reason, notes?, photos?}
     """
-    product_id = body["product_id"]
-    sku_id = uuid.UUID(body["sku_id"]) if body.get("sku_id") else None
-    quantity = Decimal(str(body["quantity"]))
-    reason = body.get("reason", "其他")
-    notes = body.get("notes", "")
-    photos = body.get("photos", "")
+    product_id = body.product_id
+    sku_id = body.sku_id
+    quantity = body.quantity
+    reason = body.reason
+    notes = body.notes or ""
+    photos = body.photos or ""
+    idempotency_key = body.idempotency_key or (
+        f"waste:{merchant.id}:{product_id}:{utc_now().timestamp()}"
+    )
 
     if photos:
         notes = f"{notes} [照片: {photos}]" if notes else f"[照片: {photos}]"
@@ -102,6 +178,15 @@ async def record_waste(
         raise HTTPException(status_code=400, detail="报损数量必须大于0")
     if reason not in WASTE_REASONS:
         raise HTTPException(status_code=400, detail=f"无效报损原因: {reason}")
+
+    # 幂等预检：客户端重试同 idempotency_key 时直接返回原记录，
+    # 避免二次 FIFO 扣库存。并发竞态由唯一约束 + 下方 commit 捕获兜底。
+    if body.idempotency_key:
+        existing = await _find_inventory_by_idempotency_key(db, merchant.id, body.idempotency_key)
+        if existing is not None:
+            if existing.event_type != "waste":
+                raise HTTPException(status_code=409, detail="幂等键已被其他库存流水占用，请更换")
+            return _waste_idempotent_replay(existing)
 
     product = await db.get(ProductCategory, product_id)
     if not product:
@@ -120,13 +205,12 @@ async def record_waste(
         product_id=product_id,
         sku_id=sku_id,
         quantity=-quantity,
-        unit=body.get("unit", product.unit),
+        unit=body.unit or product.unit,
         event_type="waste",
         event_time=utc_now(),
         source="manual",
         notes=f"{reason}: {notes}" if notes else reason,
-        idempotency_key=body.get("idempotency_key")
-        or f"waste:{merchant.id}:{product_id}:{utc_now().timestamp()}",
+        idempotency_key=idempotency_key,
     )
     db.add(record)
 
@@ -147,7 +231,20 @@ async def record_waste(
         )
     )
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # 并发重复提交同幂等键：唯一约束拦截（扣库存随事务一并回滚），
+        # 回查原记录幂等返回，而不是向客户端抛 500。
+        await db.rollback()
+        existing = await _find_inventory_by_idempotency_key(db, merchant.id, idempotency_key)
+        if existing is not None:
+            if existing.event_type != "waste":
+                raise HTTPException(
+                    status_code=409, detail="幂等键已被其他库存流水占用，请更换"
+                ) from exc
+            return _waste_idempotent_replay(existing)
+        raise
     return {
         "code": 0,
         "message": f"已记录{reason} {float(quantity)}{product.unit}",
@@ -598,14 +695,14 @@ async def customer_ledger(
 
 @router.post("/customers/repay", response_model=AnyResponse)
 async def customer_repay(
-    body: dict,
+    body: CustomerRepayRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
     _perm=Depends(require_permission("credit_sale")),
 ):
     """Record a customer repayment."""
-    customer_name = (body.get("customer_name") or "").strip()
-    amount = Decimal(str(body.get("amount", 0)))
+    customer_name = (body.customer_name or "").strip()
+    amount = body.amount
     if not customer_name:
         raise HTTPException(status_code=400, detail="客户名称不能为空")
     if amount <= 0:
@@ -624,8 +721,8 @@ async def customer_repay(
         customer_name=customer_name,
         amount=amount,
         direction="repay",
-        note=body.get("note", "手动回款"),
-        idempotency_key=body.get("idempotency_key"),
+        note=body.note or "手动回款",
+        idempotency_key=body.idempotency_key,
     )
     await db.commit()
     new_balance = await get_customer_balance(db, merchant.id, customer_name)
@@ -688,7 +785,7 @@ async def get_customer_credit_profile(
 
 @router.post("/customers/credit-profile", response_model=AnyResponse)
 async def upsert_customer_credit_profile(
-    body: dict,
+    body: CreditProfileUpsertRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
     _perm=Depends(require_permission("credit_sale")),
@@ -697,9 +794,15 @@ async def upsert_customer_credit_profile(
 
     Body: {customer_name, credit_limit?, default_credit_days?, is_blocked?, block_reason?, notes?}
     """
-    customer_name = (body.get("customer_name") or "").strip()
+    customer_name = (body.customer_name or "").strip()
     if not customer_name:
         raise HTTPException(status_code=400, detail="客户名称不能为空")
+
+    # 业务校验：负额度/负账期直接拒绝（负账期会让所有欠款永远「未逾期」）。
+    if body.credit_limit is not None and body.credit_limit < 0:
+        raise HTTPException(status_code=400, detail="信用额度不能为负数")
+    if body.default_credit_days is not None and body.default_credit_days < 0:
+        raise HTTPException(status_code=400, detail="默认账期天数不能为负数")
 
     profile = (
         await db.execute(
@@ -710,34 +813,33 @@ async def upsert_customer_credit_profile(
         )
     ).scalar_one_or_none()
 
+    # model_fields_set = 请求里显式出现的字段，等价于原 body:dict 的
+    # `if "x" in body` 部分更新语义：未传的字段保持原值不动。
+    fields = body.model_fields_set
     if profile:
         # Update existing
-        if "credit_limit" in body:
-            profile.credit_limit = (
-                Decimal(str(body["credit_limit"])) if body["credit_limit"] is not None else None
-            )
-        if "default_credit_days" in body:
-            profile.default_credit_days = body["default_credit_days"]
-        if "is_blocked" in body:
-            profile.is_blocked = body["is_blocked"]
-            if body["is_blocked"]:
-                profile.block_reason = body.get("block_reason", "手动停赊")
+        if "credit_limit" in fields:
+            profile.credit_limit = body.credit_limit
+        if "default_credit_days" in fields:
+            profile.default_credit_days = body.default_credit_days
+        if "is_blocked" in fields:
+            profile.is_blocked = body.is_blocked
+            if body.is_blocked:
+                profile.block_reason = body.block_reason or "手动停赊"
             else:
                 profile.block_reason = None
-        if "notes" in body:
-            profile.notes = body["notes"]
+        if "notes" in fields:
+            profile.notes = body.notes
         action = "updated"
     else:
         profile = CustomerCreditProfile(
             merchant_id=merchant.id,
             customer_name=customer_name,
-            credit_limit=(
-                Decimal(str(body["credit_limit"])) if body.get("credit_limit") is not None else None
-            ),
-            default_credit_days=body.get("default_credit_days"),
-            is_blocked=body.get("is_blocked", False),
-            block_reason=body.get("block_reason") if body.get("is_blocked") else None,
-            notes=body.get("notes"),
+            credit_limit=body.credit_limit,
+            default_credit_days=body.default_credit_days,
+            is_blocked=body.is_blocked,
+            block_reason=body.block_reason if body.is_blocked else None,
+            notes=body.notes,
         )
         db.add(profile)
         action = "created"
@@ -767,7 +869,7 @@ async def upsert_customer_credit_profile(
 
 @router.post("/customers/check-credit", response_model=AnyResponse)
 async def check_customer_credit(
-    body: dict,
+    body: CreditCheckRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -776,8 +878,8 @@ async def check_customer_credit(
     Body: {customer_name, amount}
     Returns: {allowed, reason, current_balance, credit_limit, remaining_credit}
     """
-    customer_name = (body.get("customer_name") or "").strip()
-    amount = Decimal(str(body.get("amount", 0)))
+    customer_name = (body.customer_name or "").strip()
+    amount = body.amount
     if not customer_name:
         raise HTTPException(status_code=400, detail="客户名称不能为空")
 
@@ -794,6 +896,22 @@ async def check_customer_credit(
         )
     ).scalar_one_or_none()
 
+    credit_limit = float(profile.credit_limit) if profile and profile.credit_limit else None
+
+    # 负/零金额无业务意义：显式拒绝。否则 remaining_credit 会随负金额反向
+    # 增加，信用校验被绕过（allowed 恒真），任何负数金额都能「赊」。
+    if amount <= 0:
+        return {
+            "code": 0,
+            "data": {
+                "allowed": False,
+                "reason": "金额必须大于0",
+                "current_balance": float(balance),
+                "credit_limit": credit_limit,
+                "remaining_credit": 0,
+            },
+        }
+
     # Check block
     if profile and profile.is_blocked:
         return {
@@ -802,7 +920,7 @@ async def check_customer_credit(
                 "allowed": False,
                 "reason": profile.block_reason or "该客户已被停赊",
                 "current_balance": float(balance),
-                "credit_limit": float(profile.credit_limit) if profile.credit_limit else None,
+                "credit_limit": credit_limit,
                 "remaining_credit": 0,
             },
         }
@@ -832,9 +950,7 @@ async def check_customer_credit(
             "allowed": True,
             "reason": None,
             "current_balance": float(balance),
-            "credit_limit": float(profile.credit_limit)
-            if profile and profile.credit_limit
-            else None,
+            "credit_limit": credit_limit,
             "remaining_credit": remaining_credit,
         },
     }

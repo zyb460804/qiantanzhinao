@@ -8,13 +8,12 @@ GitHub-learned formulas (ForecastIQ, FreshStock AI).
 
 import logging
 import uuid
-from datetime import date
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.timezone import local_days_ago, utc_now, utc_today_start
+from app.core.timezone import cst_days_ago_bounds_utc, cst_today, utc_now, utc_today_start
 from app.models.ai_action import AIAction
 from app.models.environment import EnvironmentRecord
 from app.models.inventory import InventoryRecord
@@ -274,18 +273,23 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
     这样单测可直接打本函数、不依赖 HTTP 层，也顺带灭掉了 N+1 的
     可读性问题（查询仍逐商品发起，后续可在服务层统一聚合）。
     """
-    today = date.today()
+    # EnvironmentRecord.date 是业务日（CST），取业务「今天」而非服务器本地日期
+    today = cst_today()
 
     # 1. 当前环境
     env_row = (
         await db.execute(select(EnvironmentRecord).where(EnvironmentRecord.date == today))
     ).scalar_one_or_none()
 
+    # 注意判空用 is not None：temp_high=0°C（严寒）/ rainfall_prob=0（确无降雨）
+    # 是真实值，falsy 判断会把它们错误替换成默认 25/20。
     env_factors = EnvFactors(
         date=today,
-        temp_high=float(env_row.temp_high) if env_row and env_row.temp_high else 25,
-        temp_low=float(env_row.temp_low) if env_row and env_row.temp_low else 18,
-        rainfall_prob=float(env_row.rainfall_prob) if env_row and env_row.rainfall_prob else 20,
+        temp_high=float(env_row.temp_high) if env_row and env_row.temp_high is not None else 25,
+        temp_low=float(env_row.temp_low) if env_row and env_row.temp_low is not None else 18,
+        rainfall_prob=(
+            float(env_row.rainfall_prob) if env_row and env_row.rainfall_prob is not None else 20
+        ),
         is_holiday=env_row.is_holiday if env_row else False,
         holiday_name=env_row.holiday_name if env_row else None,
         is_weekend=env_row.is_weekend if env_row else (today.weekday() >= 5),
@@ -373,8 +377,8 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
             or 0
         )
 
-        # 7 日 / 30 日销量均值
-        seven_days_ago = local_days_ago(7)
+        # 7 日 / 30 日销量均值（CST 业务日窗口，event_time 为 naive UTC）
+        seven_days_ago = cst_days_ago_bounds_utc(7)[0]
         total_sales_7d = float(
             (
                 await db.execute(
@@ -390,7 +394,7 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
         )
         moving_avg_7d = round(total_sales_7d / 7, 1)
 
-        thirty_days_ago = local_days_ago(30)
+        thirty_days_ago = cst_days_ago_bounds_utc(30)[0]
         total_sales_30d = float(
             (
                 await db.execute(

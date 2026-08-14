@@ -20,21 +20,13 @@ from app.core.admin_permissions import (
 )
 from app.core.admin_security import get_current_admin
 from app.core.audit import log_action
+from app.core.invoicing import get_invoice_by_period, insert_invoice
 from app.database import get_db
 from app.models.saas import Invoice, Plan, PlatformAdmin, Subscription, Tenant
 from app.services.state_machine import validate_invoice_transition
 
 
 router = APIRouter(prefix="/api/admin/invoices", tags=["admin-invoices"])
-
-_INVOICE_SEQ = 0
-
-
-def _next_invoice_no() -> str:
-    global _INVOICE_SEQ
-    _INVOICE_SEQ += 1
-    now = datetime.now(UTC)
-    return f"INV-{now.strftime('%Y%m')}-{_INVOICE_SEQ:04d}"
 
 
 class InvoiceInfo(BaseModel):
@@ -166,20 +158,29 @@ async def create_invoice(
         raise HTTPException(status_code=404, detail="租户不存在")
     now = datetime.now(UTC)
     due_date = now + timedelta(days=req.due_days)
-    inv = Invoice(
-        tenant_id=req.tenant_id,
-        subscription_id=req.subscription_id,
-        invoice_no=_next_invoice_no(),
-        amount=req.amount,
-        currency=req.currency,
-        status="draft",
-        period_start=req.period_start,
-        period_end=req.period_end,
-        due_date=due_date,
-        line_items=req.line_items,
-        notes=req.notes,
+    # invoice_no 由数据库侧 MAX+1 发号（进程重启/双副本不撞号）；
+    # (subscription_id, period_start) 已有票时 insert_invoice 返回已有票 → 409。
+    inv, created = await insert_invoice(
+        db,
+        {
+            "tenant_id": req.tenant_id,
+            "subscription_id": req.subscription_id,
+            "amount": req.amount,
+            "currency": req.currency,
+            "status": "draft",
+            "period_start": req.period_start,
+            "period_end": req.period_end,
+            "due_date": due_date,
+            "line_items": req.line_items,
+            "notes": req.notes,
+        },
+        now=now,
     )
-    db.add(inv)
+    if not created:
+        raise HTTPException(
+            status_code=409,
+            detail=f"该订阅在此计费周期已存在发票 {inv.invoice_no}，不可重复开具",
+        )
 
     await log_action(
         db,
@@ -306,8 +307,11 @@ async def generate_invoice_from_subscription(
 
     amount = plan.price_yearly if sub.billing_cycle == "yearly" else plan.price_monthly
     now = datetime.now(UTC)
-    period_start = sub.current_period_start or now
-    period_end = sub.current_period_end or (now + timedelta(days=30))
+    # 周期去重（幂等键 = subscription_id + period_start）：
+    # period_start 锚定订阅自身（current_period_start → created_at → now 兜底），
+    # 保证同订阅多次调用计算出同一 key，重复调用返回已有票而非重复出票。
+    period_start = sub.current_period_start or sub.created_at or now.replace(tzinfo=None)
+    period_end = sub.current_period_end or (period_start + timedelta(days=30))
     line_items = [
         {
             "name": f"{plan.name} - {sub.billing_cycle}",
@@ -316,20 +320,35 @@ async def generate_invoice_from_subscription(
         }
     ]
 
-    inv = Invoice(
-        tenant_id=sub.tenant_id,
-        subscription_id=sub.id,
-        invoice_no=_next_invoice_no(),
-        amount=amount,
-        currency="CNY",
-        status="sent",
-        period_start=period_start,
-        period_end=period_end,
-        due_date=now + timedelta(days=30),
-        line_items=line_items,
-        notes=f"基于订阅 {sub.id} 自动生成",
+    # 快路径：已有该周期发票 → 直接幂等返回
+    existing = await get_invoice_by_period(db, sub.id, period_start)
+    if existing is not None:
+        return {
+            "message": "该周期发票已存在，返回已有发票",
+            "invoice_id": str(existing.id),
+            "invoice_no": existing.invoice_no,
+            "amount": str(existing.amount),
+            "created": False,
+        }
+
+    # 慢路径兜底：并发下快路径漏检由 (subscription_id, period_start) 唯一约束
+    # + ON CONFLICT DO NOTHING 吸收，insert_invoice 回查返回已有票。
+    inv, created = await insert_invoice(
+        db,
+        {
+            "tenant_id": sub.tenant_id,
+            "subscription_id": sub.id,
+            "amount": amount,
+            "currency": "CNY",
+            "status": "sent",
+            "period_start": period_start,
+            "period_end": period_end,
+            "due_date": now + timedelta(days=30),
+            "line_items": line_items,
+            "notes": f"基于订阅 {sub.id} 自动生成",
+        },
+        now=now,
     )
-    db.add(inv)
 
     await log_action(
         db,
@@ -342,14 +361,16 @@ async def generate_invoice_from_subscription(
             "subscription_id": str(sub_id),
             "invoice_no": inv.invoice_no,
             "amount": str(amount),
+            "created": created,
         },
         request=request,
     )
     await db.commit()
     await db.refresh(inv)
     return {
-        "message": "发票已生成",
+        "message": "发票已生成" if created else "该周期发票已存在，返回已有发票",
         "invoice_id": str(inv.id),
         "invoice_no": inv.invoice_no,
         "amount": str(inv.amount),
+        "created": created,
     }

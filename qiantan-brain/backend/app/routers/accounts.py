@@ -55,7 +55,9 @@ async def supplier_balance_summary(
     items = [
         SupplierBalanceRow(
             supplier_id=str(r["supplier_id"]),
-            supplier_name=r.get("supplier_name"),
+            # list_supplier_balances 返回的键名是 "name"（models/accounts.py
+            # 语义：余额聚合行带供应商名）。原先读 "supplier_name" 恒为 None。
+            supplier_name=r.get("name"),
             balance=float(r["balance"]),
         )
         for r in rows
