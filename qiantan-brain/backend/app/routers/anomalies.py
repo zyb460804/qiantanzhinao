@@ -11,14 +11,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant
+from app.core.timezone import cst_date_of_utc_naive, utc_now
 from app.database import get_db
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
@@ -89,27 +90,29 @@ async def scan_merchant_anomalies(
     从 InventoryRecord 按天聚合每个商品的销量（event_type='sale' 的 quantity），
     取最后一天作为 current_value、之前 N-1 天作为 history，逐一调用异常检测。
     返回有异常的商品列表（按信号数降序）。
-    """
-    cutoff = datetime.now(UTC) - timedelta(days=days + 1)
 
-    # 按天聚合每个商品的销量（event_type='sale' 的 quantity）
+    日分桶在 Python 侧按 CST 业务日重算（V5-M3，同 twin._daily_breakdown）：
+    SQL 的 func.date(event_time) 只能得到 UTC 日期键，CST 0-8 点的销售会被
+    归入前一天，导致零销补齐与「最后一天」判定错位。
+    """
+    cutoff = utc_now() - timedelta(days=days + 1)
+
+    # 拉原始 sale 行（SQL 侧只做 merchant/类型/时间窗收窄），Python 侧按
+    # CST 业务日分桶求和
     rows = (
         await db.execute(
             select(
                 InventoryRecord.product_id,
-                func.date(InventoryRecord.event_time).label("d"),
-                func.sum(InventoryRecord.quantity).label("qty"),
-            )
-            .where(
+                InventoryRecord.event_time,
+                InventoryRecord.quantity,
+            ).where(
                 InventoryRecord.merchant_id == merchant.id,
                 InventoryRecord.event_type == "sale",
                 InventoryRecord.is_voided.is_(False),
                 InventoryRecord.event_time >= cutoff,
             )
-            .group_by(InventoryRecord.product_id, "d")
-            .order_by(InventoryRecord.product_id, "d")
         )
-    ).all()  # noqa: E712
+    ).all()
 
     if not rows:
         return {
@@ -117,16 +120,19 @@ async def scan_merchant_anomalies(
             "data": {"scanned": 0, "anomalies": [], "summary": "近期无销量数据"},
         }
 
-    # 按 product_id 聚合成序列
-    by_product: dict[int, list[tuple[str, float]]] = {}
-    for row in rows:
-        by_product.setdefault(row.product_id, []).append((str(row.d), float(row.qty or 0)))
+    # 按 product_id 聚合成「CST 日 → 销量」映射
+    qty_by_product_day: dict[int, dict[str, float]] = {}
+    for product_id, event_time, quantity in rows:
+        day = cst_date_of_utc_naive(event_time).isoformat()
+        qty_by_day = qty_by_product_day.setdefault(product_id, {})
+        qty_by_day[day] = qty_by_day.get(day, 0.0) + float(quantity or 0)
 
     # 补齐缺失日期（没有销量的天记为 0）—— 连续零销才能被检出
-    all_dates = sorted({d for _, seq in by_product.items() for d, _ in seq})
-    for pid, seq in by_product.items():
-        seq_map = dict(seq)
-        by_product[pid] = [(d, seq_map.get(d, 0.0)) for d in all_dates]
+    all_dates = sorted({d for qty_by_day in qty_by_product_day.values() for d in qty_by_day})
+    by_product: dict[int, list[tuple[str, float]]] = {
+        pid: [(d, qty_by_day.get(d, 0.0)) for d in all_dates]
+        for pid, qty_by_day in qty_by_product_day.items()
+    }
 
     # 查商品名（product_id 关联 product_categories 表，int 主键）
     product_ids = list(by_product.keys())

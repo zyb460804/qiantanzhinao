@@ -69,7 +69,8 @@ class TestAnomalyDetector:
         detector = AnomalyDetector(DetectionConfig(modified_zscore_threshold=3.0))
         # 历史有一个轻微离群值 30, MAD不受太大影响
         # sorted: [10,10,10,10,10,10,10,11,12,30], median=10
-        # MAD of abs deviations: sorted([0,0,0,0,0,0,0,1,2,20]) → median of [0,0,0,0,0,0,0,1,2,20] = 0
+        # MAD of abs deviations: sorted([0,0,0,0,0,0,0,1,2,20])
+        # → median of [0,0,0,0,0,0,0,1,2,20] = 0
         # Hmm, MAD=0 means no detection. Let me use more varied data.
         history = [10.0, 11.0, 9.0, 12.0, 10.0, 8.0, 30.0, 11.0, 10.0, 9.0]
         result = detector._modified_zscore_detect(history, 50.0)

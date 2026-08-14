@@ -331,7 +331,10 @@ class TestSupplierScorer:
         """自定义权重影响评分。"""
         default = SupplierScorer()
         price_focused = SupplierScorer(
-            weights={"quality": 0.1, "delivery": 0.1, "price": 0.5, "stability": 0.15, "service": 0.15}
+            weights={
+                "quality": 0.1, "delivery": 0.1, "price": 0.5,
+                "stability": 0.15, "service": 0.15,
+            }
         )
         m = self._make_bad_metrics()
         card_default = default.evaluate(m)

@@ -10,18 +10,19 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.idempotency import short_idem_key
 from app.core.security import get_current_merchant
 from app.core.tenant_context import QuotaCheck
-from app.core.timezone import local_now, utc_now
+from app.core.timezone import cst_day_bounds_utc, cst_today, utc_now
 from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.catalog import ProductSKU
@@ -171,7 +172,7 @@ async def _resolve_sku_map(
 
 
 def _resolve_unit_price(
-    request_price: float | None, sku: ProductSKU | None, product_name: str
+    request_price: float | Decimal | None, sku: ProductSKU | None, product_name: str
 ) -> Decimal:
     if request_price is not None:
         return Decimal(str(request_price)).quantize(Decimal("0.01"))
@@ -255,7 +256,9 @@ async def _create_order_items_and_consume(
                 event_time=utc_now(),
                 source="pos",
                 notes=f"订单 {order.order_no}",
-                idempotency_key=f"sale:{order.id}:{order_item.id}",
+                # V5-C1: f"sale:{uuid}:{uuid}" 长 78 字符，超出
+                # InventoryRecord.idempotency_key VARCHAR(64)，PG 全量直接 500。
+                idempotency_key=short_idem_key("sale", order.id, order_item.id),
                 client_id=order.client_id,
                 client_reference=order.order_no,
             )
@@ -298,6 +301,7 @@ async def _apply_payments(
                 status_code=400,
                 detail=f"支付金额合计 {total_paid} 与应收 {payable} 不匹配",
             )
+        credit_total = Decimal("0")
         for method, amt in normalized_payments:
             payment = Payment(
                 merchant_id=merchant_id,
@@ -309,16 +313,22 @@ async def _apply_payments(
             )
             db.add(payment)
             if method == "credit":
-                await record_customer_receivable(
-                    db,
-                    merchant_id=merchant_id,
-                    customer_name=(customer_name or "").strip(),
-                    amount=amt,
-                    direction="charge",
-                    sale_order_id=order.id,
-                    note=f"订单 {order.order_no} 赊账（组合支付）",
-                    idempotency_key=f"sale-credit:{order.id}:{method}",
-                )
+                credit_total += amt
+        if credit_total > 0:
+            # LOW(b) 修复：组合支付出现多条 credit 条目时，原先逐笔共用
+            # f"sale-credit:{order.id}:credit" 会撞 CustomerReceivable 的
+            # (merchant_id, idempotency_key) 唯一约束 → IntegrityError 500。
+            # 改为按合计金额记一笔应收；Payment 流水仍逐笔保留。
+            await record_customer_receivable(
+                db,
+                merchant_id=merchant_id,
+                customer_name=(customer_name or "").strip(),
+                amount=credit_total,
+                direction="charge",
+                sale_order_id=order.id,
+                note=f"订单 {order.order_no} 赊账（组合支付）",
+                idempotency_key=short_idem_key("sale-credit", order.id, "combo"),
+            )
         order.paid_amount = total_paid
         order.status = "paid"
         order.paid_at = now
@@ -777,8 +787,12 @@ async def _refund_single_item(
     reason: str,
     merchant_id: uuid.UUID,
     product_name: str,
-) -> dict:
-    """Refund one line item: reverse inventory, optionally restock batch, write audit."""
+) -> tuple[dict, InventoryRecord]:
+    """Refund one line item: reverse inventory, optionally restock batch, write audit.
+
+    Returns (result_dict, inventory_record) —— 返回库存记录引用供整单退款的
+    ±0.01 折扣残差对齐（LOW(c)）同步修正 total_amount。
+    """
     product_id = _require_product_id(item, action="执行库存退款")
     unit_price = item.unit_price or Decimal("0")
     # Fix 2: 行退款额按订单实付比例（total/gross）摊折扣。按毛额（数量×单价）退款
@@ -808,7 +822,9 @@ async def _refund_single_item(
         # P1 修复：同一商品行多次退款会撞唯一约束（merchant_id+idempotency_key）。
         # item.refund_quantity 在本函数开头已更新为本次退款后的累计值，
         # 加入幂等键可区分多次退款（单调递增），同时保留同一退款重试的幂等保护。
-        idempotency_key=f"refund:{order.id}:{item.id}:{item.refund_quantity}",
+        # V5-C1: 原键 f"refund:{uuid}:{uuid}:{qty}" 长 82+，超出 VARCHAR(64)
+        # → PG 拒写 500；short_idem_key 压缩后仍按源串确定性同键。
+        idempotency_key=short_idem_key("refund", order.id, item.id, item.refund_quantity),
         client_id=order.client_id,
         client_reference=order.order_no,
     )
@@ -831,7 +847,7 @@ async def _refund_single_item(
         "refund_qty": float(refund_qty),
         "refund_amount": float(refund_amount),
         "returned_to_stock": return_to_stock,
-    }
+    }, inv_record
 
 
 @router.post("/orders/{order_id}/refund", response_model=AnyResponse)
@@ -869,6 +885,7 @@ async def refund_order(
     product_map = await _resolve_product_map(db, product_ids)
 
     results: list[dict] = []
+    refund_records: list[InventoryRecord] = []
     total_refund = Decimal("0")
 
     if body.items:
@@ -891,7 +908,7 @@ async def refund_order(
             refund_plan.append((item, spec, refund_qty))
 
         for item, spec, refund_qty in refund_plan:
-            result = await _refund_single_item(
+            result, inv_record = await _refund_single_item(
                 db,
                 order,
                 item,
@@ -902,6 +919,7 @@ async def refund_order(
                 _product_label(product_map, item.product_id),
             )
             results.append(result)
+            refund_records.append(inv_record)
             total_refund += Decimal(str(result["refund_amount"])).quantize(Decimal("0.01"))
 
         # Determine new status: check if ALL items are fully refunded
@@ -923,7 +941,7 @@ async def refund_order(
             full_refund_plan.append((item, remaining))
 
         for item, remaining in full_refund_plan:
-            result = await _refund_single_item(
+            result, inv_record = await _refund_single_item(
                 db,
                 order,
                 item,
@@ -934,6 +952,7 @@ async def refund_order(
                 _product_label(product_map, item.product_id),
             )
             results.append(result)
+            refund_records.append(inv_record)
             total_refund += Decimal(str(result["refund_amount"])).quantize(Decimal("0.01"))
         order.status = "refunded"
 
@@ -946,6 +965,10 @@ async def refund_order(
         if residual != 0:
             last_amount = Decimal(str(results[-1]["refund_amount"])) + residual
             results[-1]["refund_amount"] = float(last_amount.quantize(Decimal("0.01")))
+            # LOW(c) 修复：残差对齐不能只改 results 与 Payment 分配——
+            # 对应 InventoryRecord.total_amount 同步写入对齐值，保证
+            # 库存明细合计 == refunded_amount（±0.01 明细一致性）。
+            refund_records[-1].total_amount = last_amount.quantize(Decimal("0.01"))
             total_refund = (total_refund + residual).quantize(Decimal("0.01"))
 
     order.refunded_amount = (order.refunded_amount or Decimal("0")) + total_refund
@@ -1001,9 +1024,13 @@ async def refund_order(
                     direction="repay",
                     sale_order_id=order.id,
                     note=f"退款 订单 {order.order_no}: {body.reason}",
-                    # P1 修复：加入 order.refunded_amount（883 行已更新为含本次退款的累计值），
+                    # P1 修复：加入 order.refunded_amount（上方已更新为含本次退款的累计值），
                     # 区分同一订单同渠道的多次退款，保留重试幂等。
-                    idempotency_key=f"sale-refund:{order.id}:{method}:{order.refunded_amount}",
+                    # V5-C1: 原键 f"sale-refund:{uuid}:{method}:{amt}" 在退款额
+                    # ≥ 万元时超过 VARCHAR(64) → PG 500；short_idem_key 压缩。
+                    idempotency_key=short_idem_key(
+                        "sale-refund", order.id, method, order.refunded_amount
+                    ),
                 )
             total_refund -= amt
 
@@ -1218,7 +1245,8 @@ async def resume_held_order(
                 event_time=utc_now(),
                 source="pos",
                 notes=f"订单 {order.order_no}（取回挂单）",
-                idempotency_key=f"sale:{order.id}:{item.id}",
+                # V5-C1: 同创建订单路径，压缩后 ≤64（原 78 字符超列宽）。
+                idempotency_key=short_idem_key("sale", order.id, item.id),
                 client_id=order.client_id,
                 client_reference=order.order_no,
             )
@@ -1263,10 +1291,15 @@ async def cancel_held_order(
 ):
     """Cancel a held order (only held orders can be cancelled without refund)."""
     order = await db.scalar(
-        select(SaleOrder).where(
+        select(SaleOrder)
+        .where(
             SaleOrder.id == order_id,
             SaleOrder.merchant_id == merchant.id,
         )
+        # LOW(a) 修复：与 resume 支付路径竞态——无锁时取消方可能基于过期快照
+        # 把已被并发取单支付的单覆写为 cancelled。FOR UPDATE 行锁后重读状态，
+        # 已离开 held 的订单在这里被拒绝。
+        .with_for_update()
     )
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -1318,7 +1351,9 @@ async def _auto_reconcile_after_payment(
 
         # credit 无外部渠道账单，不需要建渠道对账任务。
         unique_channels = set(payments) - {"credit"}
-        today = local_now().date()
+        # V5-H1: 渠道对账任务日按 CST 业务日（原 local_now().date() 在 Docker UTC
+        # 下 CST 0-8 点会建到前一 UTC 日的任务，与日结窗口错位）。
+        today = cst_today()
         fee_rate = Decimal("0.006")
 
         for channel in unique_channels:
@@ -1354,11 +1389,12 @@ async def _check_settlement_locked(
 ) -> None:
     """如果当天日结已关闭，禁止业务操作（section 4.10 日结锁定）。
 
-    日界按本地时区（CST UTC+8）判定——摊贩凌晨出摊时 utc_now() 仍是前一天 UTC
-    日期，会误锁到前一天的日结导致新单一律 409。改用 local_now() 保证"今天"
-    与摊贩认知一致。
+    日界按 CST 业务日（Asia/Shanghai, UTC+8）判定——原 local_now().date() 依赖
+    服务器本地时区：Docker UTC 部署下 CST 凌晨 0-8 点会被判成前一 UTC 日，
+    误锁前一天已日结的日期导致新单一律 409（V5-H1）。cst_today() 与摊贩
+    认知中的「今天」及小程序 cstToday 提交口径一致。
     """
-    target_date = action_date or local_now().date()
+    target_date = action_date or cst_today()
     settlement = await db.scalar(
         select(DailySettlement).where(
             DailySettlement.merchant_id == merchant_id,
@@ -1379,7 +1415,10 @@ async def _estimate_daily_cogs(
     day_start: datetime,
     day_end: datetime,
 ) -> Decimal:
-    """Estimate COGS from sold quantity and recent average purchase cost."""
+    """Estimate COGS from sold quantity and recent average purchase cost.
+
+    day_start/day_end 为 naive UTC 的 [start, end) 半开区间（cst_day_bounds_utc）。
+    """
     inventory_rows = (
         await db.execute(
             select(
@@ -1391,7 +1430,7 @@ async def _estimate_daily_cogs(
                 InventoryRecord.is_voided.is_(False),
                 InventoryRecord.event_type.in_(("sale", "refund")),
                 InventoryRecord.event_time >= day_start,
-                InventoryRecord.event_time <= day_end,
+                InventoryRecord.event_time < day_end,
             )
         )
     ).all()
@@ -1424,7 +1463,7 @@ async def _estimate_daily_cogs(
                 InventoryRecord.product_id.in_(set(unknown_quantities)),
                 InventoryRecord.unit_cost.isnot(None),
                 InventoryRecord.event_time >= day_start - timedelta(days=30),
-                InventoryRecord.event_time <= day_end,
+                InventoryRecord.event_time < day_end,
             )
             .group_by(InventoryRecord.product_id)
         )
@@ -1445,19 +1484,18 @@ async def _estimate_daily_cogs(
 async def _settlement_numbers(
     db: AsyncSession, merchant_id: uuid.UUID, settle_date: date
 ) -> SettlementNumbers:
-    # 日结窗口按本地日界（CST UTC+8）切——SaleOrder.created_at 以 UTC 存储，
-    # 把本地 settle_date 的 00:00~23:59 转成 UTC 去比对，避免凌晨 0-8 点的
-    # 订单被归入前一日报表。
-    cst = timezone(timedelta(hours=8))
-    day_start = datetime.combine(settle_date, time.min, tzinfo=cst).astimezone(UTC)
-    day_end = datetime.combine(settle_date, time.max, tzinfo=cst).astimezone(UTC)
+    # 日结窗口按本地日界（CST UTC+8）切——DB 时间列存 naive UTC，用
+    # cst_day_bounds_utc 把 settle_date 的 [00:00, 24:00) 换算成 naive UTC
+    # 半开区间比对，避免凌晨 0-8 点的订单被归入前一日报表，也避免 aware
+    # 边界在 asyncpg（PG naive TIMESTAMP 列）上直接 TypeError（V2-C2 口径）。
+    day_start, day_end = cst_day_bounds_utc(settle_date)
     order_filters = (
         SaleOrder.merchant_id == merchant_id,
         SaleOrder.created_at >= day_start,
-        SaleOrder.created_at <= day_end,
+        SaleOrder.created_at < day_end,
         SaleOrder.status.not_in(("cancelled", "held")),
     )
-    total_sales_raw, order_count, legacy_credit_raw, refund_amount_raw = (
+    total_sales_raw, order_count, legacy_credit_raw = (
         await db.execute(
             select(
                 func.coalesce(func.sum(SaleOrder.total_amount), Decimal("0")),
@@ -1478,13 +1516,27 @@ async def _settlement_numbers(
                     ),
                     Decimal("0"),
                 ),
-                func.coalesce(func.sum(SaleOrder.refunded_amount), Decimal("0")),
             ).where(*order_filters)
         )
     ).one()
     total_sales = _decimal_value(total_sales_raw)
     legacy_credit = _decimal_value(legacy_credit_raw)
-    refund_amount = _decimal_value(refund_amount_raw)
+
+    # V1-H2 修复：退款改按「当日退款流水」归集 —— status="refunded" 的 Payment
+    # 行合计取负，窗口与 payments 一样按 Payment.created_at 当日切。原口径
+    # SUM(SaleOrder.refunded_amount) 按订单创建日归集：跨日退款时订单日重算
+    # diff=-100（refunded_amount 计入订单日、反向流水两头都不计），退款日又
+    # 什么都不显示，四流恒等式 total_sales = payments + credit + refund 被打破。
+    # 流水口径下退款计入退款日，恒等式对跨日退款成立。
+    refund_flow_row = await db.execute(
+        select(func.coalesce(func.sum(Payment.amount), Decimal("0"))).where(
+            Payment.merchant_id == merchant_id,
+            Payment.status == "refunded",
+            Payment.created_at >= day_start,
+            Payment.created_at < day_end,
+        )
+    )
+    refund_amount = (-_decimal_value(refund_flow_row.scalar())).quantize(Decimal("0.01"))
 
     payment_rows = (
         await db.execute(
@@ -1494,10 +1546,19 @@ async def _settlement_numbers(
                 Payment.merchant_id == merchant_id,
                 Payment.status.in_(("success", "refunded")),
                 Payment.created_at >= day_start,
-                Payment.created_at <= day_end,
-                SaleOrder.created_at >= day_start,
-                SaleOrder.created_at <= day_end,
-                SaleOrder.status.not_in(("cancelled", "held")),
+                Payment.created_at < day_end,
+                # V1-H2 配套：退款流水按退款日落账（不要求订单当日创建，跨日退款
+                # 的反向流水计入退款日的渠道额/payments）；正向收款仍要求订单当日
+                # 创建 —— 跨日回款的正向流水不进 payments（由 customer_repay 承接，
+                # 否则回款日 payments 与 customer_repay 双算）。
+                or_(
+                    Payment.status == "refunded",
+                    and_(
+                        SaleOrder.created_at >= day_start,
+                        SaleOrder.created_at < day_end,
+                        SaleOrder.status.not_in(("cancelled", "held")),
+                    ),
+                ),
             )
             .group_by(Payment.method)
         )
@@ -1521,7 +1582,7 @@ async def _settlement_numbers(
             SupplierPayable.merchant_id == merchant_id,
             SupplierPayable.direction == "payment",
             SupplierPayable.created_at >= day_start,
-            SupplierPayable.created_at <= day_end,
+            SupplierPayable.created_at < day_end,
             SupplierPayable.note.notlike("退货抵扣%"),
         )
     )
@@ -1533,7 +1594,7 @@ async def _settlement_numbers(
             SupplierPayable.merchant_id == merchant_id,
             SupplierPayable.direction == "purchase",
             SupplierPayable.created_at >= day_start,
-            SupplierPayable.created_at <= day_end,
+            SupplierPayable.created_at < day_end,
         )
     )
     purchase_new_debt = _decimal_value(purchase_new_debt_row.scalar())
@@ -1548,11 +1609,35 @@ async def _settlement_numbers(
             CustomerReceivable.merchant_id == merchant_id,
             CustomerReceivable.direction == "repay",
             CustomerReceivable.created_at >= day_start,
-            CustomerReceivable.created_at <= day_end,
+            CustomerReceivable.created_at < day_end,
             CustomerReceivable.note.notlike("退款%"),
         )
     )
     customer_repay = _decimal_value(customer_repay_row.scalar())
+
+    # V1-H3 修复：net_cash_flow 的 customer_repay 须排除「订单当日创建且其真金
+    # Payment 已计入 payments」的回款行 —— 当日赊账当日回款时 payments 已含该笔
+    # 回款，再计一次 customer_repay 会双算（净流 8 vs 物理 4）。排除量按
+    # credit_repay_row 同套 join 口径计算（订单当日创建 + 窗口内 repay 行），
+    # 但不要求订单存在 credit 流水：当日创建订单的回款 Payment 必然已进
+    # payments（payments 只按订单当日创建过滤），与是否落过 credit 行无关。
+    same_day_order_repay_row = await db.execute(
+        select(func.coalesce(func.sum(CustomerReceivable.amount), Decimal("0")))
+        .join(SaleOrder, SaleOrder.id == CustomerReceivable.sale_order_id)
+        .where(
+            CustomerReceivable.merchant_id == merchant_id,
+            CustomerReceivable.direction == "repay",
+            CustomerReceivable.note.notlike("退款%"),
+            CustomerReceivable.created_at >= day_start,
+            CustomerReceivable.created_at < day_end,
+            SaleOrder.merchant_id == merchant_id,
+            SaleOrder.created_at >= day_start,
+            SaleOrder.created_at < day_end,
+            SaleOrder.status.not_in(("cancelled", "held")),
+        )
+    )
+    same_day_order_repay = _decimal_value(same_day_order_repay_row.scalar())
+    customer_repay = (customer_repay - same_day_order_repay).quantize(Decimal("0.01"))
 
     # Fix 3: 赊账金额主口径 = 窗口内订单的 credit Payment 行净额（success 正向
     # 行 + refunded 反向行）。组合支付含 credit 的订单（status="paid"）由此纳入，
@@ -1567,10 +1652,10 @@ async def _settlement_numbers(
             CustomerReceivable.direction == "repay",
             CustomerReceivable.note.notlike("退款%"),
             CustomerReceivable.created_at >= day_start,
-            CustomerReceivable.created_at <= day_end,
+            CustomerReceivable.created_at < day_end,
             SaleOrder.merchant_id == merchant_id,
             SaleOrder.created_at >= day_start,
-            SaleOrder.created_at <= day_end,
+            SaleOrder.created_at < day_end,
             SaleOrder.status.not_in(("cancelled", "held")),
             _has_credit_payment(),
         )
@@ -1587,7 +1672,7 @@ async def _settlement_numbers(
             InventoryRecord.merchant_id == merchant_id,
             InventoryRecord.event_type == "waste",
             InventoryRecord.event_time >= day_start,
-            InventoryRecord.event_time <= day_end,
+            InventoryRecord.event_time < day_end,
         )
     )
     waste_cost = abs(_decimal_value(waste_cost_row.scalar()))
@@ -1624,7 +1709,9 @@ async def close_daily_settlement(
     db: AsyncSession = Depends(get_db),
     _perm=Depends(require_permission("daily_settle")),
 ):
-    if settle_date > local_now().date():
+    # V5-H1: 未来日期守卫同样按 CST 业务日判定（Docker UTC 下 CST 0-8 点时
+    # local_now().date() 会把 CST 今天误判成未来日期，拒绝正当日结）。
+    if settle_date > cst_today():
         raise HTTPException(status_code=400, detail="不可关闭未来日期的日结")
     numbers = await _settlement_numbers(db, merchant.id, settle_date)
     settlement = await db.scalar(

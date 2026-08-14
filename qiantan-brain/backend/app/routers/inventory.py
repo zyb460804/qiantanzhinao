@@ -25,12 +25,15 @@ from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
 from app.models.product import ProductCategory
 from app.models.stocktake import StocktakeItem, StocktakeSession
+from app.models.voice import VoiceLog
+from app.routers.staff import require_permission
 from app.schemas import inventory as inventory_schemas
 from app.schemas.common import AnyResponse
 from app.services.batch import create_batch, get_active_batches, rollback_batch_on_void
 from app.services.lifecycle import calc_batch_status
 from app.services.offline_sync import upsert_offline_items
 from app.services.sku_service import resolve_sku_id
+from app.services.voice_ledger import void_voice_confirmed_record
 
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
@@ -314,8 +317,64 @@ async def void_inventory_record(
     req: inventory_schemas.VoidRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("void_record")),
 ):
-    """Void an inventory record by ID — rolls back batches, creates audit log."""
+    """Void an inventory record by ID — rolls back batches, creates audit log.
+
+    按 source 分发（第五轮 V2-H1）：
+      - "pos"   → 409，引导走订单退款链路（pos.py refund 有完整核销逻辑）；
+      - "voice" → 复用 voice 侧共享撤销核心（先锁 VoiceLog 再锁流水行，
+                  与 voice.py 的 void/edit 维持统一加锁次序，消除跨路径
+                  双撤销竞态：双批次回滚 / 双往来账冲销）；
+      - 其他    → 原有手动撤销路径（流水行锁锚点 + 批次回滚 + 审计）。
+    """
+    # 第一跳（无锁读，仅定位与分发）：source 是不可变字段，无 TOCTOU 风险；
+    # 真正的加锁在分支内按既定次序进行。
+    probe = (
+        (await db.execute(select(InventoryRecord).where(InventoryRecord.id == record_id)))
+        .scalars()
+        .first()
+    )
+    if not probe or probe.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="库存记录不存在")
+
+    if probe.source == "pos":
+        # 订单体系另有完整退款链路（pos.py refund），直接撤销会绕过其核销逻辑。
+        raise HTTPException(
+            status_code=409,
+            detail="POS订单流水不支持直接撤销，请通过订单退款链路处理",
+        )
+
+    if probe.source == "voice" and probe.voice_log_id is not None:
+        # 语音链路记录：必须先锁 VoiceLog 再锁流水行（与 voice.py void/edit
+        # 的加锁次序一致），否则与语音侧并发撤销构成 ABBA。
+        log = (
+            (
+                await db.execute(
+                    select(VoiceLog).where(VoiceLog.id == probe.voice_log_id).with_for_update()
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if log is None or log.merchant_id != merchant.id:
+            raise HTTPException(status_code=404, detail="库存记录不存在")
+
+        record, batch_summary = await void_voice_confirmed_record(
+            db, log, req.reason or "", voided_by="manual"
+        )
+        if record is None:
+            # 目标流水已在别处被撤销（历史数据不一致）：回滚本次事务并按
+            # 幂等语义 409，不再重复落第二套回滚/审计。
+            raise HTTPException(status_code=409, detail="该记录已撤销")
+        await db.commit()
+        return {
+            "code": 0,
+            "message": "记录已撤销，库存和批次已回滚",
+            "data": {"record_id": str(record.id), "batch_summary": batch_summary},
+        }
+
+    # ── 手动路径（manual / purchase_list / stocktake / food_safety / offline …）──
     # 锚点行锁：串行化同一记录的并发撤销，消除 is_voided 检查的 TOCTOU 竞态
     # （PG 生效；SQLite 静默忽略 FOR UPDATE）。
     query = select(InventoryRecord).where(InventoryRecord.id == record_id).with_for_update()
@@ -562,8 +621,11 @@ async def submit_stocktake_item(
     db: AsyncSession = Depends(get_db),
 ):
     """Submit one actual count against the immutable start-time snapshot."""
+    # 锚点行锁（V2-H3）：与 complete 同款——先锁会话行再做状态检查，
+    # 串行化 submit 与 complete/cancel 的并发交错（否则 complete 提交后，
+    # 在途的 submit 仍能把已结束会话的条目改写）。
     session_result = await db.execute(
-        select(StocktakeSession).where(StocktakeSession.id == session_id)
+        select(StocktakeSession).where(StocktakeSession.id == session_id).with_for_update()
     )
     session = session_result.scalar_one_or_none()
     if not session or session.merchant_id != merchant.id:
@@ -618,8 +680,9 @@ async def submit_stocktake_batch(
 
     返回每个 product_id 的处理结果（ok / error），调用方按结果更新本地状态。
     """
+    # 锚点行锁（V2-H3）：与 complete 同款，先锁会话行再做状态检查。
     session_result = await db.execute(
-        select(StocktakeSession).where(StocktakeSession.id == session_id)
+        select(StocktakeSession).where(StocktakeSession.id == session_id).with_for_update()
     )
     session = session_result.scalar_one_or_none()
     if not session or session.merchant_id != merchant.id:
@@ -680,8 +743,11 @@ async def cancel_stocktake(
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel an in-progress stocktake. Completed sessions remain immutable."""
+    # 锚点行锁（V2-H3）：与 complete 同款——先锁会话行再做状态检查，
+    # 串行化 cancel 与 submit/complete 的并发交错。completed → 守卫拒绝，
+    # 不会被覆写为 cancelled。
     session_result = await db.execute(
-        select(StocktakeSession).where(StocktakeSession.id == session_id)
+        select(StocktakeSession).where(StocktakeSession.id == session_id).with_for_update()
     )
     session = session_result.scalar_one_or_none()
     if not session or session.merchant_id != merchant.id:

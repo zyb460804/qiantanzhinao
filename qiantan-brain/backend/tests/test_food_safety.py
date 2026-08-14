@@ -5,11 +5,11 @@ from datetime import datetime, timedelta
 import pytest
 
 from app.services.food_safety import (
+    DEFAULT_CCPS,
     CCPDefinition,
     CCPReading,
     CCPStatus,
     DailyChecklist,
-    DEFAULT_CCPS,
     FoodSafetyEngine,
     FoodSafetyScorecard,
     InspectionResult,
@@ -152,8 +152,9 @@ class TestExpiryCheck:
     def test_shorter_shelf_life_categories(self):
         """短保质期品类。"""
         engine = FoodSafetyEngine()
-        assert FoodSafetyEngine.CATEGORY_SHELF_LIFE["seafood"] < FoodSafetyEngine.CATEGORY_SHELF_LIFE["fruit"]
-        assert FoodSafetyEngine.CATEGORY_SHELF_LIFE["cooked_food"] < FoodSafetyEngine.CATEGORY_SHELF_LIFE["vegetable"]
+        shelf_life = FoodSafetyEngine.CATEGORY_SHELF_LIFE
+        assert shelf_life["seafood"] < shelf_life["fruit"]
+        assert shelf_life["cooked_food"] < shelf_life["vegetable"]
 
 
 class TestNCRGeneration:

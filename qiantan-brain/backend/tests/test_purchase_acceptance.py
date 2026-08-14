@@ -10,7 +10,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from tests.conftest import TEST_MERCHANT_ID
 
 from app.models.accounts import SupplierPayable
@@ -589,6 +589,151 @@ class TestSupplierPaymentAllocation:
         )
         assert purchase["settled_amount"] == 40.0
         assert purchase["remaining_amount"] == 60.0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 采购退货批次同步（第五轮 V2-H4）
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestPurchaseReturnReducesBatches:
+    """退货只减账面不减批次会造成超卖（账面 < 批次余量，FIFO 仍按旧量消耗）。
+
+    修复后：退货按 rollback purchase 分支口径同步压降批次
+    remaining_qty / purchase_qty，账面库存 == 批次余量。
+    """
+
+    async def _confirmed_item(self, client, db_session, qty=30):
+        async with db_session() as session:
+            await _create_recommendation(session, 1, qty)
+        gen = await client.post("/api/v1/purchase/from-advice", json={})
+        list_id = gen.json()["data"]["list_id"]
+
+        async with db_session() as session:
+            items = (
+                (
+                    await session.execute(
+                        select(PurchaseItem).where(PurchaseItem.list_id == uuid.UUID(list_id))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            item_id = str(items[0].id)
+
+        acc = await client.post(
+            f"/api/v1/purchase/{list_id}/acceptance",
+            json={
+                "items": [
+                    {
+                        "item_id": item_id,
+                        "arrival_qty": qty,
+                        "accepted_qty": qty,
+                        "shortage_qty": 0,
+                        "damaged_qty": 0,
+                        "rejected_qty": 0,
+                        "returned_qty": 0,
+                        "replenish_qty": 0,
+                        "actual_unit_cost": 2.0,
+                        "quality_ok": True,
+                    }
+                ],
+            },
+        )
+        assert acc.status_code == 200, acc.text
+        confirm = await client.post(f"/api/v1/purchase/{list_id}/acceptance/confirm")
+        assert confirm.status_code == 200, confirm.text
+        return item_id
+
+    async def test_return_reduces_batch_and_keeps_book_equal(self, client, db_session):
+        item_id = await self._confirmed_item(client, db_session, qty=30)
+
+        ret = await client.post(
+            f"/api/v1/purchase/items/{item_id}/return",
+            json={
+                "item_id": item_id,
+                "return_qty": 12,
+                "reason": "质量问题",
+                "offset_payable": False,
+            },
+        )
+        assert ret.status_code == 200, ret.text
+
+        async with db_session() as session:
+            batch = (
+                await session.execute(
+                    select(BatchLifecycle).where(
+                        BatchLifecycle.merchant_id == uuid.UUID(TEST_MERCHANT_ID),
+                        BatchLifecycle.product_id == 1,
+                    )
+                )
+            ).scalar_one()
+            assert float(batch.remaining_qty) == 18.0  # 30 - 12 同步缩减
+            assert float(batch.purchase_qty) == 18.0
+
+            book_qty = (
+                await session.execute(
+                    select(func.coalesce(func.sum(InventoryRecord.quantity), 0)).where(
+                        InventoryRecord.merchant_id == uuid.UUID(TEST_MERCHANT_ID),
+                        InventoryRecord.product_id == 1,
+                        InventoryRecord.is_voided.is_(False),
+                    )
+                )
+            ).scalar()
+            assert float(book_qty) == 18.0  # 账面 = 批次余量（不超卖）
+
+    async def test_partial_return_keeps_item_purchased_until_exhausted(
+        self, client, db_session
+    ):
+        """分两次退清：每次批次同步缩减，退清后 item 状态 → returned。"""
+        item_id = await self._confirmed_item(client, db_session, qty=10)
+
+        first = await client.post(
+            f"/api/v1/purchase/items/{item_id}/return",
+            json={
+                "item_id": item_id,
+                "return_qty": 4,
+                "reason": "第一次退货",
+                "offset_payable": False,
+            },
+        )
+        assert first.status_code == 200
+        assert first.json()["data"]["new_item_status"] == "purchased"
+
+        async with db_session() as session:
+            batch = (
+                await session.execute(
+                    select(BatchLifecycle).where(
+                        BatchLifecycle.merchant_id == uuid.UUID(TEST_MERCHANT_ID),
+                        BatchLifecycle.product_id == 1,
+                    )
+                )
+            ).scalar_one()
+            assert float(batch.remaining_qty) == 6.0
+
+        second = await client.post(
+            f"/api/v1/purchase/items/{item_id}/return",
+            json={
+                "item_id": item_id,
+                "return_qty": 6,
+                "reason": "退清余货",
+                "offset_payable": False,
+            },
+        )
+        assert second.status_code == 200
+        assert second.json()["data"]["new_item_status"] == "returned"
+
+        async with db_session() as session:
+            batch = (
+                await session.execute(
+                    select(BatchLifecycle).where(
+                        BatchLifecycle.merchant_id == uuid.UUID(TEST_MERCHANT_ID),
+                        BatchLifecycle.product_id == 1,
+                    )
+                )
+            ).scalar_one()
+            assert float(batch.remaining_qty) == 0.0
+            assert float(batch.purchase_qty) == 0.0
 
 
 class TestSupplierPaymentAutoComplete:

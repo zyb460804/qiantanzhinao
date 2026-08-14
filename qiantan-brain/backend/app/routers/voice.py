@@ -14,7 +14,6 @@ from app.config import settings
 from app.core.security import get_current_merchant, get_merchant_id
 from app.core.timezone import utc_now, utc_today_start
 from app.database import get_db
-from app.models.accounts import CustomerReceivable
 from app.models.audit import AuditLog
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
@@ -40,6 +39,7 @@ from app.services import asr_iflytek
 from app.services.accounts_service import record_customer_receivable
 from app.services.batch import consume_batches_fifo, create_batch, rollback_batch_on_void
 from app.services.sku_service import resolve_sku_id
+from app.services.voice_ledger import sync_voice_receivables, void_voice_confirmed_record
 from app.services.voice_parser import parse_voice_text
 
 
@@ -71,71 +71,6 @@ async def _lookup_product(db: AsyncSession, name: str) -> int | None:
     result = await db.execute(query)
     pid = result.scalar_one_or_none()
     return pid
-
-
-async def _sync_voice_receivables(
-    db: AsyncSession,
-    log: VoiceLog,
-    *,
-    adjustment_key: str,
-    target_party: str | None = None,
-    target_net: Decimal | None = None,
-) -> None:
-    """把该语音单名下的往来账净额对齐到目标（撤销 → 归零；修改 → 修正后金额）。
-
-    confirm 按 ``voice:{log.id}:charge/repay`` 幂等键落 CustomerReceivable；
-    撤销/修改若只回滚库存不反向冲账，应收会永久挂死。这里按同一前缀聚合
-    每个客户的当前净额（charge 为正、repay 为负），用 accounts_service
-    现有的 record_customer_receivable 写入差额记录，不新增模型字段。
-
-    adjustment_key 携带操作序号（void 只发生一次；edit 按次数递增），
-    因此重复编辑不会双重冲销，也不会撞幂等唯一约束。
-    """
-    rows = (
-        (
-            await db.execute(
-                select(CustomerReceivable).where(
-                    CustomerReceivable.merchant_id == log.merchant_id,
-                    CustomerReceivable.idempotency_key.startswith(
-                        f"voice:{log.id}:", autoescape=True
-                    ),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    net_by_customer: dict[str, Decimal] = {}
-    for row in rows:
-        sign = Decimal("1") if row.direction == "charge" else Decimal("-1")
-        net_by_customer[row.customer_name] = (
-            net_by_customer.get(row.customer_name, Decimal("0")) + sign * row.amount
-        )
-
-    targets: dict[str, Decimal] = {target_party: target_net} if target_party and target_net else {}
-
-    for name in set(net_by_customer) | set(targets):
-        delta = targets.get(name, Decimal("0")) - net_by_customer.get(name, Decimal("0"))
-        if delta > 0:
-            await record_customer_receivable(
-                db,
-                merchant_id=log.merchant_id,
-                customer_name=name,
-                amount=delta,
-                direction="charge",
-                note=f"语音冲正 {log.id}",
-                idempotency_key=f"{adjustment_key}:charge",
-            )
-        elif delta < 0:
-            await record_customer_receivable(
-                db,
-                merchant_id=log.merchant_id,
-                customer_name=name,
-                amount=-delta,
-                direction="repay",
-                note=f"语音冲销 {log.id}",
-                idempotency_key=f"{adjustment_key}:repay",
-            )
 
 
 @router.post("/upload", response_model=VoiceUploadResponse)
@@ -322,7 +257,10 @@ async def correct_voice(
     db: AsyncSession = Depends(get_db),
 ):
     """Correct parsed fields — user edits misrecognized values before confirming."""
-    query = select(VoiceLog).where(VoiceLog.id == body.voice_log_id)
+    # 锚点行锁 + 状态守卫（V2-M1）：correct 曾无锁且无状态检查，对已 confirmed
+    # 的单调用会把状态打回 parsed → 二次 confirm 撞 voice:{log.id} 幂等唯一键
+    # → 500。已确认的单只能走 void/edit 链路（那里才有批次/往来账回滚）。
+    query = select(VoiceLog).where(VoiceLog.id == body.voice_log_id).with_for_update()
     result = await db.execute(query)
     log = result.scalar_one_or_none()
 
@@ -330,6 +268,11 @@ async def correct_voice(
         raise HTTPException(status_code=404, detail="Voice log not found")
     if log.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="Voice log not found")
+    if log.status not in ("pending", "parsed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"只能修正未确认的记录（当前状态: {log.status}），已确认请使用撤销/修改",
+        )
 
     if log.parsed_event:
         # 修复 C-1：corrections 已是强类型 VoiceCorrection，白名单字段 + 范围约束。
@@ -555,6 +498,8 @@ async def void_voice_record(
     """
     # 锚点行锁：撤销与确认/修改按 log 行串行化，防止并发撤销+确认交错记账
     # （SQLite 忽略 FOR UPDATE，由状态检查幂等语义兜底）。
+    # 加锁次序 VoiceLog → InventoryRecord → 批次，与 inventory.py 的语音
+    # 分支共用 void_voice_confirmed_record 核心消除跨路径双撤销（V2-H1）。
     query = select(VoiceLog).where(VoiceLog.id == voice_log_id).with_for_update()
     result = await db.execute(query)
     log = result.scalar_one_or_none()
@@ -562,27 +507,12 @@ async def void_voice_record(
         raise HTTPException(status_code=404, detail="语音记录不存在")
     if log.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="语音记录不存在")
-    if log.status == "voided":
-        raise HTTPException(status_code=409, detail="该记录已撤销，无需重复操作")
-    if log.status != "confirmed":
-        raise HTTPException(status_code=409, detail="只能撤销已确认的记录")
 
-    record_query = select(InventoryRecord).where(
-        InventoryRecord.voice_log_id == log.id,
-        InventoryRecord.is_voided.is_(False),
+    record, batch_summary = await void_voice_confirmed_record(
+        db, log, body.reason, voided_by="voice"
     )
-    record_result = await db.execute(record_query)
-    record = record_result.scalar_one_or_none()
 
-    if record and record.source == "pos":
-        # 订单体系另有完整退款链路（pos.py refund），语音撤销不得绕过其核销逻辑。
-        raise HTTPException(
-            status_code=409,
-            detail="POS订单流水不支持语音撤销，请通过订单退款链路处理",
-        )
-
-    if not record:
-        log.status = "voided"
+    if record is None:
         await db.commit()
         return {
             "code": 0,
@@ -590,39 +520,6 @@ async def void_voice_record(
             "data": {"voice_log_id": str(log.id)},
         }
 
-    before_data = {
-        "quantity": float(record.quantity),
-        "event_type": record.event_type,
-        "product_id": record.product_id,
-        "total_amount": float(record.total_amount) if record.total_amount else None,
-    }
-
-    batch_summary = await rollback_batch_on_void(db, log.merchant_id, record.product_id, record)
-    # 审计 JSON 列不能存 Decimal，与 inventory.py 撤销路由同款处理。
-    audit_summary = {**batch_summary, "qty_adjusted": float(batch_summary["qty_adjusted"])}
-
-    record.is_voided = True
-    record.voided_at = utc_now()
-    record.void_reason = body.reason
-    record.voided_by = "voice"
-
-    log.status = "voided"
-
-    # 往来账冲销：confirm 按 voice:{log.id}:charge/repay 落的赊账/回款流水，
-    # 按同一前缀聚合净额后反向冲平，否则撤销后应收永久挂死。
-    await _sync_voice_receivables(db, log, adjustment_key=f"voice:{log.id}:void")
-
-    audit = AuditLog(
-        merchant_id=log.merchant_id,
-        action="void",
-        target_table="inventory_records",
-        target_id=str(record.id),
-        before_data=before_data,
-        after_data={"is_voided": True, "batch_summary": audit_summary},
-        reason=body.reason,
-        operator="merchant",
-    )
-    db.add(audit)
     await db.commit()
 
     return {
@@ -660,9 +557,16 @@ async def edit_confirmed_record(
     if log.status != "confirmed":
         raise HTTPException(status_code=409, detail="只能修改已确认的记录")
 
-    record_query = select(InventoryRecord).where(
-        InventoryRecord.voice_log_id == log.id,
-        InventoryRecord.is_voided.is_(False),
+    # 流水行锁（V2-H1）：撤销/修改与 inventory.py 的 record-void 会在同一条
+    # source="voice" 流水上交汇，必须在已持有 log 锁的前提下再锁流水行，
+    # 维持 VoiceLog → InventoryRecord → 批次 的统一加锁次序。
+    record_query = (
+        select(InventoryRecord)
+        .where(
+            InventoryRecord.voice_log_id == log.id,
+            InventoryRecord.is_voided.is_(False),
+        )
+        .with_for_update()
     )
     record_result = await db.execute(record_query)
     old_record = record_result.scalar_one_or_none()
@@ -805,7 +709,7 @@ async def edit_confirmed_record(
                 target_party, target_net = party_name, target_amount
             elif parsed.get("is_repay", False):
                 target_party, target_net = party_name, -target_amount
-    await _sync_voice_receivables(
+    await sync_voice_receivables(
         db,
         log,
         adjustment_key=f"voice:{log.id}:edit{edit_seq}",

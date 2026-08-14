@@ -11,12 +11,13 @@ import logging
 import math
 import os
 import random
+from datetime import date, timedelta
 
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.timezone import cst_days_ago_bounds_utc
+from app.core.timezone import cst_date_of_utc_naive, cst_days_ago_bounds_utc, cst_today
 from app.models.environment import EnvironmentRecord
 from app.models.inventory import InventoryRecord
 from app.models.product import ProductCategory
@@ -101,10 +102,11 @@ async def get_weather_impact_rules(
     Returns insights like:
     "气温 >30°C 时, 西瓜销量平均 +32% (基于 12 家商户数据)"
 
-    ``city`` scopes the join to a single city so that inventory sales are only
-    correlated with environment records from the same city. Defaults to the
+    ``city`` scopes the correlation to a single city so that inventory sales are
+    only matched with environment records from the same city. Defaults to the
     project's default city (``上海``) to avoid cross-city row multiplication
-    when multiple cities share the same date.
+    when multiple cities share the same date. Sales are matched to environment
+    rows by CST business day (see cst_date_of_utc_naive), not UTC date.
     """
     # This is a statistical query that correlates sales with temperature
     # For MVP, we return predefined rules from config.
@@ -116,63 +118,81 @@ async def get_weather_impact_rules(
     try:
         thirty_days_ago = cst_days_ago_bounds_utc(30)[0]
 
-        # Join inventory with environment to correlate.
-        # The join includes BOTH date AND city so that a sale on 2026-01-15 in
-        # 上海 only matches the 上海 environment row (not the 北京 one for the
-        # same date), preventing duplicate-row inflation in the aggregates.
-        corr_query = (
-            select(
-                ProductCategory.name,
-                func.avg(
-                    case(
-                        (EnvironmentRecord.temp_high > 28, func.abs(InventoryRecord.quantity)),
-                    )
-                ).label("hot_day_avg"),
-                func.avg(
-                    case(
-                        (EnvironmentRecord.temp_high <= 28, func.abs(InventoryRecord.quantity)),
-                    )
-                ).label("normal_day_avg"),
-                func.count(func.distinct(InventoryRecord.merchant_id)).label("merchant_count"),
+        # 天气-销量关联按 CST 业务日（V5-H3）：event_time 是 naive UTC，
+        # SQL 的 func.date(event_time) 只能得到 UTC 日期键，CST 0-8 点的销售
+        # 会错配到前一天的环境行（或 miss）。改为拉到 Python 侧用
+        # cst_date_of_utc_naive 关联（与 twin/forecast 同法）；环境侧查询
+        # 仍在 SQL 里按日期窗口收窄，城市过滤保持在 SQL。
+        env_rows = (
+            await db.execute(
+                select(EnvironmentRecord.date, EnvironmentRecord.temp_high).where(
+                    EnvironmentRecord.city == resolved_city,
+                    EnvironmentRecord.date >= cst_today() - timedelta(days=29),
+                )
             )
-            .join(ProductCategory, InventoryRecord.product_id == ProductCategory.id)
-            .join(
-                EnvironmentRecord,
-                (func.date(InventoryRecord.event_time) == EnvironmentRecord.date)
-                & (EnvironmentRecord.city == resolved_city),
-            )
-            .where(
-                InventoryRecord.event_type == "sale",
-                InventoryRecord.event_time >= thirty_days_ago,
-            )
-            .group_by(ProductCategory.name)
-            .having(func.count(func.distinct(InventoryRecord.merchant_id)) >= MIN_MERCHANT_SAMPLE)
-        )
+        ).all()
+        temp_by_cst_day: dict[date, float] = {
+            row.date: float(row.temp_high) for row in env_rows if row.temp_high is not None
+        }
 
-        if product_name:
-            corr_query = corr_query.where(ProductCategory.name == product_name)
+        sale_rows = (
+            await db.execute(
+                select(
+                    ProductCategory.name,
+                    InventoryRecord.merchant_id,
+                    InventoryRecord.quantity,
+                    InventoryRecord.event_time,
+                )
+                .join(ProductCategory, InventoryRecord.product_id == ProductCategory.id)
+                .where(
+                    InventoryRecord.event_type == "sale",
+                    InventoryRecord.event_time >= thirty_days_ago,
+                )
+            )
+        ).all()
 
-        result = await db.execute(corr_query)
-        rows = result.all()
+        # Python 侧 CST 业务日分桶：hot (>28°C) / normal (<=28°C)
+        stats: dict[str, dict] = {}
+        for name, merchant_id, quantity, event_time in sale_rows:
+            temp_high = temp_by_cst_day.get(cst_date_of_utc_naive(event_time))
+            if temp_high is None:
+                continue  # 该 CST 业务日无本市环境记录，无法归类
+            bucket = "hot" if temp_high > 28 else "normal"
+            st = stats.setdefault(
+                name,
+                {
+                    "hot_qty": 0.0,
+                    "hot_n": 0,
+                    "normal_qty": 0.0,
+                    "normal_n": 0,
+                    "merchants": set(),
+                },
+            )
+            st[f"{bucket}_qty"] += abs(float(quantity or 0))
+            st[f"{bucket}_n"] += 1
+            st["merchants"].add(merchant_id)
 
         insights = []
-        for row in rows:
-            hot = float(row.hot_day_avg or 0)
-            normal = float(row.normal_day_avg or 0)
+        for name, st in stats.items():
+            merchant_count = len(st["merchants"])
+            if merchant_count < MIN_MERCHANT_SAMPLE or st["hot_n"] == 0 or st["normal_n"] == 0:
+                continue
+            hot = st["hot_qty"] / st["hot_n"]
+            normal = st["normal_qty"] / st["normal_n"]
             if normal > 0 and hot > 0:
                 ratio = round((hot - normal) / normal * 100, 0)
                 if abs(ratio) > 5:  # Only report significant impacts
                     insights.append(
                         {
-                            "product": row.name,
+                            "product": name,
                             "condition": "高温 (>28°C)",
                             "impact_pct": ratio,
                             "direction": "increase" if ratio > 0 else "decrease",
-                            "merchant_sample": row.merchant_count,
+                            "merchant_sample": merchant_count,
                             "message": (
-                                f"气温 >28°C 时, {row.name}销量"
+                                f"气温 >28°C 时, {name}销量"
                                 f"{'增加' if ratio > 0 else '减少'}{abs(ratio):.0f}% "
-                                f"(基于{row.merchant_count}家商户)"
+                                f"(基于{merchant_count}家商户)"
                             ),
                         }
                     )

@@ -20,6 +20,7 @@ from scripts.seed_data.pos import seed_pos_and_reconciliation
 from scripts.seed_data.purchasing import seed_purchasing_and_payables
 from scripts.seed_data.staffing import seed_staff_and_stocktake
 
+
 __all__ = [
     "seed_catalog",
     "seed_inventory_and_batches",

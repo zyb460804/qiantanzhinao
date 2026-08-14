@@ -257,6 +257,35 @@ class TestHoldResumeCancel:
         cancel = await client.delete(f"/api/v1/pos/orders/{order_id}")
         assert cancel.status_code in (400, 409)
 
+    async def test_cancel_after_resume_cannot_overwrite_paid_status(self, client, db_session):
+        """LOW(a)：挂单被取单支付后，取消请求必须 409 且不得覆写 paid 状态.
+
+        回归并发竞态：取消方与 resume 支付竞态时，无 FOR UPDATE + 锁后状态重检
+        会把已支付单覆写成 cancelled。
+        """
+        await _seed_stock(db_session, quantity=10)
+        hold = await client.post(
+            "/api/v1/pos/orders/hold",
+            json={
+                "items": [{"product_id": 1, "quantity": 2, "unit": "斤", "unit_price": 5.0}],
+                "client_id": "cancel-after-resume-001",
+            },
+        )
+        order_id = hold.json()["data"]["order_id"]
+        resume = await client.post(
+            f"/api/v1/pos/orders/{order_id}/resume",
+            json={"payment_method": "cash"},
+        )
+        assert resume.status_code == 200
+        assert resume.json()["data"]["status"] == "paid"
+
+        cancel = await client.delete(f"/api/v1/pos/orders/{order_id}")
+        assert cancel.status_code == 409
+        async with db_session() as session:
+            order = await session.get(SaleOrder, uuid.UUID(order_id))
+            assert order.status == "paid"  # 未被覆写
+            assert order.paid_amount == Decimal("10")
+
     async def test_hold_does_not_consume_stock(self, client, db_session):
         """挂单时先不扣库存 — 取单(resume)时才扣，防止挂单霸占库存."""
         await _seed_stock(db_session, quantity=5)

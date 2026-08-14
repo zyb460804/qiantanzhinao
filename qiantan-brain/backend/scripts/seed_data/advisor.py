@@ -12,9 +12,7 @@
 
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -26,11 +24,8 @@ from app.models.voice import VoiceLog
 from scripts.seed_data.common import (
     ALL_MERCHANT_IDS,
     MERCHANTS,
-    PRODUCTS_BY_ID,
-    date_ago,
     days_ago,
     make_rng,
-    money,
     products_for,
     sku_uuid,
 )
@@ -51,7 +46,14 @@ async def seed_recommendations(db) -> dict:
         my_products = list(products_for(merchant_id))
 
         # 每摊 6 条建议，状态分布：3 采纳 / 2 拒绝 / 1 待处理
-        scenarios = ["adopted_clearance", "adopted_purchase", "adopted_price", "rejected", "rejected", "pending"]
+        scenarios = [
+            "adopted_clearance",
+            "adopted_purchase",
+            "adopted_price",
+            "rejected",
+            "rejected",
+            "pending",
+        ]
         for i, scenario in enumerate(scenarios):
             prod = rng.choice(my_products)
             rec_id = uuid.uuid5(uuid.NAMESPACE_URL, f"rec-{merchant_id}-{i}")
@@ -59,7 +61,11 @@ async def seed_recommendations(db) -> dict:
 
             if scenario == "adopted_clearance":
                 suggestion = f"{prod.name} 临期在即（剩 1 天），建议立即 7 折清货止损"
-                basis = ["shelf_life_remaining<20%", "batch_near_expiry", "historical_waste_rate=18%"]
+                basis = [
+                    "shelf_life_remaining<20%",
+                    "batch_near_expiry",
+                    "historical_waste_rate=18%",
+                ]
                 risk = "降价后毛利压缩，但可避免全损"
                 adopted = True
                 deviation = Decimal(str(rng.uniform(-2, 5)))
@@ -97,7 +103,9 @@ async def seed_recommendations(db) -> dict:
                     suggestion=suggestion,
                     basis=basis,
                     risk_warning=risk,
-                    recommended_qty=Decimal(rng.randint(20, 40)) if "purchase" in scenario else None,
+                    recommended_qty=Decimal(rng.randint(20, 40))
+                    if "purchase" in scenario
+                    else None,
                     confidence=Decimal(str(round(rng.uniform(0.72, 0.94), 2))),
                     was_adopted=adopted,
                     actual_deviation=deviation,
@@ -138,7 +146,11 @@ async def seed_ai_actions(db, ctx: dict) -> None:
                 executed_at = days_ago(5, hour=9)
             elif scenario == "adopted_price":
                 action_type, title, status = "price", f"改价-{prod.name}", "executed"
-                payload = {"product_id": prod.id, "old_price": str(prod.default_price), "new_price": str(prod.default_price + Decimal("1"))}
+                payload = {
+                    "product_id": prod.id,
+                    "old_price": str(prod.default_price),
+                    "new_price": str(prod.default_price + Decimal("1")),
+                }
                 result = {"price_history_id": "已记录", "revenue_lift": "+8%"}
                 executed_at = days_ago(4, hour=11)
             else:  # rejected
@@ -244,11 +256,12 @@ async def seed_voice_logs(db) -> None:
     n = 0
     for profile in MERCHANTS:
         merchant_id = profile.merchant_id
-        my_products = {p.name: p for p in products_for(merchant_id)}
 
         for i in range(10):
             text, etype, prod_name, amount_qty, price = rng.choice(templates)
-            created = days_ago(rng.randint(0, 25), hour=rng.randint(7, 19), minute=rng.randint(0, 59))
+            created = days_ago(
+                rng.randint(0, 25), hour=rng.randint(7, 19), minute=rng.randint(0, 59)
+            )
             parsed = {
                 "event_type": etype,
                 "product": prod_name,

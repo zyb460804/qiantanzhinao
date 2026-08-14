@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 import httpx
 
 from app.config import settings
+from app.core.timezone import cst_today
 
 
 logger = logging.getLogger(__name__)
@@ -188,7 +189,9 @@ async def fetch_current_weather(city: str = "上海") -> dict | None:
     else:
         rainfall_prob = 10.0
 
-    today = date.today()
+    # 日历键按 CST 业务日，与 environment.py 读端（cst_today()）对齐：
+    # UTC 16-24 点（= CST 次日 0-8 点）时 date.today() 会取到前一天。
+    today = cst_today()
     dow = today.weekday()
     is_holiday, holiday_name = _get_holiday(today)
 
@@ -279,7 +282,7 @@ async def get_forecast_env(city: str = "上海", days: int = 3) -> list[dict]:
 
 def _mock_today(city: str) -> dict:
     """Mock today's environment data (used when no API key configured)."""
-    today = date.today()
+    today = cst_today()
     dow = today.weekday()
     is_holiday, holiday_name = _get_holiday(today)
     return {
@@ -303,7 +306,7 @@ def _mock_forecast(city: str, days: int) -> list[dict]:
     ``days`` covers today plus subsequent days (i=0 is today), mirroring QWeather
     where a 3-day forecast includes today as day 1.
     """
-    today = date.today()
+    today = cst_today()
     results = []
     for i in range(0, days):
         d = today + timedelta(days=i)

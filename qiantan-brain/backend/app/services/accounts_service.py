@@ -101,6 +101,21 @@ async def record_supplier_payment(
     if len(payable_ids) != len(set(payable_ids)):
         raise ValueError("应付账款不能重复选择")
 
+    # 并发付款串行化（TOCTOU）：两笔付款选不同应付集合时，行级锁互不阻塞，
+    # 而净余额聚合读不到对方未提交的 payment 流水，可能双双通过校验导致
+    # 供应商余额为负。PG 用事务级 advisory lock 串行化同一供应商的付款
+    # （事务结束自动释放），锁先于幂等预检与余额校验获取（V2-M1：预检在
+    # 锁后才能看到锁持有者已提交的同键付款，否则并发同键重试会双双漏检）；
+    # SQLite 单写者语义下天然串行，跳过。
+    _dialect = getattr(db.bind.dialect, "name", "") if db.bind is not None else ""
+    if _dialect == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"supplier-payment:{merchant_id}:{supplier_id}"},
+        )
+
+    # 幂等预检（advisory lock 之后）：同键重试在锁上排队，先到者提交后
+    # 后到者此处即命中重放，不会重复核销。
     if idempotency_key:
         existing = (
             await db.execute(
@@ -143,17 +158,6 @@ async def record_supplier_payment(
         raise ValueError("付款金额不能超过所选应付余额")
     # 退货抵扣等历史 payment 流水可能尚未分摊到 settled_amount；同时校验
     # 供应商净余额，防止选中应付看似有余额但实际已被退货抵扣后再次超付。
-    #
-    # 并发付款串行化（TOCTOU）：两笔付款选不同应付集合时，上面的行级锁
-    # 互不阻塞，而净余额聚合读不到对方未提交的 payment 流水，可能双双
-    # 通过校验导致供应商余额为负。PG 用事务级 advisory lock 串行化同一
-    # 供应商的付款（事务结束自动释放）；SQLite 单写者语义下天然串行，跳过。
-    _dialect = getattr(db.bind.dialect, "name", "") if db.bind is not None else ""
-    if _dialect == "postgresql":
-        await db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-            {"lock_key": f"supplier-payment:{merchant_id}:{supplier_id}"},
-        )
     supplier_balance = await get_supplier_balance(db, merchant_id, supplier_id)
     if amount > supplier_balance:
         raise ValueError("付款金额不能超过供应商当前应付净余额")

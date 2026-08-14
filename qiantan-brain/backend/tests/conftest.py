@@ -113,10 +113,10 @@ async def _override_get_current_merchant(
     # 测试角色模拟：注入 _token_role，与生产 get_current_merchant 行为对齐
     test_role = request.headers.get("X-Test-Token-Role")
     if test_role:
-        setattr(merchant, "_token_role", test_role)
+        merchant._token_role = test_role
     else:
         # 与生产默认行为一致：无 token 时 _token_role 默认 "owner"
-        setattr(merchant, "_token_role", "owner")
+        merchant._token_role = "owner"
     return merchant
 
 

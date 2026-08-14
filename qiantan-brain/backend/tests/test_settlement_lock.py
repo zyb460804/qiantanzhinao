@@ -17,6 +17,7 @@ from tests.conftest import TEST_MERCHANT_ID
 from app.core.timezone import local_now, utc_now
 from app.models.batch import BatchLifecycle
 from app.models.pos import DailySettlement
+from app.routers import pos as pos_module
 from app.services.batch import create_batch
 
 
@@ -109,6 +110,74 @@ class TestSettlementLock:
             "items": [{"product_id": 1, "quantity": 1, "unit": "斤", "unit_price": 3.0}],
         })
         assert res.status_code == 200  # Only today is locked by today's close
+
+
+# ═══════════════════════════════════════════════════════════════════
+# V5-H1: 日结锁定的日界必须按 CST 业务日判定（Docker UTC 下不误锁/拒日结）
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestSettlementLockCstDayBoundary:
+    """模拟「UTC 2026-08-15 20:00 = CST 2026-08-16 04:00」的部署时钟.
+
+    旧实现按 local_now().date()（= 服务器/UTC 日期 08-15）查锁，会把已关闭的
+    08-15 日结误套到 CST 08-16 凌晨的新单上；同理 08-16 的日结会被未来日期
+    守卫拒绝。改用 cst_today() 后两者都必须正确。
+    """
+
+    CST_DAY = date(2026, 8, 16)  # CST「今天」（UTC 时钟仍停在 08-15 20:00）
+    UTC_DAY = date(2026, 8, 15)  # 服务器本地（UTC）日期
+
+    def _freeze_cst_today(self, monkeypatch):
+        monkeypatch.setattr(pos_module, "cst_today", lambda: self.CST_DAY)
+
+    async def test_utc_early_hours_do_not_mislock_previous_day(
+        self, client, db_session, monkeypatch
+    ):
+        """CST 凌晨 0-8 点：前一 UTC 日的日结已关闭，不得锁住 CST 今天的新单."""
+        await _seed_stock(db_session, quantity=10)
+        self._freeze_cst_today(monkeypatch)
+
+        closed = await client.post(f"/api/v1/pos/daily-settlement/{self.UTC_DAY.isoformat()}/close")
+        assert closed.status_code == 200
+
+        res = await client.post("/api/v1/pos/orders", json={
+            "client_id": "cst-mislock-guard-001",
+            "payment_method": "cash",
+            "items": [{"product_id": 1, "quantity": 1, "unit": "斤", "unit_price": 3.0}],
+        })
+        assert res.status_code == 200  # 旧实现此处误 409（锁到 UTC 昨天）
+
+    async def test_cst_today_close_blocks_new_orders(self, client, db_session, monkeypatch):
+        """CST 今天的日结关闭后，CST 今天的新单必须被锁（409）."""
+        await _seed_stock(db_session, quantity=10)
+        self._freeze_cst_today(monkeypatch)
+
+        closed = await client.post(
+            f"/api/v1/pos/daily-settlement/{self.CST_DAY.isoformat()}/close"
+        )
+        assert closed.status_code == 200
+
+        res = await client.post("/api/v1/pos/orders", json={
+            "client_id": "cst-today-lock-001",
+            "payment_method": "cash",
+            "items": [{"product_id": 1, "quantity": 1, "unit": "斤", "unit_price": 3.0}],
+        })
+        assert res.status_code == 409
+        assert "日结已关闭" in res.json()["detail"]
+
+    async def test_future_guard_uses_cst_day(self, client, db_session, monkeypatch):
+        """未来日期守卫按 CST 今天判定：CST 今天可结、CST 明天 400."""
+        self._freeze_cst_today(monkeypatch)
+
+        future = await client.post("/api/v1/pos/daily-settlement/2026-08-17/close")
+        assert future.status_code == 400
+        assert "未来" in future.json()["detail"]
+
+        today = await client.post(
+            f"/api/v1/pos/daily-settlement/{self.CST_DAY.isoformat()}/close"
+        )
+        assert today.status_code == 200
 
 
 # ═══════════════════════════════════════════════════════════════════

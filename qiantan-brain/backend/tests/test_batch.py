@@ -22,6 +22,7 @@ from app.services.batch import (
     count_expiring_batches,
     create_batch,
     get_active_batches,
+    reduce_batches_on_purchase_return,
     return_to_batches,
     rollback_batch_on_void,
 )
@@ -532,3 +533,168 @@ async def test_fifo_tiebreak_is_deterministic_for_identical_keys(db_session):
         )
         # 全序确定：两次都命中同一批次（10-3-3=4），另一批次保持 10。
         assert remainders == [4.0, 10.0]
+
+
+# ── 锁序统一回归（第五轮 V2-C1）────────────────────────────────────────
+# 所有批次 SELECT 统一 ORDER BY id ASC 加锁；业务分配方向（FEFO 正序 /
+# 反 FEFO 倒序）改由应用层重排实现。以下多批次场景锁定「方向语义不变」：
+# 若有人误把 SQL 的 id 升序直接当业务序迭代，这些断言会立刻失败。
+
+
+async def test_rollback_sale_restores_newest_batch_first(db_session):
+    """多批次回补方向：restore 先落最新批次（旧 purchase_date DESC 语义保持）。
+
+    old=10 / new=10，FIFO 消耗 15（old 耗尽 10、new 耗 5）后回补 6：
+    最新批次先回补其已消耗的 5，剩余 1 落到 old → old=1, new=10。
+    方向若反（id 升序直接迭代）会得到 old=6, new=5 —— 断言锁定正确方向。
+    """
+    async with db_session() as session:
+        await create_batch(
+            session, MERCHANT_ID, 1, "白菜", "白菜-lifo-old", Decimal("10"),
+            datetime(2026, 7, 9, 8, 0, 0),
+        )
+        await create_batch(
+            session, MERCHANT_ID, 1, "白菜", "白菜-lifo-new", Decimal("10"),
+            datetime(2026, 7, 11, 8, 0, 0),
+        )
+        await session.commit()
+        assert await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("15")) == Decimal(
+            "15.00"
+        )
+
+        record = InventoryRecord(
+            merchant_id=MERCHANT_ID,
+            product_id=1,
+            quantity=Decimal("-6"),
+            unit="斤",
+            event_type="sale",
+            event_time=datetime.now(),
+        )
+        summary = await rollback_batch_on_void(session, MERCHANT_ID, 1, record)
+        await session.commit()
+
+        old = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-lifo-old")
+            )
+        ).scalar_one()
+        new = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-lifo-new")
+            )
+        ).scalar_one()
+        assert old.remaining_qty == Decimal("1.00")
+        assert new.remaining_qty == Decimal("10.00")
+        assert summary["qty_adjusted"] == Decimal("6.00")
+        assert summary["batches_affected"] == 2
+
+
+async def test_return_to_batches_refills_newest_batch_first(db_session):
+    """return_to_batches 多批次方向：最新批次先回库（与 rollback 同向）。"""
+    async with db_session() as session:
+        await create_batch(
+            session, MERCHANT_ID, 1, "白菜", "白菜-ret-lifo-old", Decimal("10"),
+            datetime(2026, 7, 9, 8, 0, 0),
+        )
+        await create_batch(
+            session, MERCHANT_ID, 1, "白菜", "白菜-ret-lifo-new", Decimal("10"),
+            datetime(2026, 7, 11, 8, 0, 0),
+        )
+        await session.commit()
+        assert await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("15")) == Decimal(
+            "15.00"
+        )
+        # old=0（耗尽 10）、new=5（耗 5）
+
+        returned = await return_to_batches(session, MERCHANT_ID, 1, Decimal("4"))
+        await session.commit()
+
+        assert returned == Decimal("4.00")
+        old = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-ret-lifo-old")
+            )
+        ).scalar_one()
+        new = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-ret-lifo-new")
+            )
+        ).scalar_one()
+        assert new.remaining_qty == Decimal("9.00")  # 最新批次先回库：5 + 4
+        assert old.remaining_qty == Decimal("0.00")  # 旧批次不动
+
+
+# ── 采购退货批次缩减（第五轮 V2-H4）─────────────────────────────────────
+
+
+async def test_reduce_batches_on_purchase_return_by_label(db_session):
+    """按 label 命中：remaining/purchase 等量压降。"""
+    async with db_session() as session:
+        await create_batch(
+            session, MERCHANT_ID, 1, "白菜", "白菜-pr-label", Decimal("10"), datetime.now()
+        )
+        await session.commit()
+
+        removed = await reduce_batches_on_purchase_return(
+            session, MERCHANT_ID, 1, Decimal("4"), batch_label="白菜-pr-label"
+        )
+        await session.commit()
+
+        batch = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-pr-label")
+            )
+        ).scalar_one()
+        assert removed == Decimal("4.00")
+        assert batch.remaining_qty == Decimal("6.00")
+        assert batch.purchase_qty == Decimal("6.00")
+
+
+async def test_reduce_batches_purchase_return_shortfall_reduces_history_only(db_session):
+    """缺口（退货量 > 批次现存余量）：remaining 扣到 0，差额只压 purchase_qty。
+
+    与 rollback purchase 分支「缩减至已消耗量」同口径：缺口对应已售出部分，
+    从未留在现存批次里，只调减历史入库量，保持 purchase_qty >= remaining_qty。
+    """
+    async with db_session() as session:
+        await create_batch(
+            session, MERCHANT_ID, 1, "白菜", "白菜-pr-short", Decimal("10"), datetime.now()
+        )
+        await session.commit()
+        await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("8"))  # remaining=2
+
+        removed = await reduce_batches_on_purchase_return(
+            session, MERCHANT_ID, 1, Decimal("5"), batch_label="白菜-pr-short"
+        )
+        await session.commit()
+
+        batch = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-pr-short")
+            )
+        ).scalar_one()
+        assert removed == Decimal("2.00")  # 现存只有 2 可从 remaining 移除
+        assert batch.remaining_qty == Decimal("0.00")
+        assert batch.purchase_qty == Decimal("5.00")  # 10 - 5：缺口 3 只压历史
+
+
+async def test_reduce_batches_purchase_return_falls_back_to_live_batches(db_session):
+    """label 未命中（批次已被回滚删除等）→ 回退该商品现存可售批次扣减。"""
+    async with db_session() as session:
+        await create_batch(
+            session, MERCHANT_ID, 1, "白菜", "白菜-pr-live", Decimal("10"), datetime.now()
+        )
+        await session.commit()
+
+        removed = await reduce_batches_on_purchase_return(
+            session, MERCHANT_ID, 1, Decimal("3"), batch_label="不存在的批次标签"
+        )
+        await session.commit()
+
+        batch = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-pr-live")
+            )
+        ).scalar_one()
+        assert removed == Decimal("3.00")
+        assert batch.remaining_qty == Decimal("7.00")

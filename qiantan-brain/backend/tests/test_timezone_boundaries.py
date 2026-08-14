@@ -27,7 +27,10 @@ from app.core.timezone import (
     cst_days_ago_bounds_utc,
     cst_month_bounds_utc,
     cst_today,
+    parse_iso_datetime,
+    utc_days_ago,
     utc_now,
+    utc_today_start,
 )
 
 
@@ -60,8 +63,50 @@ def test_cst_days_ago_bounds_utc_covers_today():
     """近 1 天窗口恰好是今天的完整 CST 业务日，且覆盖当前时刻。"""
     start, end = cst_days_ago_bounds_utc(1)
     assert end - start == timedelta(days=1)
-    now_naive = utc_now().replace(tzinfo=None)
+    now_naive = utc_now()  # naive UTC（见下方 V2-C2 回归）
     assert start <= now_naive < end
+
+
+# ------------------------------------------------------------------
+# V2-C2 回归：时间获取/解析 helper 一律返回 naive UTC
+#
+# DB 全部时间列为 naive UTC（TIMESTAMP without tz），asyncpg 对 naive 列不做
+# aware→naive 转换，写入/比较 aware datetime 直接 TypeError(500)；SQLite
+# 静默丢 offset 会掩盖该问题。以下断言锁死 naive 契约，防止将来改回 aware。
+# ------------------------------------------------------------------
+
+
+def test_utc_now_returns_naive_utc():
+    """utc_now() 必须 naive，且与真实 UTC 钟一致（排除『返回了本地时间』）。"""
+    now = utc_now()
+    assert now.tzinfo is None
+    wall_utc = datetime.now(UTC).replace(tzinfo=None)
+    assert abs((wall_utc - now).total_seconds()) < 60
+
+
+def test_utc_today_start_and_days_ago_are_naive():
+    """utc_today_start()/utc_days_ago() 与 utc_now()/DB 列同体系（naive UTC）。"""
+    start = utc_today_start()
+    assert start.tzinfo is None
+    assert start.time() == time(0, 0)
+    assert start.date() == utc_now().date()
+
+    ago = utc_days_ago(30)
+    assert ago.tzinfo is None
+    # utc_days_ago(30) + 30d 应回到「今天 UTC」区间内
+    assert start <= ago + timedelta(days=30) <= start + timedelta(days=1)
+
+
+def test_parse_iso_datetime_returns_naive_utc():
+    """parse_iso_datetime() 归一成 naive UTC（写入 naive 列；aware 会在 PG 500）。"""
+    # 带 +08:00 偏移 → 换算成 UTC 后 strip
+    assert parse_iso_datetime("2026-08-15T09:30:00+08:00") == datetime(2026, 8, 15, 1, 30)
+    # Z 后缀与无时区（按 UTC 解释）
+    assert parse_iso_datetime("2026-08-15T01:30:00Z") == datetime(2026, 8, 15, 1, 30)
+    assert parse_iso_datetime("2026-08-15T01:30:00") == datetime(2026, 8, 15, 1, 30)
+    # 非法输入返回 None 而非抛异常
+    assert parse_iso_datetime("not-a-date") is None
+    assert parse_iso_datetime(None) is None
 
 
 def test_cst_date_of_utc_naive():

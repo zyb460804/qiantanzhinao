@@ -13,10 +13,11 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.idempotency import short_idem_key
 from app.core.security import get_current_merchant
 from app.core.timezone import utc_now
 from app.database import get_db
@@ -30,7 +31,7 @@ from app.models.product import ProductCategory
 from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse, DecimalNum
 from app.services.accounts_service import get_customer_balance, record_customer_receivable
-from app.services.batch import consume_batches_fifo
+from app.services.batch import consume_batches_fifo_costed
 
 
 class ClearancePromotionRequest(BaseModel):
@@ -167,8 +168,11 @@ async def record_waste(
     reason = body.reason
     notes = body.notes or ""
     photos = body.photos or ""
-    idempotency_key = body.idempotency_key or (
-        f"waste:{merchant.id}:{product_id}:{utc_now().timestamp()}"
+    # 自动幂等键：short_idem_key 压缩到 64 字符列宽内（V1-M4——原拼接
+    # "waste:{uuid36}:{pid}:{ts}" 达 66 字符，PG 直接拒写 INSERT）。
+    # 微秒级时戳保证同秒多次报损不互撞（秒级会吞掉同秒第二笔报损）。
+    idempotency_key = body.idempotency_key or short_idem_key(
+        "waste", merchant.id, product_id, int(utc_now().timestamp() * 1_000_000)
     )
 
     if photos:
@@ -192,13 +196,24 @@ async def record_waste(
     if not product:
         raise HTTPException(status_code=404, detail="商品不存在")
 
-    # FIFO consume for waste
-    consumed = await consume_batches_fifo(db, merchant.id, product_id, quantity, sku_id=sku_id)
+    # FIFO consume for waste（成本化：V1-M3——原 consume_batches_fifo 丢弃
+    # total_cost，报损流水 unit_cost/total_amount 恒空，报损分析与导出的
+    # waste_cost 恒 0。语义与 POS 销售路径一致：全部被消费批次均有成本时
+    # 记加权均价与实际 FIFO 成本，任一批次缺成本则置 None（不猜成本））。
+    consumption = await consume_batches_fifo_costed(
+        db, merchant.id, product_id, quantity, sku_id=sku_id
+    )
+    consumed = consumption["quantity"]
     if consumed < quantity:
         raise HTTPException(
             status_code=409,
             detail=f"库存不足，报损需要{float(quantity)}{product.unit}，可用{float(consumed)}{product.unit}",
         )
+    unit_cost = (
+        (consumption["total_cost"] / consumed).quantize(Decimal("0.01"))
+        if consumed > 0 and consumption["missing_cost_quantity"] == 0
+        else None
+    )
 
     record = InventoryRecord(
         merchant_id=merchant.id,
@@ -206,6 +221,8 @@ async def record_waste(
         sku_id=sku_id,
         quantity=-quantity,
         unit=body.unit or product.unit,
+        unit_cost=unit_cost,
+        total_amount=consumption["total_cost"] if unit_cost is not None else None,
         event_type="waste",
         event_time=utc_now(),
         source="manual",
@@ -700,13 +717,69 @@ async def customer_repay(
     db: AsyncSession = Depends(get_db),
     _perm=Depends(require_permission("credit_sale")),
 ):
-    """Record a customer repayment."""
+    """Record a customer repayment.
+
+    并发与幂等（V2-H2，模式对齐供应商付款 accounts_service.record_supplier_payment）：
+
+    - PG：``pg_advisory_xact_lock(hashtext('customer-repay:{merchant}:{name}'))``
+      事务级串行化同商户同客户的并发回款——余额读与 amount<=balance 校验
+      必须在锁内进行，否则两笔并发回款都读到同一余额、双双通过校验，
+      余额被扣成负数。SQLite 单写者语义天然串行，跳过。
+    - 幂等预检在锁后：并发同键回款串行化后，先到者先落库，后到者预检即
+      命中重放（原实现预检缺位 + 键可为 NULL，网络重试会重复扣余额）。
+    - 无客户端键时服务端生成非空确定性压缩键（short_idem_key）：NULL 不
+      参与唯一约束比较，裸 NULL 无法兜底并发窗口。
+    - commit 撞 (merchant_id, idempotency_key) 唯一约束（真正重叠的并发
+      窗口）→ 回滚回查重放，不向客户端抛 500。
+    """
     customer_name = (body.customer_name or "").strip()
-    amount = body.amount
     if not customer_name:
         raise HTTPException(status_code=400, detail="客户名称不能为空")
+    amount = body.amount.quantize(Decimal("0.01"))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="回款金额必须大于0")
+
+    idempotency_key = body.idempotency_key or short_idem_key(
+        "customer-repay", merchant.id, customer_name, int(utc_now().timestamp() * 1_000_000)
+    )
+
+    def _replay_response(new_balance: Decimal) -> dict:
+        return {
+            "code": 0,
+            "message": "重复回款请求：幂等键已存在，已返回原回款结果（未重复扣减欠款）",
+            "data": {"customer_name": customer_name, "new_balance": float(new_balance)},
+        }
+
+    async def _find_by_key(key: str) -> CustomerReceivable | None:
+        return (
+            await db.execute(
+                select(CustomerReceivable).where(
+                    CustomerReceivable.merchant_id == merchant.id,
+                    CustomerReceivable.idempotency_key == key,
+                )
+            )
+        ).scalar_one_or_none()
+
+    # PG 事务级 advisory lock：串行化同商户同客户的并发回款（TOCTOU 防线）。
+    _dialect = getattr(db.bind.dialect, "name", "") if db.bind is not None else ""
+    if _dialect == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"customer-repay:{merchant.id}:{customer_name}"},
+        )
+
+    # 幂等预检（锁后）：同键重试直接重放，不二次扣减余额。
+    if body.idempotency_key:
+        existing = await _find_by_key(body.idempotency_key)
+        if existing is not None:
+            if existing.direction != "repay":
+                raise HTTPException(status_code=409, detail="幂等键已被其他客户流水占用，请更换")
+            if existing.customer_name != customer_name or existing.amount != amount:
+                raise HTTPException(status_code=409, detail="幂等键已用于另一笔回款")
+            new_balance = await get_customer_balance(db, merchant.id, customer_name)
+            return _replay_response(new_balance)
+
+    # 余额校验（锁内重读：并发回款在锁上排队，后到者读到先到者提交后的余额）。
     current_balance = await get_customer_balance(db, merchant.id, customer_name)
     if current_balance <= 0:
         raise HTTPException(status_code=400, detail="该客户当前没有欠款")
@@ -722,9 +795,25 @@ async def customer_repay(
         amount=amount,
         direction="repay",
         note=body.note or "手动回款",
-        idempotency_key=body.idempotency_key,
+        idempotency_key=idempotency_key,
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # 重叠并发窗口兜底：同键第二笔回款撞唯一约束（扣减随事务回滚），
+        # 回查重放而不是向客户端抛 500。
+        await db.rollback()
+        existing = await _find_by_key(idempotency_key)
+        if existing is not None:
+            if existing.direction != "repay":
+                raise HTTPException(
+                    status_code=409, detail="幂等键已被其他客户流水占用，请更换"
+                ) from exc
+            if existing.customer_name != customer_name or existing.amount != amount:
+                raise HTTPException(status_code=409, detail="幂等键已用于另一笔回款") from exc
+            new_balance = await get_customer_balance(db, merchant.id, customer_name)
+            return _replay_response(new_balance)
+        raise
     new_balance = await get_customer_balance(db, merchant.id, customer_name)
     return {
         "code": 0,

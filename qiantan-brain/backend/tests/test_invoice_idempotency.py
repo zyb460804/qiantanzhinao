@@ -5,7 +5,12 @@
 2. 进程内连续开多票 → invoice_no 单调递增不重复（数据库侧 MAX+1 发号）；
 3. 并发 gather 5 个同周期生成 → 恰好 1 张票；
 4. 手工发票（无订阅/无周期，NULL 键）不受 (subscription_id, period_start) 唯一约束影响；
-5. 手工开票指定已有 (subscription_id, period_start) → 409 而非 500。
+5. 手工开票指定已有 (subscription_id, period_start) → 409 而非 500；
+6. 跨入口幂等（V1-H1）：两入口键统一为「票覆盖周期（下一计费周期）的起点
+   = current_period_end」，worker 出过下期票后 admin 再生成返回同一张票（反之亦然）；
+   周期起点漂移（activate 续期）形成的重叠期票由区间重叠守卫拒绝（409 / 跳过）；
+7. 发号抗脏数据（V1-M1）：库中 Unicode 数字后缀票号不毒化 MAX+1；
+8. yearly 续期票覆盖 365 天（V1-M2），不再固定 +30 天。
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from sqlalchemy import func, select
 
 import app.worker as worker_module
 from app.core.admin_security import create_admin_token
+from app.core.invoicing import next_invoice_no
 from app.models.saas import Invoice, Plan, PlatformAdmin, Subscription, Tenant
 from app.worker import generate_invoices
 
@@ -48,6 +54,7 @@ async def _seed_subscription(
     *,
     current_period_start: datetime | None,
     current_period_end: datetime | None,
+    billing_cycle: str = "monthly",
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """播种 租户+套餐+订阅，返回 (tenant_id, subscription_id)。"""
     tenant_id = uuid.uuid4()
@@ -69,7 +76,7 @@ async def _seed_subscription(
                 id=subscription_id,
                 tenant_id=tenant_id,
                 plan_id=plan_id,
-                billing_cycle="monthly",
+                billing_cycle=billing_cycle,
                 status="active",
                 current_period_start=current_period_start,
                 current_period_end=current_period_end,
@@ -302,3 +309,195 @@ async def _invoice_tenant_id(db_session, subscription_id: uuid.UUID) -> uuid.UUI
         sub = await session.get(Subscription, subscription_id)
         assert sub is not None
         return sub.tenant_id
+
+
+async def _single_invoice(db_session, subscription_id: uuid.UUID) -> Invoice:
+    async with db_session() as session:
+        return (
+            await session.execute(
+                select(Invoice).where(Invoice.subscription_id == subscription_id)
+            )
+        ).scalar_one()
+
+
+async def _drift_period_end(db_session, subscription_id: uuid.UUID, new_end: datetime) -> None:
+    """模拟 activate 续期后周期起点漂移：直接改 current_period_end。"""
+    async with db_session() as session:
+        sub = await session.get(Subscription, subscription_id)
+        assert sub is not None
+        sub.current_period_end = new_end
+        await session.commit()
+
+
+class TestCrossEntryIdempotency:
+    """V1-H1 跨入口双票修复。
+
+    语义决策：worker 与 admin generate-from-subscription 两入口的幂等键统一
+    归一化到「票覆盖周期的起点」。两个入口都开出「下一计费周期」的续费票，
+    period_start = current_period_end —— 当期费用已随开通/激活收取（不落
+    Invoice 行），admin 原来锚定 current_period_start 的「当期补开」本身就是
+    第二次就同一费用出票；且 activate 续期会重置 current_period_start 使键
+    漂移、与既有票形成区间重叠但键不等，唯一约束拦不住。
+    """
+
+    async def test_worker_then_admin_same_subscription_single_invoice(
+        self, client, db_session, admin_headers, monkeypatch
+    ):
+        """worker 先出下期票 → admin 同订阅再生成 → 幂等返回同一张票，不新增第二张。"""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        _, subscription_id = await _seed_subscription(
+            db_session,
+            current_period_start=now - timedelta(days=29),
+            current_period_end=now + timedelta(days=1),
+        )
+        monkeypatch.setattr(worker_module, "async_session", db_session)
+        await generate_invoices()
+
+        worker_invoice = await _single_invoice(db_session, subscription_id)
+        assert worker_invoice.period_start == now + timedelta(days=1)
+
+        response = await client.post(
+            f"/api/admin/invoices/generate-from-subscription/{subscription_id}",
+            headers=admin_headers,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["created"] is False
+        assert body["invoice_id"] == str(worker_invoice.id)
+        assert await _count_invoices(db_session, subscription_id) == 1
+
+    async def test_admin_then_worker_same_subscription_single_invoice(
+        self, client, db_session, admin_headers, monkeypatch
+    ):
+        """admin 先出下期票 → worker 再跑 → ON CONFLICT 吸收，不新增第二张。"""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        _, subscription_id = await _seed_subscription(
+            db_session,
+            current_period_start=now - timedelta(days=15),
+            current_period_end=now + timedelta(days=2),
+        )
+        first = await client.post(
+            f"/api/admin/invoices/generate-from-subscription/{subscription_id}",
+            headers=admin_headers,
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["created"] is True
+        admin_invoice = await _single_invoice(db_session, subscription_id)
+        # admin 出的也是「下一计费周期」票：period_start 锚定 current_period_end
+        assert admin_invoice.period_start == now + timedelta(days=2)
+
+        monkeypatch.setattr(worker_module, "async_session", db_session)
+        await generate_invoices()
+
+        assert await _count_invoices(db_session, subscription_id) == 1
+        assert (await _single_invoice(db_session, subscription_id)).id == admin_invoice.id
+
+    async def test_admin_rejects_overlapping_invoice_after_period_drift(
+        self, client, db_session, admin_headers
+    ):
+        """周期起点漂移（activate 续期重置周期）→ admin 目标区间与既有票重叠 → 409 拒开。"""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        _, subscription_id = await _seed_subscription(
+            db_session,
+            current_period_start=now - timedelta(days=29),
+            current_period_end=now + timedelta(days=1),
+        )
+        first = await client.post(
+            f"/api/admin/invoices/generate-from-subscription/{subscription_id}",
+            headers=admin_headers,
+        )
+        assert first.status_code == 200, first.text
+
+        # 模拟 activate 续期：period_end 漂移 1 天，新目标区间与既有票重叠
+        await _drift_period_end(db_session, subscription_id, now + timedelta(days=2))
+        second = await client.post(
+            f"/api/admin/invoices/generate-from-subscription/{subscription_id}",
+            headers=admin_headers,
+        )
+        assert second.status_code == 409, second.text
+        assert "重叠" in second.json()["detail"]
+        assert await _count_invoices(db_session, subscription_id) == 1
+
+    async def test_worker_skips_overlapping_invoice_after_period_drift(
+        self, db_session, monkeypatch
+    ):
+        """周期起点漂移后 worker 目标区间与既有票重叠 → 跳过不出票。"""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        _, subscription_id = await _seed_subscription(
+            db_session,
+            current_period_start=now - timedelta(days=29),
+            current_period_end=now + timedelta(days=1),
+        )
+        monkeypatch.setattr(worker_module, "async_session", db_session)
+        await generate_invoices()
+        assert await _count_invoices(db_session, subscription_id) == 1
+
+        await _drift_period_end(db_session, subscription_id, now + timedelta(days=2))
+        await generate_invoices()
+        # 漂移后目标 [now+2d, now+32d) 与既有票 [now+1d, now+31d) 重叠 → 不出第二张
+        assert await _count_invoices(db_session, subscription_id) == 1
+
+    async def test_admin_requires_period_end(self, client, db_session, admin_headers):
+        """订阅缺少 current_period_end → 400（无法确定续期周期），而非错键出票。"""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        _, subscription_id = await _seed_subscription(
+            db_session,
+            current_period_start=now - timedelta(days=15),
+            current_period_end=None,
+        )
+        response = await client.post(
+            f"/api/admin/invoices/generate-from-subscription/{subscription_id}",
+            headers=admin_headers,
+        )
+        assert response.status_code == 400, response.text
+        assert "计费周期" in response.json()["detail"]
+
+    async def test_worker_yearly_renewal_covers_365_days(self, db_session, monkeypatch):
+        """yearly 续期票 period_end = period_start + 365d（V1-M2，原固定 +30d）。"""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        _, subscription_id = await _seed_subscription(
+            db_session,
+            current_period_start=now - timedelta(days=360),
+            current_period_end=now + timedelta(days=1),
+            billing_cycle="yearly",
+        )
+        monkeypatch.setattr(worker_module, "async_session", db_session)
+        await generate_invoices()
+
+        invoice = await _single_invoice(db_session, subscription_id)
+        assert invoice.period_end == invoice.period_start + timedelta(days=365)
+        assert invoice.amount == Decimal("990.00")
+
+
+class TestInvoiceNumberingRobustness:
+    async def test_unicode_digit_suffix_does_not_poison_numbering(self, db_session):
+        """库中存在 Unicode 数字后缀脏票号 → 发号正常（V1-M1）。
+
+        '²'.isdigit() 为 True 但 int('²') 抛 ValueError —— 一行脏数据不得
+        毒化 MAX+1 发号。
+        """
+        assert "²".isdigit() and not "²".isascii()  # 锁定陷阱本身
+        tenant_id = uuid.uuid4()
+        async with db_session() as session:
+            session.add(Tenant(id=tenant_id, name="脏票号租户", slug=uuid.uuid4().hex[:12]))
+            session.add_all(
+                [
+                    Invoice(
+                        tenant_id=tenant_id,
+                        invoice_no="INV-202608-0007",
+                        amount=Decimal("1.00"),
+                        currency="CNY",
+                        status="draft",
+                    ),
+                    Invoice(
+                        tenant_id=tenant_id,
+                        invoice_no="INV-202608-0042²",
+                        amount=Decimal("1.00"),
+                        currency="CNY",
+                        status="draft",
+                    ),
+                ]
+            )
+            await session.commit()
+            # 脏行 "0042²" 被跳过，MAX 取 7 → 下一号 0008
+            assert await next_invoice_no(session, now=datetime(2026, 8, 15)) == "INV-202608-0008"

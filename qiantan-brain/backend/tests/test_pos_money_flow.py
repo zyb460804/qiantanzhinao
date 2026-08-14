@@ -10,14 +10,16 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from tests.conftest import TEST_MERCHANT_ID
 
-from app.core.timezone import local_now
+from app.core.timezone import CST, cst_today, local_now
 from app.models.accounts import CustomerReceivable
+from app.models.inventory import InventoryRecord
 from app.models.payment import ReconciliationDifference, ReconciliationTask
 from app.models.pos import Payment, SaleOrder
 from app.services.accounts_service import get_customer_balance
@@ -573,3 +575,374 @@ async def test_pay_rejects_credit_method(client, db_session):
         json={"amount": 5, "payments": [{"amount": 5, "method": "credit"}]},
     )
     assert repay.status_code == 400
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 第五轮 L3：四流恒等式跨日场景（V1-H2）+ net_cash_flow 去双算（V1-H3）
+# 四流恒等式：total_sales = payments + credit_amount + refund_amount
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _cst_day_utc_stamp(day: date) -> datetime:
+    """CST 业务日 day 正午 12:00 对应的 naive UTC 时间（远离日界，避免边界误差）."""
+    return datetime.combine(day, time(12, 0), tzinfo=CST).astimezone(UTC).replace(tzinfo=None)
+
+
+async def _shift_order_to_cst_day(db_session, order_id: uuid.UUID, day: date) -> None:
+    """把订单及其全部支付流水整体挪到指定 CST 业务日（模拟跨日资金场景）."""
+    stamp = _cst_day_utc_stamp(day)
+    async with db_session() as session:
+        order = await session.get(SaleOrder, order_id)
+        assert order is not None
+        order.created_at = stamp
+        await session.execute(
+            update(Payment).where(Payment.order_id == order_id).values(created_at=stamp)
+        )
+        await session.commit()
+
+
+async def _live_settlement(client, day: date) -> dict:
+    """读取某 CST 日的实时日结数字（未关闭时 GET 返回 live 计算）."""
+    res = await client.get(f"/api/v1/pos/daily-settlement/{day.isoformat()}")
+    assert res.status_code == 200
+    return res.json()["data"]
+
+
+@pytest.mark.asyncio
+async def test_same_day_refund_settlement_balances(client, db_session):
+    """场景① 当日退：现金单 100 当日整单退 → refund==100、payments==0、diff==0."""
+    await _seed_stock(db_session, quantity=10)
+    create = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": "l3-sameday-refund-001",
+            "payment_method": "cash",
+            "items": _items(10, 10.0),
+        },
+    )
+    assert create.status_code == 200
+    order_id = uuid.UUID(create.json()["data"]["order_id"])
+    refund = await client.post(
+        f"/api/v1/pos/orders/{order_id}/refund",
+        json={"reason": "当日退货", "return_to_stock": True},
+    )
+    assert refund.status_code == 200
+
+    numbers = await _live_settlement(client, cst_today())
+    assert numbers["total_sales"] == 100.0
+    assert numbers["refund_amount"] == 100.0
+    assert numbers["total_payments"] == 0.0  # +100 收款与 -100 退款同日对冲
+    assert numbers["diff_amount"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_next_day_refund_counts_on_refund_day_and_keeps_both_days_balanced(
+    client, db_session
+):
+    """场景② 次日退当日订单：退款计入退款日（refund==100、cash==-100），两日 diff==0.
+
+    V1-H2 回归：原 SUM(SaleOrder.refunded_amount) 按订单创建日归集，跨日退款
+    时订单日重算 diff=-100、退款日又什么都不显示。
+    """
+    await _seed_stock(db_session, quantity=10)
+    create = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": "l3-nextday-refund-001",
+            "payment_method": "cash",
+            "items": _items(10, 10.0),
+        },
+    )
+    assert create.status_code == 200
+    order_id = uuid.UUID(create.json()["data"]["order_id"])
+    yesterday = cst_today() - timedelta(days=1)
+    await _shift_order_to_cst_day(db_session, order_id, yesterday)
+
+    refund = await client.post(
+        f"/api/v1/pos/orders/{order_id}/refund",
+        json={"reason": "次日退货", "return_to_stock": True},
+    )
+    assert refund.status_code == 200
+
+    # 退款日（今天）：无销售，但退款流水落今天并计入渠道额
+    today_numbers = await _live_settlement(client, cst_today())
+    assert today_numbers["total_sales"] == 0.0
+    assert today_numbers["refund_amount"] == 100.0
+    assert today_numbers["cash_amount"] == -100.0
+    assert today_numbers["total_payments"] == -100.0
+    assert today_numbers["diff_amount"] == 0.0
+
+    # 订单日（昨天）：销售/收款照旧，退款不回灌订单日
+    yesterday_numbers = await _live_settlement(client, yesterday)
+    assert yesterday_numbers["total_sales"] == 100.0
+    assert yesterday_numbers["total_payments"] == 100.0
+    assert yesterday_numbers["refund_amount"] == 0.0
+    assert yesterday_numbers["diff_amount"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_same_day_credit_same_day_collect_net_cash_flow(client, db_session):
+    """场景③ 当日赊 10 当日收 4：net_cash_flow==4（payments 已含回款，不再双算）.
+
+    V1-H3 回归：原 customer_repay 聚合不排除当日订单回款，净流算成 8。
+    """
+    await _seed_stock(db_session, quantity=10)
+    create = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": "l3-sameday-credit-001",
+            "payment_method": "credit",
+            "customer_name": "l3当日回款",
+            "items": _items(2, 5.0),
+        },
+    )
+    assert create.status_code == 200
+    order_id = uuid.UUID(create.json()["data"]["order_id"])
+    repay = await client.post(
+        f"/api/v1/pos/orders/{order_id}/pay",
+        json={"amount": 4, "method": "cash", "transaction_id": "l3-sameday-repay-001"},
+    )
+    assert repay.status_code == 200
+    assert repay.json()["data"]["status"] == "partial"
+
+    numbers = await _live_settlement(client, cst_today())
+    assert numbers["total_sales"] == 10.0
+    assert numbers["total_payments"] == 4.0
+    assert numbers["customer_repay"] == 0.0  # 当日订单回款已计入 payments
+    assert numbers["net_cash_flow"] == 4.0
+    assert numbers["credit_amount"] == 6.0
+    assert numbers["diff_amount"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_cross_day_repay_counts_once_in_net_cash_flow(client, db_session):
+    """场景④ 跨日回款：昨赊 10 今收 4 → 今日 net_cash_flow==4、customer_repay==4、diff==0."""
+    await _seed_stock(db_session, quantity=10)
+    create = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": "l3-crossday-credit-001",
+            "payment_method": "credit",
+            "customer_name": "l3跨日回款",
+            "items": _items(2, 5.0),
+        },
+    )
+    assert create.status_code == 200
+    order_id = uuid.UUID(create.json()["data"]["order_id"])
+    yesterday = cst_today() - timedelta(days=1)
+    await _shift_order_to_cst_day(db_session, order_id, yesterday)
+
+    repay = await client.post(
+        f"/api/v1/pos/orders/{order_id}/pay",
+        json={"amount": 4, "method": "wechat", "transaction_id": "l3-crossday-repay-001"},
+    )
+    assert repay.status_code == 200
+
+    # 回款日（今天）：跨日回款不进 payments（否则与 customer_repay 双算）
+    today_numbers = await _live_settlement(client, cst_today())
+    assert today_numbers["total_sales"] == 0.0
+    assert today_numbers["total_payments"] == 0.0
+    assert today_numbers["customer_repay"] == 4.0
+    assert today_numbers["net_cash_flow"] == 4.0
+    assert today_numbers["diff_amount"] == 0.0
+
+    # 赊账日（昨天）：credit_amount==10、无回款冲减
+    yesterday_numbers = await _live_settlement(client, yesterday)
+    assert yesterday_numbers["total_sales"] == 10.0
+    assert yesterday_numbers["credit_amount"] == 10.0
+    assert yesterday_numbers["total_payments"] == 0.0
+    assert yesterday_numbers["diff_amount"] == 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 第五轮 L3：幂等键列宽（V5-C1）+ 组合双赊账 + 折扣残差明细对齐
+# ═══════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_pos_idempotency_keys_fit_varchar64(client, db_session):
+    """V5-C1：sale/refund 幂等键压缩后 ≤64 且保留前缀语义（原 78/82+ 字符 PG 500）."""
+    await _seed_stock(db_session, quantity=10)
+    create = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": "l3-idem-key-001",
+            "payment_method": "cash",
+            "items": [
+                {"product_id": 1, "quantity": 1, "unit": "斤", "unit_price": 5.0},
+                {"product_id": 1, "quantity": 1, "unit": "斤", "unit_price": 5.0},
+            ],
+        },
+    )
+    assert create.status_code == 200
+    order_id = uuid.UUID(create.json()["data"]["order_id"])
+    refund = await client.post(
+        f"/api/v1/pos/orders/{order_id}/refund",
+        json={"reason": "幂等键回归", "return_to_stock": True},
+    )
+    assert refund.status_code == 200
+
+    async with db_session() as session:
+        keys = (
+            (
+                await session.execute(
+                    select(InventoryRecord.idempotency_key).where(
+                        InventoryRecord.merchant_id == uuid.UUID(TEST_MERCHANT_ID),
+                        InventoryRecord.event_type.in_(("sale", "refund")),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(keys) >= 3
+    for key in keys:
+        assert key is not None
+        assert len(key) <= 64, f"idempotency key exceeds VARCHAR(64): {key!r} ({len(key)})"
+        assert key.startswith(("sale:", "refund:"))
+    assert any(key.startswith("sale:") for key in keys)
+    assert any(key.startswith("refund:") for key in keys)
+    assert len(set(keys)) == len(keys)  # 每行键互不相同
+
+
+@pytest.mark.asyncio
+async def test_refund_receivable_key_fits_varchar64_on_large_refund(client, db_session):
+    """V5-C1：赊账大额退款的 sale-refund 键 ≤64（原键 30 万退款额时 65 字符）."""
+    await _seed_stock(db_session, quantity=10)
+    create = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": "l3-idem-refund-001",
+            "payment_method": "credit",
+            "customer_name": "l3大额赊退",
+            "items": _items(6, 50000.0),
+        },
+    )
+    assert create.status_code == 200
+    order_id = uuid.UUID(create.json()["data"]["order_id"])
+    refund = await client.post(
+        f"/api/v1/pos/orders/{order_id}/refund",
+        json={"reason": "大额整退", "return_to_stock": True},
+    )
+    assert refund.status_code == 200
+
+    async with db_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(CustomerReceivable).where(
+                        CustomerReceivable.sale_order_id == order_id,
+                        CustomerReceivable.direction == "repay",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+    key = rows[0].idempotency_key
+    assert key is not None
+    assert len(key) <= 64, f"sale-refund key exceeds VARCHAR(64): {key!r} ({len(key)})"
+    assert key.startswith("sale-refund:")
+
+
+@pytest.mark.asyncio
+async def test_combo_double_credit_entries_merge_into_one_receivable(client, db_session):
+    """LOW(b)：组合支付含两条 credit 不再撞幂等键 → 一笔合并应收，无 500."""
+    await _seed_stock(db_session, quantity=10)
+    res = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": "l3-combo-double-credit-001",
+            "customer_name": "l3双赊",
+            "items": _items(10, 10.0),
+            "payments": [
+                {"method": "cash", "amount": 50.0},
+                {"method": "credit", "amount": 30.0},
+                {"method": "credit", "amount": 20.0},
+            ],
+        },
+    )
+    assert res.status_code == 200
+    order_id = uuid.UUID(res.json()["data"]["order_id"])
+
+    async with db_session() as session:
+        charges = (
+            (
+                await session.execute(
+                    select(CustomerReceivable).where(
+                        CustomerReceivable.sale_order_id == order_id,
+                        CustomerReceivable.direction == "charge",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(charges) == 1  # 合并为一笔，不撞唯一约束
+        assert charges[0].amount == Decimal("50")
+        key = charges[0].idempotency_key
+        assert key is not None and len(key) <= 64 and key.startswith("sale-credit:")
+
+        credit_payments = (
+            (
+                await session.execute(
+                    select(Payment).where(
+                        Payment.order_id == order_id, Payment.method == "credit"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # Payment 流水仍逐笔保留（两笔 credit 各 30/20）
+        assert sum((p.amount for p in credit_payments), Decimal("0")) == Decimal("50")
+
+
+@pytest.mark.asyncio
+async def test_discount_residual_aligns_inventory_records(client, db_session):
+    """LOW(c)：整单退款 ±0.01 残差对齐时 InventoryRecord.total_amount 同步对齐."""
+    await _seed_stock(db_session, quantity=5)
+    create = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": "l3-residual-align-001",
+            "payment_method": "cash",
+            "discount_amount": 1,
+            "items": [
+                {"product_id": 1, "quantity": 1, "unit": "斤", "unit_price": 10.0},
+                {"product_id": 1, "quantity": 1, "unit": "斤", "unit_price": 10.0},
+                {"product_id": 1, "quantity": 1, "unit": "斤", "unit_price": 10.0},
+            ],
+        },
+    )
+    assert create.status_code == 200
+    assert create.json()["data"]["total_amount"] == 29.0
+    order_id = uuid.UUID(create.json()["data"]["order_id"])
+
+    refund = await client.post(
+        f"/api/v1/pos/orders/{order_id}/refund",
+        json={"reason": "残差对齐", "return_to_stock": True},
+    )
+    assert refund.status_code == 200
+    assert refund.json()["data"]["refunded_amount"] == 29.0
+
+    async with db_session() as session:
+        order = await session.get(SaleOrder, order_id)
+        refund_records = (
+            (
+                await session.execute(
+                    select(InventoryRecord).where(
+                        InventoryRecord.client_reference == order.order_no,
+                        InventoryRecord.event_type == "refund",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(refund_records) == 3
+        amounts = [r.total_amount for r in refund_records]
+        # 逐行 9.67×3 = 29.01 → 残差 -0.01 落到末行 9.66，明细合计对齐 29.00
+        assert sum(amounts, Decimal("0")) == Decimal("29.00")
+        assert max(amounts) - min(amounts) == Decimal("0.01")

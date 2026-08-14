@@ -21,6 +21,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.idempotency import short_idem_key
 from app.core.security import get_current_merchant
 from app.core.timezone import utc_now, utc_today_start
 from app.database import get_db
@@ -47,7 +48,7 @@ from app.services.accounts_service import (
     record_supplier_payable_from_purchase,
     record_supplier_payment,
 )
-from app.services.batch import create_batch
+from app.services.batch import create_batch, reduce_batches_on_purchase_return
 from app.services.sku_service import resolve_sku_id
 
 
@@ -876,7 +877,7 @@ async def confirm_acceptance(
         # Generate supplier payable
         # 应付幂等键：源串 88 字符超 supplier_payables.idempotency_key VARCHAR(64)，
         # 压缩后 legacy /confirm 与 /acceptance/confirm 共用同一键空间互相兜底
-        idem_key = _short_idem_key("purchase-payable", plist.id, item.id)
+        idem_key = short_idem_key("purchase-payable", plist.id, item.id)
         await record_supplier_payable_from_purchase(db, plist, item, idempotency_key=idem_key)
 
         if item.recommendation_id:
@@ -1095,8 +1096,26 @@ async def return_purchase_item(
             event_time=utc_now(),
             source="purchase_list",
             notes=f"退货给供应商: {body.reason}",
-            idempotency_key=_short_idem_key("purchase-return", item.id, prior_returned, return_qty),
+            idempotency_key=short_idem_key("purchase-return", item.id, prior_returned, return_qty),
         )
+    )
+
+    # 批次同步缩减（V2-H4）：修复前只减账面不减批次 → 批次仍按旧余量参与
+    # FIFO 消耗，造成超卖。按 rollback purchase 分支口径同步压降
+    # remaining_qty / purchase_qty（详见 services/batch.py 注释），
+    # 优先按本采购项入库时的 batch_label 精确命中。
+    purchase_record = (
+        await db.get(InventoryRecord, item.inventory_record_id)
+        if item.inventory_record_id
+        else None
+    )
+    await reduce_batches_on_purchase_return(
+        db,
+        merchant.id,
+        item.product_id,
+        return_qty,
+        batch_label=purchase_record.batch_label if purchase_record else None,
+        sku_id=item.sku_id,
     )
 
     # F2: Offset payable — reconcile the original purchase-direction SupplierPayable
@@ -1137,7 +1156,7 @@ async def return_purchase_item(
                 payable_ids=payable_ids,
                 amount=return_amount,
                 note=f"退货抵扣: {body.reason}",
-                idempotency_key=_short_idem_key("purchase-return-payable", item.id, prior_returned),
+                idempotency_key=short_idem_key("purchase-return-payable", item.id, prior_returned),
             )
         else:
             # No outstanding purchase payable to offset (e.g. already fully paid
@@ -1152,7 +1171,7 @@ async def return_purchase_item(
                     purchase_list_id=item.list_id,
                     note=f"退货抵扣: {body.reason}",
                     settled=True,
-                    idempotency_key=_short_idem_key(
+                    idempotency_key=short_idem_key(
                         "purchase-return-payable", item.id, prior_returned
                     ),
                 )
@@ -1309,7 +1328,7 @@ async def confirm_purchase(
         item.status = "purchased"
         item.purchased_at = now
 
-        idem_key = _short_idem_key("purchase-payable", plist.id, item.id)
+        idem_key = short_idem_key("purchase-payable", plist.id, item.id)
         await record_supplier_payable_from_purchase(db, plist, item, idempotency_key=idem_key)
 
         if item.recommendation_id:
@@ -1382,17 +1401,6 @@ def _purchase_inventory_idem_key(plist_id: uuid.UUID, item_id: uuid.UUID) -> str
     """
     digest = hashlib.sha256(f"purchase-accept:{plist_id}:{item_id}".encode()).hexdigest()[:40]
     return f"purchase-accept:{digest}"
-
-
-def _short_idem_key(prefix: str, *parts: object) -> str:
-    """幂等键压缩：长源串超出 VARCHAR(64) 列宽时 PG 会直接拒写 INSERT。
-
-    对 parts 拼接取 sha256 并截断（总长 ≤ 63）：同一源串确定性同键，
-    不同源串碰撞概率可忽略；prefix 保留语义便于排查。
-    """
-    digest_len = max(8, 63 - len(prefix))
-    digest = hashlib.sha256(":".join(map(str, parts)).encode()).hexdigest()[:digest_len]
-    return f"{prefix}:{digest}"
 
 
 def _gen_order_no(plist: PurchaseList) -> str:

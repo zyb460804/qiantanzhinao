@@ -429,3 +429,70 @@ class TestPosSourceGuard:
                 )
             ).scalar_one()
         assert record.is_voided is False
+
+
+# ---------------------------------------------------------------------------
+# 5. /correct 状态守卫（V2-M1）
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectStateGuard:
+    async def test_correct_confirmed_log_rejected(self, client, db_session):
+        """已确认的单调用 correct → 409，状态不被打回 parsed。
+
+        修复前：correct 无状态检查，把 confirmed 打回 parsed 后二次 confirm
+        会撞 voice:{log.id} 幂等唯一键 → 500。
+        """
+        await _purchase_stock(client)
+        log_id = await _seed_voice_log(db_session, _cash_sale_event(quantity=5))
+        confirm = await client.post("/api/v1/voice/confirm", json={"voice_log_id": str(log_id)})
+        assert confirm.status_code == 200
+
+        resp = await client.post(
+            "/api/v1/voice/correct",
+            json={"voice_log_id": str(log_id), "corrections": {"quantity": 3}},
+        )
+        assert resp.status_code == 409
+        assert "只能修正未确认" in resp.json()["detail"]
+
+        async with db_session() as session:
+            log = await session.get(VoiceLog, log_id)
+            assert log.status == "confirmed"  # 状态未被改回 parsed
+        # 后续 confirm 仍走幂等短路，而不是撞唯一键
+        again = await client.post("/api/v1/voice/confirm", json={"voice_log_id": str(log_id)})
+        assert again.status_code == 200
+        assert again.json()["data"]["idempotent"] is True
+
+    async def test_correct_parsed_log_still_works(self, client, db_session):
+        """未确认（parsed）的单正常修正 → 字段更新、状态保持 parsed。"""
+        log_id = await _seed_voice_log(db_session, _cash_sale_event(quantity=5))
+
+        resp = await client.post(
+            "/api/v1/voice/correct",
+            json={"voice_log_id": str(log_id), "corrections": {"quantity": 3}},
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["parsed"]["quantity"] == 3
+
+        async with db_session() as session:
+            log = await session.get(VoiceLog, log_id)
+            assert log.status == "parsed"
+            assert log.correction_count == 1
+
+    async def test_correct_voided_log_rejected(self, client, db_session):
+        """已撤销的单不允许 correct（重新解析需走新语音单）。"""
+        await _purchase_stock(client)
+        log_id = await _seed_voice_log(db_session, _cash_sale_event(quantity=5))
+        assert (
+            await client.post("/api/v1/voice/confirm", json={"voice_log_id": str(log_id)})
+        ).status_code == 200
+        assert (
+            await client.post(f"/api/v1/voice/{log_id}/void", json={"reason": "误记"})
+        ).status_code == 200
+
+        resp = await client.post(
+            "/api/v1/voice/correct",
+            json={"voice_log_id": str(log_id), "corrections": {"quantity": 3}},
+        )
+        assert resp.status_code == 409

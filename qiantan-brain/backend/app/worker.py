@@ -29,7 +29,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import func, select, update
 
 from app.config import settings
-from app.core.invoicing import insert_invoice
+from app.core.invoicing import get_overlapping_invoice, insert_invoice
 from app.database import async_session
 from app.models.auth import AuthRevokedToken
 from app.models.saas import (
@@ -134,6 +134,12 @@ async def generate_invoices():
     (subscription_id, period_start) 唯一约束（uq_invoice_subscription_period），
     两个 worker 并发跑同一周期也只出一票；invoice_no 数据库侧 MAX+1 发号，
     撞号竞态自动重试（见 app/core/invoicing.py）。
+
+    续期票语义：票覆盖「下一计费周期」，period_start = current_period_end
+    （该周期的起点），period_end 按计费周期长度推进（monthly 30d / yearly
+    365d）。与 admin generate-from-subscription 入共用一键，跨入口重试幂等；
+    周期起点漂移（activate 续期）形成的重叠期票由 get_overlapping_invoice
+    拦截（V1-H1）。
     """
     async with async_session() as db:
         now = datetime.now(UTC)
@@ -157,6 +163,26 @@ async def generate_invoices():
                 continue  # 上方过滤已保证，防御性兜底
 
             period_start = sub.current_period_end
+            # 续期票覆盖下一整个计费周期：monthly 30 天 / yearly 365 天（V1-M2）。
+            # 原实现固定 +30 天，年度订阅 12 张续期票的覆盖区间会互相重叠。
+            cycle_days = 365 if sub.billing_cycle == "yearly" else 30
+            period_end = period_start + timedelta(days=cycle_days)
+
+            # 重叠守卫（V1-H1）：约束只拦周期起点相等的重复。订阅被 activate
+            # 续期后 current_period_end 漂移，本周期目标可能与既有票区间重叠
+            # （键不等，约束拦不住）——跳过并不出票，宁可少出不可重出。
+            overlapping = await get_overlapping_invoice(db, sub.id, period_start, period_end)
+            if overlapping is not None and overlapping.period_start != period_start:
+                logger.warning(
+                    "subscription=%s 目标周期 [%s, %s) 与已有发票 %s (%s) 重叠，跳过出票",
+                    sub.id,
+                    period_start,
+                    period_end,
+                    overlapping.invoice_no,
+                    overlapping.period_start,
+                )
+                continue
+
             amount = plan.price_yearly if sub.billing_cycle == "yearly" else plan.price_monthly
             values = {
                 "tenant_id": sub.tenant_id,
@@ -165,7 +191,7 @@ async def generate_invoices():
                 "currency": "CNY",
                 "status": "draft",
                 "period_start": period_start,
-                "period_end": period_start + timedelta(days=30),
+                "period_end": period_end,
                 "due_date": period_start + timedelta(days=7),
                 "line_items": [
                     {

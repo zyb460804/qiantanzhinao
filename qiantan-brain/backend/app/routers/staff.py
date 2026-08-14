@@ -179,6 +179,12 @@ async def staff_login(
     if not staff.is_active:
         await record_failed_attempt(request, rl_key)
         raise HTTPException(status_code=403, detail="员工已停用")
+    # 应用层断言（V3-H1）：owner 只能由商户本人（merchants）承载，员工表
+    # 不允许 owner 行 —— create/update 已禁、迁移 n6d7e8f9a0b1 清理存量、
+    # seed 不再生成。此处兜底：未来任何写入路径复活 role='owner' 员工行，
+    # 也绝不为其签发带 owner 全权限的员工 token。
+    if staff.role == "owner":
+        raise HTTPException(status_code=403, detail="owner 角色不允许员工登录")
     # 常量时间比较（H2）：避免时序侧信道泄露正确 PIN 的前缀
     if not staff.pin_code or not hmac.compare_digest(staff.pin_code, str(pin_code)):
         await record_failed_attempt(request, rl_key)

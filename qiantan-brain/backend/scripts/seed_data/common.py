@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import random
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -61,6 +61,7 @@ def staff_uuid(merchant_id: uuid.UUID, idx: int) -> uuid.UUID:
 #  商品目录（全局唯一；三摊共享，各取子集）
 # ────────────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class ProductDef:
     """商品目录定义。id 与 product_categories.id 对齐（手动指定保证稳定）。"""
@@ -82,23 +83,84 @@ class ProductDef:
 # 原有 10 个（id 1-10，保持与旧 seed 一致）+ 水果 + 肉类扩充
 PRODUCTS: tuple[ProductDef, ...] = (
     # ── 蔬菜（老张主营）──
-    ProductDef(1, "白菜", "斤", Decimal("1.50"), 72, "叶菜类", (MERCHANT_VEGETABLE,), aliases=("大白菜", "娃娃菜")),
-    ProductDef(2, "菠菜", "斤", Decimal("3.00"), 48, "叶菜类", (MERCHANT_VEGETABLE,), aliases=("菠菜草",)),
-    ProductDef(3, "土豆", "斤", Decimal("2.00"), 168, "根茎类", (MERCHANT_VEGETABLE,), aliases=("马铃薯", "洋芋")),
+    ProductDef(
+        1,
+        "白菜",
+        "斤",
+        Decimal("1.50"),
+        72,
+        "叶菜类",
+        (MERCHANT_VEGETABLE,),
+        aliases=("大白菜", "娃娃菜"),
+    ),
+    ProductDef(
+        2, "菠菜", "斤", Decimal("3.00"), 48, "叶菜类", (MERCHANT_VEGETABLE,), aliases=("菠菜草",)
+    ),
+    ProductDef(
+        3,
+        "土豆",
+        "斤",
+        Decimal("2.00"),
+        168,
+        "根茎类",
+        (MERCHANT_VEGETABLE,),
+        aliases=("马铃薯", "洋芋"),
+    ),
     ProductDef(4, "豆腐", "斤", Decimal("2.50"), 24, "豆制品", (MERCHANT_VEGETABLE,)),
-    ProductDef(5, "黄瓜", "斤", Decimal("3.50"), 96, "瓜果类", (MERCHANT_VEGETABLE, MERCHANT_FRUIT)),
-    ProductDef(6, "番茄", "斤", Decimal("4.00"), 120, "瓜果类", (MERCHANT_VEGETABLE, MERCHANT_FRUIT), aliases=("西红柿", "洋柿子")),
-    ProductDef(7, "西瓜", "斤", Decimal("2.00"), 120, "水果类", (MERCHANT_VEGETABLE, MERCHANT_FRUIT)),
-    ProductDef(8, "苹果", "斤", Decimal("6.00"), 168, "水果类", (MERCHANT_VEGETABLE, MERCHANT_FRUIT), aliases=("红富士",)),
+    ProductDef(
+        5, "黄瓜", "斤", Decimal("3.50"), 96, "瓜果类", (MERCHANT_VEGETABLE, MERCHANT_FRUIT)
+    ),
+    ProductDef(
+        6,
+        "番茄",
+        "斤",
+        Decimal("4.00"),
+        120,
+        "瓜果类",
+        (MERCHANT_VEGETABLE, MERCHANT_FRUIT),
+        aliases=("西红柿", "洋柿子"),
+    ),
+    ProductDef(
+        7, "西瓜", "斤", Decimal("2.00"), 120, "水果类", (MERCHANT_VEGETABLE, MERCHANT_FRUIT)
+    ),
+    ProductDef(
+        8,
+        "苹果",
+        "斤",
+        Decimal("6.00"),
+        168,
+        "水果类",
+        (MERCHANT_VEGETABLE, MERCHANT_FRUIT),
+        aliases=("红富士",),
+    ),
     ProductDef(9, "猪肉", "斤", Decimal("15.00"), 48, "肉类", (MERCHANT_VEGETABLE, MERCHANT_MEAT)),
-    ProductDef(10, "鸡蛋", "斤", Decimal("6.00"), 720, "蛋类", (MERCHANT_VEGETABLE, MERCHANT_FRUIT, MERCHANT_MEAT)),
+    ProductDef(
+        10,
+        "鸡蛋",
+        "斤",
+        Decimal("6.00"),
+        720,
+        "蛋类",
+        (MERCHANT_VEGETABLE, MERCHANT_FRUIT, MERCHANT_MEAT),
+    ),
     # ── 水果（王姐主营，id 11-17）──
     ProductDef(11, "香蕉", "斤", Decimal("3.50"), 120, "水果类", (MERCHANT_FRUIT,)),
-    ProductDef(12, "橙子", "斤", Decimal("4.50"), 240, "水果类", (MERCHANT_FRUIT,), aliases=("脐橙", "甜橙")),
+    ProductDef(
+        12,
+        "橙子",
+        "斤",
+        Decimal("4.50"),
+        240,
+        "水果类",
+        (MERCHANT_FRUIT,),
+        aliases=("脐橙", "甜橙"),
+    ),
     ProductDef(13, "葡萄", "斤", Decimal("8.00"), 96, "水果类", (MERCHANT_FRUIT,)),
     ProductDef(14, "草莓", "斤", Decimal("15.00"), 48, "水果类", (MERCHANT_FRUIT,)),
     ProductDef(15, "芒果", "斤", Decimal("9.00"), 120, "水果类", (MERCHANT_FRUIT,)),
-    ProductDef(16, "梨", "斤", Decimal("3.00"), 168, "水果类", (MERCHANT_FRUIT,), aliases=("鸭梨", "雪梨")),
+    ProductDef(
+        16, "梨", "斤", Decimal("3.00"), 168, "水果类", (MERCHANT_FRUIT,), aliases=("鸭梨", "雪梨")
+    ),
     ProductDef(17, "桃子", "斤", Decimal("4.00"), 96, "水果类", (MERCHANT_FRUIT,)),
     # ── 肉类（刘哥主营，id 18-23）──
     ProductDef(18, "牛肉", "斤", Decimal("38.00"), 48, "肉类", (MERCHANT_MEAT,)),
@@ -120,6 +182,7 @@ def products_for(merchant_id: uuid.UUID) -> tuple[ProductDef, ...]:
 # ────────────────────────────────────────────────────────────────────
 #  商户档案（故事化）
 # ────────────────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class MerchantProfile:
@@ -169,6 +232,7 @@ MERCHANTS: tuple[MerchantProfile, ...] = (
 #  供应商档案（全局共享；三摊按品类引用）
 # ────────────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class SupplierDef:
     idx: int
@@ -186,12 +250,73 @@ class SupplierDef:
 
 
 SUPPLIERS: tuple[SupplierDef, ...] = (
-    SupplierDef(1, "老王蔬菜批发", "13800000001", "蔬菜批发", Decimal("2.10"), Decimal("1.50"), Decimal("0.80"), Decimal("96.00"), Decimal("92.50")),
-    SupplierDef(2, "张姐水果直供", "13800000002", "水果批发", Decimal("3.20"), Decimal("2.00"), Decimal("1.20"), Decimal("91.00"), Decimal("88.00")),
-    SupplierDef(3, "李记肉联厂", "13800000003", "猪牛羊肉", Decimal("1.50"), Decimal("0.50"), Decimal("0.30"), Decimal("98.00"), Decimal("95.80")),
-    SupplierDef(4, "惠民粮油", "13800000004", "豆制品蛋类", Decimal("1.00"), Decimal("0.80"), Decimal("0.50"), Decimal("94.00"), Decimal("91.20")),
-    SupplierDef(5, "鲜达禽业", "13800000005", "鸡鸭禽类", Decimal("2.50"), Decimal("1.80"), Decimal("1.00"), Decimal("89.00"), Decimal("85.00")),
-    SupplierDef(6, "宏发农贸（已拉黑）", "13800000006", "综合批发", Decimal("8.50"), Decimal("6.20"), Decimal("5.10"), Decimal("72.00"), Decimal("58.00"), is_blacklisted=True),
+    SupplierDef(
+        1,
+        "老王蔬菜批发",
+        "13800000001",
+        "蔬菜批发",
+        Decimal("2.10"),
+        Decimal("1.50"),
+        Decimal("0.80"),
+        Decimal("96.00"),
+        Decimal("92.50"),
+    ),
+    SupplierDef(
+        2,
+        "张姐水果直供",
+        "13800000002",
+        "水果批发",
+        Decimal("3.20"),
+        Decimal("2.00"),
+        Decimal("1.20"),
+        Decimal("91.00"),
+        Decimal("88.00"),
+    ),
+    SupplierDef(
+        3,
+        "李记肉联厂",
+        "13800000003",
+        "猪牛羊肉",
+        Decimal("1.50"),
+        Decimal("0.50"),
+        Decimal("0.30"),
+        Decimal("98.00"),
+        Decimal("95.80"),
+    ),
+    SupplierDef(
+        4,
+        "惠民粮油",
+        "13800000004",
+        "豆制品蛋类",
+        Decimal("1.00"),
+        Decimal("0.80"),
+        Decimal("0.50"),
+        Decimal("94.00"),
+        Decimal("91.20"),
+    ),
+    SupplierDef(
+        5,
+        "鲜达禽业",
+        "13800000005",
+        "鸡鸭禽类",
+        Decimal("2.50"),
+        Decimal("1.80"),
+        Decimal("1.00"),
+        Decimal("89.00"),
+        Decimal("85.00"),
+    ),
+    SupplierDef(
+        6,
+        "宏发农贸（已拉黑）",
+        "13800000006",
+        "综合批发",
+        Decimal("8.50"),
+        Decimal("6.20"),
+        Decimal("5.10"),
+        Decimal("72.00"),
+        Decimal("58.00"),
+        is_blacklisted=True,
+    ),
 )
 
 SUPPLIERS_BY_NAME: dict[str, SupplierDef] = {s.name: s for s in SUPPLIERS}
@@ -201,6 +326,7 @@ SUPPLIERS_BY_NAME: dict[str, SupplierDef] = {s.name: s for s in SUPPLIERS}
 #  员工档案（每摊 3-4 人，覆盖不同角色演示权限）
 # ────────────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class StaffDef:
     name: str
@@ -209,19 +335,23 @@ class StaffDef:
 
 
 STAFF_BY_MERCHANT: dict[uuid.UUID, tuple[StaffDef, ...]] = {
+    # 摊主本人（张建国/王丽萍/刘大强）不设 owner 员工行（V3-H1）：owner 只能
+    # 由商户本人（merchants）承载，员工体系的 owner 角色会被 staff_login
+    # 直接 403、迁移 n6d7e8f9a0b1 也会把存量 owner 行降级——seed 不再复活
+    # 该角色，摊主行改为权限次高的 manager 演示多角色权限矩阵。
     MERCHANT_VEGETABLE: (
-        StaffDef("张建国", "owner", "13900000001"),
+        StaffDef("张建国", "manager", "13900000001"),
         StaffDef("王秀兰", "manager", "13900000002"),
         StaffDef("李小妹", "cashier", "13900000003"),
         StaffDef("赵师傅", "purchaser", "13900000004"),
     ),
     MERCHANT_FRUIT: (
-        StaffDef("王丽萍", "owner", "13900000005"),
+        StaffDef("王丽萍", "manager", "13900000005"),
         StaffDef("陈阿姨", "cashier", "13900000006"),
         StaffDef("小周", "stocker", "13900000007"),
     ),
     MERCHANT_MEAT: (
-        StaffDef("刘大强", "owner", "13900000008"),
+        StaffDef("刘大强", "manager", "13900000008"),
         StaffDef("孙师傅", "manager", "13900000009"),
         StaffDef("马小哥", "cashier", "13900000010"),
         StaffDef("老陈", "purchaser", "13900000011"),
@@ -232,6 +362,7 @@ STAFF_BY_MERCHANT: dict[uuid.UUID, tuple[StaffDef, ...]] = {
 # ────────────────────────────────────────────────────────────────────
 #  赊账客户（演示往来账 + 信用额度）
 # ────────────────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class CreditCustomerDef:
@@ -246,10 +377,14 @@ class CreditCustomerDef:
 CREDIT_CUSTOMERS: tuple[CreditCustomerDef, ...] = (
     CreditCustomerDef("张记饭店", MERCHANT_VEGETABLE, Decimal("2000.00"), 15, False, None),
     CreditCustomerDef("李婶食堂", MERCHANT_VEGETABLE, Decimal("1500.00"), 10, False, None),
-    CreditCustomerDef("老赵排档", MERCHANT_VEGETABLE, Decimal("800.00"), 7, True, "逾期 45 天未结，暂停赊账"),
+    CreditCustomerDef(
+        "老赵排档", MERCHANT_VEGETABLE, Decimal("800.00"), 7, True, "逾期 45 天未结，暂停赊账"
+    ),
     CreditCustomerDef("阳光幼儿园", MERCHANT_FRUIT, Decimal("3000.00"), 20, False, None),
     CreditCustomerDef("天天茶餐厅", MERCHANT_MEAT, Decimal("5000.00"), 15, False, None),
-    CreditCustomerDef("胖子烧烤", MERCHANT_MEAT, Decimal("1000.00"), 7, True, "累计欠款超额度，已停赊"),
+    CreditCustomerDef(
+        "胖子烧烤", MERCHANT_MEAT, Decimal("1000.00"), 7, True, "累计欠款超额度，已停赊"
+    ),
 )
 
 
@@ -287,6 +422,7 @@ def qty(v: float | int | str) -> Decimal:
 # ────────────────────────────────────────────────────────────────────
 #  幂等写入辅助
 # ────────────────────────────────────────────────────────────────────
+
 
 async def get_or_create(db, model, pk_value, **fields):
     """按主键判重：存在跳过，不存在则 add。返回 (obj, created)。"""

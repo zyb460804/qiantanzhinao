@@ -1,13 +1,14 @@
 """Environment data API router — QWeather integration + DB persistence."""
 
 import uuid
-from datetime import date
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_merchant_id
+from app.core.timezone import cst_today
 from app.database import get_db
 from app.models.environment import EnvironmentRecord
 from app.schemas.common import AnyResponse
@@ -27,8 +28,11 @@ async def get_today(
 
     Checks DB first. If not cached, fetches from QWeather API
     (falls back to mock when API key is not configured).
+
+    「今天」按 CST 业务日：日历键必须与天气服务写端（cst_today()）一致，
+    否则部署在非 CST 时区的服务器会在 UTC 16-24 点读写到错误的日期。
     """
-    today = date.today()
+    today = cst_today()
 
     # Check DB cache
     query = select(EnvironmentRecord).where(
@@ -108,10 +112,8 @@ async def get_history(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get recent environment records from DB."""
-    from datetime import timedelta
-
-    start_date = date.today() - timedelta(days=days)
+    """Get recent environment records from DB (CST-day window)."""
+    start_date = cst_today() - timedelta(days=days)
 
     query = (
         select(EnvironmentRecord)
@@ -296,7 +298,7 @@ def resolve_solar_term(mmdd: str) -> dict:
 @router.get("/solar-term", response_model=AnyResponse)
 async def get_solar_term():
     """Get the current solar term and seasonal products."""
-    term_data = resolve_solar_term(date.today().strftime("%m%d"))
+    term_data = resolve_solar_term(cst_today().strftime("%m%d"))
     current_term = term_data["solar_term"]
     term_data["in_season_products"] = SEASONAL_PRODUCTS.get(current_term, "西瓜·番茄·黄瓜")
     term_data["in_season_product_list"] = [
@@ -314,7 +316,7 @@ async def get_seasonal_advice(
 
     Combines solar-term lookup with merchant-specific weather forecast summary.
     """
-    today = date.today()
+    today = cst_today()
     mmdd = today.strftime("%m%d")
 
     # Resolve the current solar term via the shared lookup so early-January dates

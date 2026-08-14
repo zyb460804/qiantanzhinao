@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +21,7 @@ from app.core.admin_permissions import (
 )
 from app.core.admin_security import get_current_admin
 from app.core.audit import log_action
-from app.core.invoicing import get_invoice_by_period, insert_invoice
+from app.core.invoicing import get_overlapping_invoice, insert_invoice
 from app.database import get_db
 from app.models.saas import Invoice, Plan, PlatformAdmin, Subscription, Tenant
 from app.services.state_machine import validate_invoice_transition
@@ -58,15 +59,21 @@ class PaginatedInvoices(BaseModel):
 
 
 class InvoiceCreate(BaseModel):
+    """手工开票入参 — 上界收紧（第五轮顺手项）。
+
+    amount 上界 1e7（Numeric(12,2) 列宽内）、due_days ≤ 365、notes ≤ 2000，
+    防御异常入参落库；负/零金额与负账期无业务意义，一并拒绝（422）。
+    """
+
     tenant_id: uuid.UUID
     subscription_id: uuid.UUID | None = None
-    amount: Decimal
-    currency: str = "CNY"
+    amount: Decimal = Field(gt=0, le=Decimal("10000000"))
+    currency: Literal["CNY"] = "CNY"
     period_start: datetime | None = None
     period_end: datetime | None = None
-    due_days: int = 30
+    due_days: int = Field(default=30, ge=0, le=365)
     line_items: list[dict[str, object]] | None = None
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class InvoiceUpdate(BaseModel):
@@ -298,38 +305,71 @@ async def generate_invoice_from_subscription(
     admin: PlatformAdmin = Depends(get_current_admin),
     _perm=Depends(require_admin_permission(INVOICE_CREATE)),
 ):
+    """从订阅生成续期发票 — 与 worker generate_invoices 同一键与同周期语义（V1-H1）。
+
+    语义决策：本入口开出「下一计费周期」的续费票，period_start 锚定
+    current_period_end（下一周期起点），与 worker 完全一致。原实现锚定
+    current_period_start（当期补开）有两个洞：
+
+    1. 当期费用已随开通/激活收取（admin/subscriptions.py create/activate
+       收取并设定周期，不落 Invoice 行），admin 再按当期出票 = 同一笔费用
+       重复出票；
+    2. activate 续期会把 current_period_start 重置为 now，锚点漂移后与既有
+       票（含 worker 预生成的下期票）区间重叠但 (subscription_id,
+       period_start) 键不等，唯一约束拦不住。
+
+    统一键后跨入口重试天然幂等（worker 先出下期票 → 本入口返回同一张票，
+    不新增第二张）；周期起点漂移形成的重叠期票由 get_overlapping_invoice
+    预检拒绝（409），宁可拒开不可重开。确需补开历史周期发票请走手工开票
+    接口（POST /api/admin/invoices，显式传 period_start，键冲突返回 409）。
+    """
     sub = await db.get(Subscription, sub_id)
     if sub is None:
         raise HTTPException(status_code=404, detail="订阅不存在")
     plan = await db.get(Plan, sub.plan_id)
     if plan is None:
         raise HTTPException(status_code=400, detail="套餐不存在")
+    if sub.current_period_end is None:
+        raise HTTPException(
+            status_code=400,
+            detail="订阅缺少当前计费周期结束时间，无法确定续期周期，请先修正订阅周期",
+        )
 
     amount = plan.price_yearly if sub.billing_cycle == "yearly" else plan.price_monthly
     now = datetime.now(UTC)
-    # 周期去重（幂等键 = subscription_id + period_start）：
-    # period_start 锚定订阅自身（current_period_start → created_at → now 兜底），
-    # 保证同订阅多次调用计算出同一 key，重复调用返回已有票而非重复出票。
-    period_start = sub.current_period_start or sub.created_at or now.replace(tzinfo=None)
-    period_end = sub.current_period_end or (period_start + timedelta(days=30))
+    # 幂等键 = subscription_id + period_start，period_start 为票覆盖周期
+    # （下一计费周期）的起点 = current_period_end，与 worker 共用同一键。
+    period_start = sub.current_period_end
+    cycle_days = 365 if sub.billing_cycle == "yearly" else 30
+    period_end = period_start + timedelta(days=cycle_days)
     line_items = [
         {
             "name": f"{plan.name} - {sub.billing_cycle}",
             "amount": str(amount),
-            "description": f"套餐 {plan.code} 的 {sub.billing_cycle} 费用",
+            "description": f"套餐 {plan.code} 的 {sub.billing_cycle} 续期费用",
         }
     ]
 
-    # 快路径：已有该周期发票 → 直接幂等返回
-    existing = await get_invoice_by_period(db, sub.id, period_start)
-    if existing is not None:
+    # 快路径：已有该周期发票（本入口重复调用或 worker 已预生成）→ 幂等返回。
+    overlapping = await get_overlapping_invoice(db, sub.id, period_start, period_end)
+    if overlapping is not None and overlapping.period_start == period_start:
         return {
             "message": "该周期发票已存在，返回已有发票",
-            "invoice_id": str(existing.id),
-            "invoice_no": existing.invoice_no,
-            "amount": str(existing.amount),
+            "invoice_id": str(overlapping.id),
+            "invoice_no": overlapping.invoice_no,
+            "amount": str(overlapping.amount),
             "created": False,
         }
+    if overlapping is not None:
+        # 周期起点漂移（典型：activate 续期重置周期）后目标区间与既有票重叠。
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"目标周期 {period_start.isoformat()} 起的续期发票与已有发票 "
+                f"{overlapping.invoice_no}（周期 {overlapping.period_start.isoformat()} 起）"
+                "覆盖区间重叠，已拒绝出票以避免重复计费"
+            ),
+        )
 
     # 慢路径兜底：并发下快路径漏检由 (subscription_id, period_start) 唯一约束
     # + ON CONFLICT DO NOTHING 吸收，insert_invoice 回查返回已有票。
@@ -343,7 +383,7 @@ async def generate_invoice_from_subscription(
             "status": "sent",
             "period_start": period_start,
             "period_end": period_end,
-            "due_date": now + timedelta(days=30),
+            "due_date": period_start + timedelta(days=7),
             "line_items": line_items,
             "notes": f"基于订阅 {sub.id} 自动生成",
         },

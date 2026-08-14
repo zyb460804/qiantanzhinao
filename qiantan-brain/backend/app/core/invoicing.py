@@ -10,6 +10,10 @@
   （``uq_invoice_subscription_period``，见 app/models/saas.py），插入走
   方言感知 ``INSERT ... ON CONFLICT DO NOTHING``（参考 app/core/quota.py
   模式）。同订阅同周期并发/重复生成只出一票，后到方回查返回已有票。
+- 周期间重叠守卫（V1-H1）：约束只能拦「周期起点相等」的重复；订阅续期
+  （activate）重置 current_period_start/end 后周期起点漂移，新票与既有票
+  区间重叠但键不等。两个订阅驱动的出票入口（worker / admin generate）在
+  插入前用 :func:`get_overlapping_invoice` 拦截重叠出票。
 
 两列均可空：手工开票（无订阅 / 无周期）时 NULL 不参与唯一性比较
 （PG16 与 SQLite 均按 NULLS DISTINCT 处理），不受该约束影响。
@@ -21,7 +25,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,7 +56,9 @@ async def next_invoice_no(db: AsyncSession, now: datetime | None = None) -> str:
     max_seq = 0
     for (no,) in result.all():
         suffix = no[len(prefix) :]
-        if suffix.isdigit():
+        # isascii 先行：'²'/'٣' 等 Unicode 数字 isdigit() 为 True 但 int() 会崩，
+        # 一行脏数据（手工 INSERT / 历史导入）不得毒化发号（V1-M1）。
+        if suffix.isascii() and suffix.isdigit():
             max_seq = max(max_seq, int(suffix))
     return f"{prefix}{max_seq + 1:04d}"
 
@@ -69,6 +75,42 @@ async def get_invoice_by_period(
             Invoice.period_start == period_start,
         )
     )
+
+
+async def get_overlapping_invoice(
+    db: AsyncSession,
+    subscription_id: uuid.UUID,
+    period_start: datetime,
+    period_end: datetime | None,
+) -> Invoice | None:
+    """查同订阅下与目标计费周期区间重叠的已有票（V1-H1 跨入口守卫）。
+
+    唯一约束 uq_invoice_subscription_period 只能拦「周期起点完全相等」的重复；
+    订阅 activate 续期会把 current_period_start/end 重置为 now，周期起点漂移后
+    的新票与既有票区间重叠却键不等，约束拦不住。本函数按半开区间
+    [period_start, period_end) 判重叠：
+
+    - existing.period_start < period_end（目标无界时不限）；
+    - existing.period_end 为 NULL（视为未闭合，保守按无限期处理）或 > period_start。
+
+    精确键命中（existing.period_start == period_start）同样算重叠，由调用方
+    区分「幂等返回已有票」与「拒绝重叠出票」两种语义。找不到返回 None。
+    """
+    stmt = (
+        select(Invoice)
+        .where(
+            Invoice.subscription_id == subscription_id,
+            Invoice.period_start.isnot(None),
+            or_(
+                Invoice.period_end.is_(None),
+                Invoice.period_end > period_start,
+            ),
+        )
+        .order_by(Invoice.period_start.asc(), Invoice.id)
+    )
+    if period_end is not None:
+        stmt = stmt.where(Invoice.period_start < period_end)
+    return (await db.execute(stmt)).scalars().first()
 
 
 async def insert_invoice(
