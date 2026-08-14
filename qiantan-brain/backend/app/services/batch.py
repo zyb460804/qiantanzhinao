@@ -325,12 +325,15 @@ async def consume_batches_fifo_costed(
 
     # FEFO (First-Expiry-First-Out): earliest expiry wins, NULL expiry last.
     # with_for_update() acquires row-level locks on PostgreSQL (SQLite ignores it silently).
+    # id 仅作 tie-breaker：保证加锁顺序构成全序（多商品订单并发时按一致顺序
+    # 加锁，消 ABBA 死锁），不改变 FEFO 主序。
     query = (
         select(BatchLifecycle)
         .where(*filters)
         .order_by(
             BatchLifecycle.expiry_date.asc().nullslast(),
             BatchLifecycle.purchase_date.asc(),
+            BatchLifecycle.id,
         )
         .with_for_update()
     )
@@ -391,10 +394,15 @@ async def rollback_batch_on_void(
 
     if record.event_type == "purchase":
         # Find the batch created by this purchase (match by batch_label + product + date proximity)
-        query = select(BatchLifecycle).where(
-            BatchLifecycle.merchant_id == merchant_id,
-            BatchLifecycle.product_id == product_id,
-            BatchLifecycle.batch_label == record.batch_label,
+        # 行锁锚点：串行化同一批次的并发回滚（PG 生效；SQLite 静默忽略 FOR UPDATE）。
+        query = (
+            select(BatchLifecycle)
+            .where(
+                BatchLifecycle.merchant_id == merchant_id,
+                BatchLifecycle.product_id == product_id,
+                BatchLifecycle.batch_label == record.batch_label,
+            )
+            .with_for_update()
         )
         result = await db.execute(query)
         batch = result.scalar_one_or_none()
@@ -421,6 +429,8 @@ async def rollback_batch_on_void(
     elif record.event_type in ("sale", "waste"):
         # Restore quantity to the most recently consumed batches (reverse FIFO)
         qty_to_restore = abs(record.quantity)
+        # 行锁锚点：串行化并发撤销回滚，防止读-算-写竞态丢失一次回滚或产生幻影库存
+        # （PG 生效；SQLite 静默忽略 FOR UPDATE）。id 兜底保证加锁顺序确定，防死锁。
         query = (
             select(BatchLifecycle)
             .where(
@@ -430,7 +440,9 @@ async def rollback_batch_on_void(
                     ("wasted", "destroyed", "removed", "recalled", "returned")
                 ),
             )
-            .order_by(BatchLifecycle.purchase_date.desc())  # newest first (reverse FIFO)
+            # newest first (reverse FIFO); id 兜底 tie-breaker 保证加锁顺序全序确定。
+            .order_by(BatchLifecycle.purchase_date.desc(), BatchLifecycle.id.desc())
+            .with_for_update()
         )
         result = await db.execute(query)
         batches = result.scalars().all()
@@ -484,10 +496,15 @@ async def return_to_batches(
     else:
         filters.append(BatchLifecycle.product_id == product_id)
 
+    # 行锁锚点：串行化并发退货回库对 remaining_qty 的读-改-写，防止丢更新
+    # （PG 生效；SQLite 静默忽略 FOR UPDATE）。id 兜底 tie-breaker 保证
+    # 加锁顺序全序确定，与 rollback 路径一致，防死锁。
     query = (
         select(BatchLifecycle)
         .where(*filters)
-        .order_by(BatchLifecycle.purchase_date.desc())  # newest first
+        # newest first (reverse FIFO); id 兜底 tie-breaker。
+        .order_by(BatchLifecycle.purchase_date.desc(), BatchLifecycle.id.desc())
+        .with_for_update()
     )
     result = await db.execute(query)
     batches = result.scalars().all()

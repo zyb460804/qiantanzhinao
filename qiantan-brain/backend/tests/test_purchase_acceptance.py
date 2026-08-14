@@ -319,6 +319,79 @@ class TestConfirmAcceptance:
             # This is correct behavior — payables only generated with supplier linkage
             assert len(payables) >= 0  # Validated by confirm success above
 
+    async def test_confirm_twice_second_rejected_409(self, client, db_session):
+        """同一清单连续两次确认入库 → 第二次 409，且不产生重复库存流水.
+
+        修复（CRITICAL TOCTOU）：无锁状态检查 + inventory_record_id 快照守卫
+        在并发下会双重入库；入口 FOR UPDATE 串行化后，第二个事务重新读到
+        stored 状态被 409 拒绝。库存流水幂等键作为跨端兜底一并落库。
+        """
+        async with db_session() as session:
+            await _create_recommendation(session, 1, 10)
+        gen = await client.post("/api/v1/purchase/from-advice", json={})
+        list_id = gen.json()["data"]["list_id"]
+
+        async with db_session() as session:
+            items = (
+                (
+                    await session.execute(
+                        select(PurchaseItem).where(PurchaseItem.list_id == uuid.UUID(list_id))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            item_id = str(items[0].id)
+
+        await client.post(
+            f"/api/v1/purchase/{list_id}/acceptance",
+            json={
+                "items": [
+                    {
+                        "item_id": item_id,
+                        "arrival_qty": 10,
+                        "accepted_qty": 10,
+                        "shortage_qty": 0,
+                        "damaged_qty": 0,
+                        "rejected_qty": 0,
+                        "returned_qty": 0,
+                        "replenish_qty": 0,
+                        "actual_unit_cost": 2.0,
+                        "quality_ok": True,
+                    }
+                ],
+            },
+        )
+
+        first = await client.post(f"/api/v1/purchase/{list_id}/acceptance/confirm")
+        assert first.status_code == 200
+        assert first.json()["data"]["confirmed_count"] == 1
+
+        second = await client.post(f"/api/v1/purchase/{list_id}/acceptance/confirm")
+        assert second.status_code == 409
+        assert "必须先完成验收" in second.json()["detail"]
+
+        async with db_session() as session:
+            records = (
+                (
+                    await session.execute(
+                        select(InventoryRecord).where(
+                            InventoryRecord.merchant_id == uuid.UUID(TEST_MERCHANT_ID),
+                            InventoryRecord.source == "purchase_list",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(records) == 1
+            assert records[0].idempotency_key
+            assert records[0].idempotency_key.startswith("purchase-accept:")
+
+            plist = await session.get(PurchaseList, uuid.UUID(list_id))
+            assert plist.status == "stored"
+            assert plist.total_actual_cost == Decimal("20.00")
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 鉴权
@@ -516,3 +589,83 @@ class TestSupplierPaymentAllocation:
         )
         assert purchase["settled_amount"] == 40.0
         assert purchase["remaining_amount"] == 60.0
+
+
+class TestSupplierPaymentAutoComplete:
+    """付清某供应商 → 仅该供应商的 stored+paid 清单自动完成（不误伤其他供应商）."""
+
+    async def _seed_stored_paid_list(self, session, supplier, amount=100):
+        plist = PurchaseList(
+            merchant_id=uuid.UUID(TEST_MERCHANT_ID),
+            status="stored",
+            total_actual_cost=Decimal(str(amount)),
+            payment_status="paid",
+            paid_amount=Decimal(str(amount)),
+        )
+        session.add(plist)
+        await session.flush()
+        session.add(
+            PurchaseItem(
+                list_id=plist.id,
+                merchant_id=uuid.UUID(TEST_MERCHANT_ID),
+                supplier_id=supplier.id,
+                product_id=1,
+                actual_qty=Decimal("10"),
+                unit="斤",
+                actual_unit_cost=Decimal(str(amount / 10)),
+                actual_cost=Decimal(str(amount)),
+                status="purchased",
+            )
+        )
+        return plist
+
+    async def test_paying_supplier_completes_only_their_lists(self, client, db_session):
+        """付清供应商 A 后，供应商 B 的 stored+paid 清单保持 stored 不被误标 completed."""
+        async with db_session() as session:
+            supplier_a = Supplier(
+                merchant_id=uuid.UUID(TEST_MERCHANT_ID), name=f"供应商A-{uuid.uuid4().hex[:6]}"
+            )
+            supplier_b = Supplier(
+                merchant_id=uuid.UUID(TEST_MERCHANT_ID), name=f"供应商B-{uuid.uuid4().hex[:6]}"
+            )
+            session.add_all([supplier_a, supplier_b])
+            await session.flush()
+
+            list_a = await self._seed_stored_paid_list(session, supplier_a)
+            list_b = await self._seed_stored_paid_list(session, supplier_b)
+
+            payable = SupplierPayable(
+                merchant_id=uuid.UUID(TEST_MERCHANT_ID),
+                supplier_id=supplier_a.id,
+                direction="purchase",
+                amount=Decimal("100"),
+                purchase_list_id=list_a.id,
+                settled=False,
+                settled_amount=Decimal("0"),
+            )
+            session.add(payable)
+            await session.commit()
+            supplier_a_id, payable_id = supplier_a.id, payable.id
+
+        payment = await client.post(
+            "/api/v1/purchase/supplier-payment",
+            json={
+                "supplier_id": str(supplier_a_id),
+                "payable_ids": [str(payable_id)],
+                "amount": 100,
+                "method": "cash",
+                "idempotency_key": f"auto-complete-{uuid.uuid4()}",
+            },
+        )
+        assert payment.status_code == 200
+        assert float(payment.json()["data"]["new_balance"]) == 0.0
+
+        async with db_session() as session:
+            a = await session.get(PurchaseList, list_a.id)
+            b = await session.get(PurchaseList, list_b.id)
+            # 付清的供应商清单 → 自动完成
+            assert a.status == "completed"
+            assert a.completed_at is not None
+            # 另一供应商的清单不受影响（修复前会被一并误标 completed）
+            assert b.status == "stored"
+            assert b.completed_at is None

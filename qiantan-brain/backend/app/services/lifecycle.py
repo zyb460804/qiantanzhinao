@@ -4,7 +4,7 @@ Tracks batch freshness and generates expiry alerts.
 """
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.timezone import utc_now
@@ -51,7 +51,13 @@ def calc_batch_status(
             "message": "未知品类",
         }
 
-    hours_elapsed = (utc_now() - purchase_date).total_seconds() / 3600
+    # purchase_date 是 naive DateTime 列（SQLite/PG 读回均无 tzinfo），按服务端
+    # 时间戳统一 UTC 的约定补 tzinfo 后再与 aware 的 utc_now() 相减，
+    # 否则 TypeError（aware 减 naive）导致 /inventory/alerts 等路由 500。
+    purchase_dt = (
+        purchase_date if purchase_date.tzinfo is not None else purchase_date.replace(tzinfo=UTC)
+    )
+    hours_elapsed = (utc_now() - purchase_dt).total_seconds() / 3600
     stages = lifecycle.get("lifecycle_stages", {})
 
     for stage_name, stage_data in stages.items():

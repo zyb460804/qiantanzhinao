@@ -13,6 +13,7 @@
   GET    /supplier/{id}/statement 供应商对账单
 """
 
+import hashlib
 import uuid
 from decimal import Decimal
 
@@ -793,7 +794,9 @@ async def confirm_acceptance(
     Idempotent: items with inventory_record_id are skipped.
     State must be 'accepted'.
     """
-    list_query = select(PurchaseList).where(PurchaseList.id == list_id)
+    # 行锁串行化整个多步入库（批次/库存/应付），防并发双 confirm 双重入库
+    # （SQLite 忽略 FOR UPDATE 属预期，靠状态检查 + 幂等键兜底；PG16 生效）。
+    list_query = select(PurchaseList).where(PurchaseList.id == list_id).with_for_update()
     list_result = await db.execute(list_query)
     plist = list_result.scalar_one_or_none()
     if plist is None or plist.merchant_id != merchant.id:
@@ -850,6 +853,7 @@ async def confirm_acceptance(
             source="purchase_list",
             batch_label=batch_label,
             notes=f"验收入库: 到货{_fmt_q(item.arrival_qty)} 合格{_fmt_q(item.accepted_qty)}",
+            idempotency_key=_purchase_inventory_idem_key(plist.id, item.id),
         )
         db.add(record)
         await db.flush()
@@ -870,7 +874,9 @@ async def confirm_acceptance(
         item.purchased_at = now
 
         # Generate supplier payable
-        idem_key = f"purchase-accept:{plist.id}:{item.id}"
+        # 应付幂等键：源串 88 字符超 supplier_payables.idempotency_key VARCHAR(64)，
+        # 压缩后 legacy /confirm 与 /acceptance/confirm 共用同一键空间互相兜底
+        idem_key = _short_idem_key("purchase-payable", plist.id, item.id)
         await record_supplier_payable_from_purchase(db, plist, item, idempotency_key=idem_key)
 
         if item.recommendation_id:
@@ -960,7 +966,7 @@ async def pay_supplier(
             target_id=str(payment.id),
             after_data={
                 "supplier_id": str(body.supplier_id),
-                "amount": body.amount,
+                "amount": float(body.amount),
                 "method": body.method,
             },
             reason=body.note,
@@ -973,13 +979,21 @@ async def pay_supplier(
 
     # Auto-complete: if all purchase lists for this supplier are fully paid, mark them completed
     if new_balance <= 0:
-        # Find stored lists for this supplier that are fully paid
+        # Find stored lists for this supplier that are fully paid.
+        # 修复：原查询缺供应商维度，会把本商户其他供应商的 stored+paid 清单
+        # 一并误标 completed。PurchaseList 无 supplier_id，经条目反查该供应商的清单。
         stored_lists = (
             (
                 await db.execute(
                     select(PurchaseList).where(
                         PurchaseList.merchant_id == merchant.id,
                         PurchaseList.status == "stored",
+                        PurchaseList.id.in_(
+                            select(PurchaseItem.list_id).where(
+                                PurchaseItem.merchant_id == merchant.id,
+                                PurchaseItem.supplier_id == body.supplier_id,
+                            )
+                        ),
                     )
                 )
             )
@@ -1081,7 +1095,7 @@ async def return_purchase_item(
             event_time=utc_now(),
             source="purchase_list",
             notes=f"退货给供应商: {body.reason}",
-            idempotency_key=f"purchase-return:{item.id}:{prior_returned}:{return_qty}",
+            idempotency_key=_short_idem_key("purchase-return", item.id, prior_returned, return_qty),
         )
     )
 
@@ -1123,7 +1137,7 @@ async def return_purchase_item(
                 payable_ids=payable_ids,
                 amount=return_amount,
                 note=f"退货抵扣: {body.reason}",
-                idempotency_key=f"purchase-return-payable:{item.id}:{prior_returned}",
+                idempotency_key=_short_idem_key("purchase-return-payable", item.id, prior_returned),
             )
         else:
             # No outstanding purchase payable to offset (e.g. already fully paid
@@ -1138,7 +1152,9 @@ async def return_purchase_item(
                     purchase_list_id=item.list_id,
                     note=f"退货抵扣: {body.reason}",
                     settled=True,
-                    idempotency_key=f"purchase-return-payable:{item.id}:{prior_returned}",
+                    idempotency_key=_short_idem_key(
+                        "purchase-return-payable", item.id, prior_returned
+                    ),
                 )
             )
 
@@ -1226,11 +1242,17 @@ async def confirm_purchase(
 
     New integrations should use /acceptance followed by /acceptance/confirm.
     """
-    list_query = select(PurchaseList).where(PurchaseList.id == list_id)
+    # 行锁 + 已入库状态检查：防并发双 confirm 双重入库，以及重复 confirm
+    # 把 total_actual_cost 清零、重复写审计日志的旧缺陷。
+    list_query = select(PurchaseList).where(PurchaseList.id == list_id).with_for_update()
     list_result = await db.execute(list_query)
     plist = list_result.scalar_one_or_none()
     if plist is None or plist.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="采购清单不存在")
+    if plist.status in ("stored", "completed"):
+        raise HTTPException(
+            status_code=409, detail=f"采购清单已确认入库，请勿重复确认，当前状态: {plist.status}"
+        )
 
     all_items_query = select(PurchaseItem).where(PurchaseItem.list_id == list_id)
     all_items = (await db.execute(all_items_query)).scalars().all()
@@ -1267,6 +1289,7 @@ async def confirm_purchase(
             event_time=now,
             source="purchase_list",
             batch_label=batch_label,
+            idempotency_key=_purchase_inventory_idem_key(plist.id, item.id),
         )
         db.add(record)
         await db.flush()
@@ -1286,7 +1309,7 @@ async def confirm_purchase(
         item.status = "purchased"
         item.purchased_at = now
 
-        idem_key = f"purchase:{plist.id}:{item.id}"
+        idem_key = _short_idem_key("purchase-payable", plist.id, item.id)
         await record_supplier_payable_from_purchase(db, plist, item, idempotency_key=idem_key)
 
         if item.recommendation_id:
@@ -1346,6 +1369,30 @@ def _fmt_q(value) -> str:
     if value is None:
         return "?"
     return str(float(value))
+
+
+def _purchase_inventory_idem_key(plist_id: uuid.UUID, item_id: uuid.UUID) -> str:
+    """采购确认产生的库存流水幂等键（跨端/重试兜底）。
+
+    源串 "purchase-accept:{list_id}:{item_id}" 长 89 字符，超出
+    inventory_records.idempotency_key 的 VARCHAR(64) 列宽（PG 会直接拒写），
+    故对源串取 sha256 前 40 位压缩为 56 字符：同一条 (list, item) 永远
+    得到同一个键，(merchant_id, idempotency_key) 唯一约束即可拦截重复入库。
+    legacy /confirm 与 /acceptance/confirm 共用同一键空间，互相兜底。
+    """
+    digest = hashlib.sha256(f"purchase-accept:{plist_id}:{item_id}".encode()).hexdigest()[:40]
+    return f"purchase-accept:{digest}"
+
+
+def _short_idem_key(prefix: str, *parts: object) -> str:
+    """幂等键压缩：长源串超出 VARCHAR(64) 列宽时 PG 会直接拒写 INSERT。
+
+    对 parts 拼接取 sha256 并截断（总长 ≤ 63）：同一源串确定性同键，
+    不同源串碰撞概率可忽略；prefix 保留语义便于排查。
+    """
+    digest_len = max(8, 63 - len(prefix))
+    digest = hashlib.sha256(":".join(map(str, parts)).encode()).hexdigest()[:digest_len]
+    return f"{prefix}:{digest}"
 
 
 def _gen_order_no(plist: PurchaseList) -> str:

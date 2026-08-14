@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import uuid
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -277,7 +278,11 @@ async def test_confirm_purchase(client, db_session):
 
 
 async def test_confirm_purchase_idempotent(client, db_session):
-    """Repeated confirm must not create duplicate inventory records."""
+    """Repeated legacy confirm must be rejected and not duplicate inventory records.
+
+    修复（并发/重复确认防护）：第二次 confirm 返回 409，而不是旧的
+    「200 + total_actual_cost 被清零 + 重复审计日志」。
+    """
     mid = uuid.UUID(TEST_MERCHANT_ID)
     async with db_session() as session:
         await _create_recommendation(session, mid, 1)
@@ -287,18 +292,28 @@ async def test_confirm_purchase_idempotent(client, db_session):
     )
     list_id = create_resp.json()["data"]["list_id"]
 
+    # 录入实际进价，保证首次 confirm 后 total_actual_cost 有值可被「清零」检验
+    today = await client.get("/api/v1/purchase/today", params={"merchant_id": TEST_MERCHANT_ID})
+    item_id = today.json()["data"]["items"][0]["item_id"]
+    put = await client.put(
+        f"/api/v1/purchase/item/{item_id}",
+        params={"merchant_id": TEST_MERCHANT_ID},
+        json={"actual_qty": 15, "actual_unit_cost": 0.8},
+    )
+    assert put.status_code == 200
+
     # First confirm
     resp1 = await client.post(f"/api/v1/purchase/{list_id}/confirm", json={})
     assert resp1.status_code == 200
     assert resp1.json()["data"]["confirmed_count"] == 1
 
-    # Second confirm — idempotent
+    # Second confirm — idempotent rejection (409)
     resp2 = await client.post(f"/api/v1/purchase/{list_id}/confirm", json={})
-    assert resp2.status_code == 200
-    assert resp2.json()["code"] == 0
+    assert resp2.status_code == 409
 
     # Only one inventory record should exist
     from app.models.inventory import InventoryRecord
+    from app.models.purchase import PurchaseList
 
     async with db_session() as session:
         rec_result = await session.execute(
@@ -309,3 +324,11 @@ async def test_confirm_purchase_idempotent(client, db_session):
         )
         records = rec_result.scalars().all()
         assert len(records) == 1
+        # 库存流水带幂等键，重试/跨端兜底
+        assert records[0].idempotency_key
+        assert records[0].idempotency_key.startswith("purchase-accept:")
+
+        # 已确认的清单金额不被第二次 confirm 清零
+        plist = await session.get(PurchaseList, uuid.UUID(list_id))
+        assert plist.status == "stored"
+        assert plist.total_actual_cost == Decimal("12.00")

@@ -234,6 +234,7 @@ async def create_staff(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("manage_staff")),
 ):
     name = (body.get("name") or "").strip()
     role = body.get("role", "cashier")
@@ -241,6 +242,9 @@ async def create_staff(
         raise HTTPException(status_code=400, detail="姓名不能为空")
     if role not in ROLE_PERMISSIONS:
         raise HTTPException(status_code=400, detail=f"无效角色: {role}")
+    # 安全（垂直提权修复）：owner 只能是商户本人，不允许经员工体系创建
+    if role == "owner":
+        raise HTTPException(status_code=400, detail="不允许创建 owner 角色的员工")
 
     s = StaffMember(
         merchant_id=merchant.id,
@@ -261,6 +265,7 @@ async def update_staff(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("manage_staff")),
 ):
     """更新员工字段。
 
@@ -283,6 +288,9 @@ async def update_staff(
     if "role" in body:
         if body["role"] not in ROLE_PERMISSIONS:
             raise HTTPException(status_code=400, detail="无效角色")
+        # 安全（垂直提权修复）：禁止把员工（含自己）提升为 owner —— owner 只能是商户本人
+        if body["role"] == "owner":
+            raise HTTPException(status_code=400, detail="不允许将员工角色修改为 owner")
         s.role = body["role"]
     if "is_active" in body:
         s.is_active = bool(body["is_active"])
@@ -295,6 +303,7 @@ async def deactivate_staff(
     staff_id: uuid.UUID,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("manage_staff")),
 ):
     s = await db.get(StaffMember, staff_id)
     if not s or s.merchant_id != merchant.id:

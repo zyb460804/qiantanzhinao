@@ -316,7 +316,9 @@ async def void_inventory_record(
     db: AsyncSession = Depends(get_db),
 ):
     """Void an inventory record by ID — rolls back batches, creates audit log."""
-    query = select(InventoryRecord).where(InventoryRecord.id == record_id)
+    # 锚点行锁：串行化同一记录的并发撤销，消除 is_voided 检查的 TOCTOU 竞态
+    # （PG 生效；SQLite 静默忽略 FOR UPDATE）。
+    query = select(InventoryRecord).where(InventoryRecord.id == record_id).with_for_update()
     result = await db.execute(query)
     record = result.scalar_one_or_none()
     if not record:
@@ -324,7 +326,7 @@ async def void_inventory_record(
     if record.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="库存记录不存在")
     if record.is_voided:
-        raise HTTPException(status_code=400, detail="该记录已撤销")
+        raise HTTPException(status_code=409, detail="该记录已撤销")
 
     before_data = {
         "quantity": float(record.quantity),
@@ -339,13 +341,16 @@ async def void_inventory_record(
     record.void_reason = req.reason or ""
     record.voided_by = "manual"
 
+    # sa.JSON 列默认走 json.dumps，不支持 Decimal——落库前转为 float
+    # （服务层返回值保持 Decimal 不变，仅在此 JSON 边界转换）。
+    audit_summary = {**batch_summary, "qty_adjusted": float(batch_summary["qty_adjusted"])}
     audit = AuditLog(
         merchant_id=record.merchant_id,
         action="void",
         target_table="inventory_records",
         target_id=str(record.id),
         before_data=before_data,
-        after_data={"is_voided": True, "batch_summary": batch_summary},
+        after_data={"is_voided": True, "batch_summary": audit_summary},
         reason=req.reason or "",
         operator="merchant",
     )
@@ -708,8 +713,10 @@ async def complete_stocktake(
     db: AsyncSession = Depends(get_db),
 ):
     """Complete a stocktake after every persisted snapshot line is counted."""
+    # 锚点行锁：串行化同一会话的并发 complete，防止双并发各自 INSERT 调整记录与
+    # 盘盈批次（PG 生效；SQLite 静默忽略 FOR UPDATE）。
     session_result = await db.execute(
-        select(StocktakeSession).where(StocktakeSession.id == session_id)
+        select(StocktakeSession).where(StocktakeSession.id == session_id).with_for_update()
     )
     session = session_result.scalar_one_or_none()
     if not session or session.merchant_id != merchant.id:

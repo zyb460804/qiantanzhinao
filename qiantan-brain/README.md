@@ -351,6 +351,7 @@ pre-commit install
 | [大创立项申请书](docs/大创立项申请书.md) | 创新训练立项全套材料（背景/创新点/路线/预算） |
 | [用户调研问卷](docs/用户调研问卷.md) | 22 题问卷模板 + 数据分析指引 |
 | [系统架构总览](docs/architecture.md) | 架构图 + 数据流时序图（答辩用） |
+| [架构文档·源码级](docs/codebase-architecture.md) | 14 节全量架构：业务链路/AI 决策层/多租户/边缘设备/技术债清单 |
 | [演示脚本](docs/demo-script.md) | 演示流程与话术 |
 
 ---

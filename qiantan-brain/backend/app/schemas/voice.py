@@ -111,14 +111,18 @@ class VoiceConfirmData(BaseModel):
     quantity: DecimalNum
     unit: str
     total_amount: DecimalNum
-    consumed_from_batches: list | None = None
+    # FIFO 实际消耗数量（Decimal）；原 list 声明与路由返回值不符，
+    # 销售确认一旦真正扣批次就会触发 ResponseValidationError。
+    consumed_from_batches: DecimalNum | None = None
     idempotent: bool = False
 
 
 class VoiceVoidData(BaseModel):
     voice_log_id: str
     record_id: str | None = None
-    batch_summary: list | None = None
+    # rollback_batch_on_void 返回的是 summary dict（BatchRollbackSummary），
+    # 原声明 list 与实际返回不符，撤销必触发 ResponseValidationError。
+    batch_summary: dict | None = None
 
 
 class VoiceEditData(BaseModel):
@@ -128,7 +132,7 @@ class VoiceEditData(BaseModel):
     product: str
     quantity: DecimalNum
     unit: str
-    consumed_from_batches: list | None = None
+    consumed_from_batches: DecimalNum | None = None
 
 
 # ── 响应信封类型别名 ──────────────────────────────────────

@@ -382,9 +382,11 @@ class TestFullRefund:
             },
         )
         assert refund.status_code == 200
-        # Verify order is fully refunded
+        assert refund.json()["data"]["new_status"] == "refunded"
+        # Verify order is fully refunded and the receivable is fully reversed
         async with db_session() as session:
             from app.models.accounts import CustomerReceivable
+            from app.services.accounts_service import get_customer_balance
 
             entries = (
                 (
@@ -399,8 +401,29 @@ class TestFullRefund:
                 .scalars()
                 .all()
             )
-            # At minimum the charge entry exists
-            assert len(entries) >= 1
+            # charge 产生应收，退款整单冲减应收
+            assert [(entry.direction, float(entry.amount)) for entry in entries] == [
+                ("charge", 7.0),
+                ("repay", 7.0),
+            ]
+            balance = await get_customer_balance(
+                session, uuid.UUID(TEST_MERCHANT_ID), "赵记面馆"
+            )
+            assert balance == Decimal("0")
+            credit_refunds = (
+                (
+                    await session.execute(
+                        select(Payment).where(
+                            Payment.order_id == uuid.UUID(order_id),
+                            Payment.method == "credit",
+                            Payment.status == "refunded",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert [float(p.amount) for p in credit_refunds] == [-7.0]
 
 
 # ═══════════════════════════════════════════════════════════════════

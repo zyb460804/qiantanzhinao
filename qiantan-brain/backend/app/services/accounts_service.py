@@ -13,7 +13,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.accounts import CustomerReceivable, SupplierPayable
@@ -143,6 +143,17 @@ async def record_supplier_payment(
         raise ValueError("付款金额不能超过所选应付余额")
     # 退货抵扣等历史 payment 流水可能尚未分摊到 settled_amount；同时校验
     # 供应商净余额，防止选中应付看似有余额但实际已被退货抵扣后再次超付。
+    #
+    # 并发付款串行化（TOCTOU）：两笔付款选不同应付集合时，上面的行级锁
+    # 互不阻塞，而净余额聚合读不到对方未提交的 payment 流水，可能双双
+    # 通过校验导致供应商余额为负。PG 用事务级 advisory lock 串行化同一
+    # 供应商的付款（事务结束自动释放）；SQLite 单写者语义下天然串行，跳过。
+    _dialect = getattr(db.bind.dialect, "name", "") if db.bind is not None else ""
+    if _dialect == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"supplier-payment:{merchant_id}:{supplier_id}"},
+        )
     supplier_balance = await get_supplier_balance(db, merchant_id, supplier_id)
     if amount > supplier_balance:
         raise ValueError("付款金额不能超过供应商当前应付净余额")
@@ -404,16 +415,52 @@ async def get_supplier_statement(
     *,
     limit: int = 50,
 ) -> dict:
-    """Return a supplier's ledger statement with all transactions.
+    """Return a supplier's ledger statement: full-aggregate totals + paginated items.
 
     Includes purchase (应付产生), payment (付款), and return (退货抵扣) entries.
+    总额/余额对该供应商的全部流水聚合（与 get_supplier_balance 同口径），
+    items 明细只保留最近 limit 条——不能对分页截断后的子集求和，否则流水
+    超过 limit 后余额失真，与 /accounts/supplier-balance 各说各话。
     """
     from app.models.catalog import Supplier
 
     supplier = await db.get(Supplier, supplier_id)
     supplier_name = supplier.name if supplier else None
 
-    # All supplier payable entries for this supplier
+    # 总额/余额：全量聚合。SupplierPayable 仅 purchase/payment 两种方向
+    # （见 models/accounts.py）；退货抵扣记为 direction="payment"，
+    # 已被 total_payments 覆盖，不存在 direction=="return" 分支。
+    totals = (
+        await db.execute(
+            select(
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (SupplierPayable.direction == "purchase", SupplierPayable.amount),
+                            else_=Decimal("0"),
+                        )
+                    ),
+                    Decimal("0"),
+                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (SupplierPayable.direction == "payment", SupplierPayable.amount),
+                            else_=Decimal("0"),
+                        )
+                    ),
+                    Decimal("0"),
+                ),
+            ).where(
+                SupplierPayable.merchant_id == merchant_id,
+                SupplierPayable.supplier_id == supplier_id,
+            )
+        )
+    ).one()
+    total_purchases = _to_decimal(totals[0]) or Decimal("0")
+    total_payments = _to_decimal(totals[1]) or Decimal("0")
+
+    # 明细列表：保持分页，只取最近 limit 条
     stmt = (
         select(SupplierPayable)
         .where(
@@ -427,18 +474,8 @@ async def get_supplier_statement(
     rows = result.scalars().all()
 
     items = []
-    total_purchases = Decimal("0")
-    total_payments = Decimal("0")
 
     for row in rows:
-        if row.direction == "purchase":
-            total_purchases += row.amount
-        elif row.direction == "payment":
-            total_payments += row.amount
-        # SupplierPayable 仅用 purchase/payment 两种方向（见 models/accounts.py）；
-        # 退货抵扣记为 direction="payment" + note 以"退货抵扣"开头，已被 total_payments
-        # 覆盖。此处不再统计 direction=="return"——该分支恒不命中。
-
         settled_amount = row.settled_amount or Decimal("0")
         remaining_amount = max(row.amount - settled_amount, Decimal("0"))
         items.append(

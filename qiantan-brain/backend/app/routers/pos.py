@@ -8,6 +8,7 @@ P0 新增（2026-07-12）:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -48,6 +49,8 @@ from app.services.sku_service import resolve_sku_id
 
 
 router = APIRouter(prefix="/api/v1/pos", tags=["pos"])
+
+logger = logging.getLogger(__name__)
 
 
 class SettlementNumbers(TypedDict):
@@ -94,6 +97,19 @@ def _product_label(product_map: dict[int, ProductCategory], product_id: int | No
         return "未知商品（历史订单行缺少商品关联）"
     product = product_map.get(product_id)
     return product.name if product else f"商品{product_id}"
+
+
+def _has_credit_payment():
+    """关联子查询：该订单是否已有 method='credit' 的 Payment 流水。
+
+    Fix 3 用它区分新旧口径 —— 落了 credit 流水的新订单按流水合计统计赊账，
+    未落流水的存量赊账订单（credit Payment 行上线前创建）保留 total-paid 原口径。
+    """
+    return (
+        select(Payment.id)
+        .where(Payment.order_id == SaleOrder.id, Payment.method == "credit")
+        .exists()
+    )
 
 
 def _order_data(order: SaleOrder, *, duplicate: bool = False) -> dict:
@@ -308,6 +324,20 @@ async def _apply_payments(
         order.paid_at = now
     elif payment_method == "credit":
         order.status = "credit"
+        # Fix 1: 纯赊账同步落一条 method="credit" 的 Payment 流水（status="success"，
+        # 与组合支付路径口径一致），退款/日结链路才能按 Payment 行拾取赊账金额。
+        # 注意不写 order.paid_amount —— 纯赊账订单 paid_amount 仍只表示真实回款，
+        # /pay 回款依赖 remaining = total_amount - paid_amount。
+        db.add(
+            Payment(
+                merchant_id=merchant_id,
+                order_id=order.id,
+                amount=payable,
+                method="credit",
+                status="success",
+                note=f"订单 {order.order_no} 赊账",
+            )
+        )
         await record_customer_receivable(
             db,
             merchant_id=merchant_id,
@@ -620,6 +650,10 @@ async def pay_sale_order(
 
     # Combo payment: if body.payments is provided, use it; otherwise single method
     if body.payments:
+        # credit 是开单时的记账方式，收款端点再收 credit 等于用赊账还赊账
+        if any(p.method == "credit" for p in body.payments):
+            raise HTTPException(status_code=400, detail="收款方式不支持 credit，赊账请在开单时录入")
+        previous_status = order.status
         total_pay = sum(
             (Decimal(str(p.amount)) for p in body.payments), start=Decimal("0")
         ).quantize(Decimal("0.01"))
@@ -647,6 +681,19 @@ async def pay_sale_order(
             order.paid_at = utc_now()
         else:
             order.status = "partial"
+
+        # 组合收款对赊账/部分付款订单同步记应收回款（与单笔路径口径一致）
+        if order.customer_name and previous_status in {"credit", "partial"} and created_payments:
+            await record_customer_receivable(
+                db,
+                merchant_id=merchant.id,
+                customer_name=order.customer_name,
+                amount=total_pay,
+                direction="repay",
+                sale_order_id=order.id,
+                note=body.note or f"订单 {order.order_no} 组合回款",
+                idempotency_key=f"sale-repay:{created_payments[0].id}",
+            )
         await db.commit()
         await _auto_reconcile_after_payment(db, merchant.id, order)
         return {
@@ -734,7 +781,11 @@ async def _refund_single_item(
     """Refund one line item: reverse inventory, optionally restock batch, write audit."""
     product_id = _require_product_id(item, action="执行库存退款")
     unit_price = item.unit_price or Decimal("0")
-    refund_amount = (refund_qty * unit_price).quantize(Decimal("0.01"))
+    # Fix 2: 行退款额按订单实付比例（total/gross）摊折扣。按毛额（数量×单价）退款
+    # 会让 refunded_amount 超过实收，日结/月报多冲、remaining_amount 可为负。
+    gross_amount = order.total_amount + (order.discount_amount or Decimal("0"))
+    payable_ratio = order.total_amount / gross_amount if gross_amount > 0 else Decimal("1")
+    refund_amount = (refund_qty * unit_price * payable_ratio).quantize(Decimal("0.01"))
 
     # Record refunded quantity on the item
     item.refund_quantity = (item.refund_quantity or Decimal("0")) + refund_qty
@@ -755,7 +806,7 @@ async def _refund_single_item(
         source="pos",
         notes=f"退款退货 订单 {order.order_no}: {reason}",
         # P1 修复：同一商品行多次退款会撞唯一约束（merchant_id+idempotency_key）。
-        # item.refund_quantity 在本函数开头（737 行）已更新为本次退款后的累计值，
+        # item.refund_quantity 在本函数开头已更新为本次退款后的累计值，
         # 加入幂等键可区分多次退款（单调递增），同时保留同一退款重试的幂等保护。
         idempotency_key=f"refund:{order.id}:{item.id}:{item.refund_quantity}",
         client_id=order.client_id,
@@ -886,6 +937,17 @@ async def refund_order(
             total_refund += Decimal(str(result["refund_amount"])).quantize(Decimal("0.01"))
         order.status = "refunded"
 
+    # Fix 2: 多行按比例摊折扣的舍入残差（±0.01）在"全部退清"时以订单实付净额
+    # 对齐，保证整单退 refunded_amount 恰等于 total_amount（remaining == 0），
+    # 恒等于实际反向 Payment + 应收冲减合计。
+    if order.status == "refunded" and results:
+        refund_target = order.total_amount - (order.refunded_amount or Decimal("0"))
+        residual = (refund_target - total_refund).quantize(Decimal("0.01"))
+        if residual != 0:
+            last_amount = Decimal(str(results[-1]["refund_amount"])) + residual
+            results[-1]["refund_amount"] = float(last_amount.quantize(Decimal("0.01")))
+            total_refund = (total_refund + residual).quantize(Decimal("0.01"))
+
     order.refunded_amount = (order.refunded_amount or Decimal("0")) + total_refund
     order.refund_reason = body.reason
     order.refunded_at = utc_now()
@@ -909,7 +971,12 @@ async def refund_order(
 
     # Refund proportionally across original payment methods
     if refund_methods:
-        for method, original_amt in refund_methods.items():
+        # Fix 1 配套：先退真金渠道（cash/wechat/alipay/card），再冲赊账应收。
+        # 赊账+部分回款的订单退款时，客户真实付过的钱必须优先退还，余额再
+        # 冲减应收 —— 反序会"现金不退、应收被多冲成负数"。
+        method_order = {"cash": 0, "wechat": 1, "alipay": 2, "card": 3, "credit": 4}
+        ordered_methods = sorted(refund_methods.items(), key=lambda kv: method_order.get(kv[0], 9))
+        for method, original_amt in ordered_methods:
             # Scale: refund same proportion from each method
             if total_refund <= 0:
                 break
@@ -1232,8 +1299,8 @@ async def _auto_reconcile_after_payment(
     """Best-effort auto-reconciliation after payment creation.
 
     Checks if there are imported channel bills for the same date and channel,
-    and triggers reconciliation if so. Failures are silently ignored — reconciliation
-    is non-blocking for the payment flow.
+    and triggers reconciliation if so. Failures are rolled back and logged —
+    reconciliation is non-blocking for the payment flow.
     """
     try:
         payments = (
@@ -1249,19 +1316,35 @@ async def _auto_reconcile_after_payment(
             .all()
         )
 
-        unique_channels = set(payments)
+        # credit 无外部渠道账单，不需要建渠道对账任务。
+        unique_channels = set(payments) - {"credit"}
         today = local_now().date()
         fee_rate = Decimal("0.006")
 
         for channel in unique_channels:
-            task = await get_or_create_task(db, merchant_id, channel, today)
+            try:
+                task = await get_or_create_task(db, merchant_id, channel, today)
+            except IntegrityError:
+                # Fix 4: 并发下 get_or_create_task 的 SELECT-then-INSERT 会撞
+                # uq_recon_per_day_channel —— 回滚后重查拿到对方事务已提交的任务。
+                await db.rollback()
+                task = await get_or_create_task(db, merchant_id, channel, today)
             import_count = await db.scalar(
                 select(func.count(ChannelBillImport.id)).where(ChannelBillImport.task_id == task.id)
             )
             if import_count and import_count > 0:
                 await reconcile_task(db, task, fee_rate=fee_rate)
+        # Fix 4: 调用点都在主事务 commit 之后，这里只 flush 不 commit 的话，
+        # get_db 关闭 session 时整体隐式回滚，自动对账恒空转 —— 必须显式提交。
+        await db.commit()
     except Exception:
-        pass  # Reconciliation is best-effort; don't fail the payment
+        await db.rollback()
+        logger.warning(
+            "auto reconcile after payment failed: merchant=%s order=%s",
+            merchant_id,
+            order.id,
+            exc_info=True,
+        )
 
 
 async def _check_settlement_locked(
@@ -1374,16 +1457,20 @@ async def _settlement_numbers(
         SaleOrder.created_at <= day_end,
         SaleOrder.status.not_in(("cancelled", "held")),
     )
-    total_sales_raw, order_count, credit_amount_raw, refund_amount_raw = (
+    total_sales_raw, order_count, legacy_credit_raw, refund_amount_raw = (
         await db.execute(
             select(
                 func.coalesce(func.sum(SaleOrder.total_amount), Decimal("0")),
                 func.count(SaleOrder.id),
+                # Fix 3: 存量赊账订单（credit Payment 行上线前创建）没有 credit
+                # 流水，保留原口径 total - paid；新数据统一按 credit Payment 行
+                # 净额统计（见下方 by_method 之后）。
                 func.coalesce(
                     func.sum(
                         case(
                             (
-                                SaleOrder.status.in_(("credit", "partial")),
+                                SaleOrder.status.in_(("credit", "partial"))
+                                & ~_has_credit_payment(),
                                 SaleOrder.total_amount - SaleOrder.paid_amount,
                             ),
                             else_=Decimal("0"),
@@ -1396,7 +1483,7 @@ async def _settlement_numbers(
         )
     ).one()
     total_sales = _decimal_value(total_sales_raw)
-    credit_amount = _decimal_value(credit_amount_raw)
+    legacy_credit = _decimal_value(legacy_credit_raw)
     refund_amount = _decimal_value(refund_amount_raw)
 
     payment_rows = (
@@ -1466,6 +1553,33 @@ async def _settlement_numbers(
         )
     )
     customer_repay = _decimal_value(customer_repay_row.scalar())
+
+    # Fix 3: 赊账金额主口径 = 窗口内订单的 credit Payment 行净额（success 正向
+    # 行 + refunded 反向行）。组合支付含 credit 的订单（status="paid"）由此纳入，
+    # total_sales = payments + credit_amount + refund_amount 对其恒成立；纯赊账
+    # 订单（status="credit"）同样成立。当日真实回款已计入 payments，须从
+    # credit_amount 中扣除避免双算；存量无流水订单走 legacy_credit 原口径。
+    credit_repay_row = await db.execute(
+        select(func.coalesce(func.sum(CustomerReceivable.amount), Decimal("0")))
+        .join(SaleOrder, SaleOrder.id == CustomerReceivable.sale_order_id)
+        .where(
+            CustomerReceivable.merchant_id == merchant_id,
+            CustomerReceivable.direction == "repay",
+            CustomerReceivable.note.notlike("退款%"),
+            CustomerReceivable.created_at >= day_start,
+            CustomerReceivable.created_at <= day_end,
+            SaleOrder.merchant_id == merchant_id,
+            SaleOrder.created_at >= day_start,
+            SaleOrder.created_at <= day_end,
+            SaleOrder.status.not_in(("cancelled", "held")),
+            _has_credit_payment(),
+        )
+    )
+    credit_amount = (
+        by_method.get("credit", Decimal("0"))
+        + legacy_credit
+        - _decimal_value(credit_repay_row.scalar())
+    ).quantize(Decimal("0.01"))
 
     # 报损成本
     waste_cost_row = await db.execute(

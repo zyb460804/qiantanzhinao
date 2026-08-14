@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant
@@ -513,7 +513,48 @@ async def customer_ledger(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get detailed ledger for a specific customer."""
+    """Get detailed ledger for a specific customer.
+
+    总额/余额对该客户的全部流水全量聚合（与 get_customer_balance 同口径），
+    items 明细只保留最近 limit 条——不能对分页截断后的子集求和，否则流水
+    超过 limit 后余额失真，与 /accounts/customer-balance 各说各话。
+    """
+    totals = (
+        await db.execute(
+            select(
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                CustomerReceivable.direction == "charge",
+                                CustomerReceivable.amount,
+                            ),
+                            else_=Decimal("0"),
+                        )
+                    ),
+                    Decimal("0"),
+                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                CustomerReceivable.direction == "repay",
+                                CustomerReceivable.amount,
+                            ),
+                            else_=Decimal("0"),
+                        )
+                    ),
+                    Decimal("0"),
+                ),
+            ).where(
+                CustomerReceivable.merchant_id == merchant.id,
+                CustomerReceivable.customer_name == customer_name,
+            )
+        )
+    ).one()
+    total_charge = Decimal(str(totals[0] or 0))
+    total_repay = Decimal(str(totals[1] or 0))
+
     rows = (
         (
             await db.execute(
@@ -530,14 +571,8 @@ async def customer_ledger(
         .all()
     )
 
-    total_charge = Decimal("0")
-    total_repay = Decimal("0")
     items = []
     for r in rows:
-        if r.direction == "charge":
-            total_charge += r.amount
-        else:
-            total_repay += r.amount
         items.append(
             {
                 "id": str(r.id),

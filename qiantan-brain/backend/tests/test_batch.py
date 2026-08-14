@@ -22,6 +22,7 @@ from app.services.batch import (
     count_expiring_batches,
     create_batch,
     get_active_batches,
+    return_to_batches,
     rollback_batch_on_void,
 )
 
@@ -405,3 +406,129 @@ async def test_fifo_consumption_returns_weighted_actual_batch_cost(db_session):
             "total_cost": Decimal("14.00"),
             "missing_cost_quantity": Decimal("0.00"),
         }
+
+
+# ── return_to_batches / 锁定排序回归 ─────────────────────────────────
+# SQLite 忽略 FOR UPDATE（生产 PG16 生效），以下测试锁定「加锁后逻辑无回归」：
+# 读-改-写累计正确、ORDER BY 追加 id 仅作 tie-breaker 不改变 FEFO 主序。
+
+
+async def test_return_to_batches_accumulates_across_repeated_returns(db_session):
+    """两次退货回库 → remaining_qty 逐次累计，不丢更新、不产生幻影批次。"""
+    async with db_session() as session:
+        await create_batch(
+            session,
+            MERCHANT_ID,
+            1,
+            "白菜",
+            "白菜-return-acc",
+            Decimal("10"),
+            datetime.now(),
+        )
+        await session.commit()
+        assert await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("6")) == Decimal(
+            "6.00"
+        )
+        # remaining=4, consumed=6
+
+        first = await return_to_batches(session, MERCHANT_ID, 1, Decimal("2"))
+        second = await return_to_batches(session, MERCHANT_ID, 1, Decimal("2"))
+        await session.commit()
+
+        assert first == Decimal("2.00")
+        assert second == Decimal("2.00")
+        batch = (
+            await session.execute(
+                select(BatchLifecycle).where(
+                    BatchLifecycle.batch_label == "白菜-return-acc"
+                )
+            )
+        ).scalar_one()
+        assert batch.remaining_qty == Decimal("8.00")  # 4 + 2 + 2，两次都累计
+        # 未超出总消耗 → 不应创建 surplus 批次
+        labels = (
+            (
+                await session.execute(
+                    select(BatchLifecycle).where(BatchLifecycle.product_id == 1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(labels) == 1
+
+
+async def test_fifo_expiry_order_unaffected_by_id_tiebreaker(db_session):
+    """id 仅作 tie-breaker：FEFO（最早到期优先）主序不变。
+
+    先插入"晚到期"批次、后插入"早到期"批次，使 id 顺序与到期顺序无关，
+    消费仍必须先耗尽早到期批次。
+    """
+    async with db_session() as session:
+        await create_batch(
+            session,
+            MERCHANT_ID,
+            1,
+            "白菜",
+            "白菜-fifo-later",  # 先插入（晚入库/晚到期）
+            Decimal("10"),
+            datetime.now() - timedelta(hours=1),
+        )
+        await create_batch(
+            session,
+            MERCHANT_ID,
+            1,
+            "白菜",
+            "白菜-fifo-earlier",  # 后插入（早入库/早到期）
+            Decimal("10"),
+            datetime.now() - timedelta(hours=3),
+        )
+        await session.commit()
+
+        consumed = await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("5"))
+        await session.commit()
+
+        assert consumed == Decimal("5.00")
+        later = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-fifo-later")
+            )
+        ).scalar_one()
+        earlier = (
+            await session.execute(
+                select(BatchLifecycle).where(BatchLifecycle.batch_label == "白菜-fifo-earlier")
+            )
+        ).scalar_one()
+        assert float(earlier.remaining_qty) == 5  # 早到期先被消耗
+        assert float(later.remaining_qty) == 10  # 晚到期不动
+
+
+async def test_fifo_tiebreak_is_deterministic_for_identical_keys(db_session):
+    """同 expiry/purchase_date 的批次：id tie-breaker 保证加锁/消费全序确定。
+
+    两次部分消费必须持续落在同一批次（同一总序），不随调用漂移。
+    """
+    same_time = datetime(2026, 7, 11, 8, 0, 0)
+    async with db_session() as session:
+        await create_batch(session, MERCHANT_ID, 1, "白菜", "白菜-tie-a", Decimal("10"), same_time)
+        await create_batch(session, MERCHANT_ID, 1, "白菜", "白菜-tie-b", Decimal("10"), same_time)
+        await session.commit()
+
+        assert await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("3")) == Decimal("3.00")
+        assert await consume_batches_fifo(session, MERCHANT_ID, 1, Decimal("3")) == Decimal("3.00")
+        await session.commit()
+
+        remainders = sorted(
+            float(b.remaining_qty)
+            for b in (
+                await session.execute(
+                    select(BatchLifecycle).where(
+                        BatchLifecycle.batch_label.in_(("白菜-tie-a", "白菜-tie-b"))
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # 全序确定：两次都命中同一批次（10-3-3=4），另一批次保持 10。
+        assert remainders == [4.0, 10.0]

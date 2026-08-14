@@ -261,3 +261,55 @@ class TestStaffPinLogin:
                 json={"staff_id": sid, "pin_code": "wrong"},
             )
             assert res.status_code == 401
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 员工管理权限（垂直提权修复）
+# ═══════════════════════════════════════════════════════════════════
+
+class TestStaffManagePermission:
+    """员工管理 CRUD 必须有 manage_staff 权限（当前仅 owner）—— 防垂直提权。"""
+
+    async def test_cashier_cannot_create_staff(self, client, db_session):
+        """无 manage_staff 的员工创建员工 → 403（X-Staff-Id 模拟员工身份）."""
+        sid = await _create_staff(db_session, "cashier")
+        res = await client.post(
+            "/api/v1/staff", json={"name": "越权员工"}, headers={"X-Staff-Id": sid}
+        )
+        assert res.status_code == 403
+
+    async def test_cashier_cannot_update_staff(self, client, db_session):
+        """无 manage_staff 的员工修改员工 → 403."""
+        sid = await _create_staff(db_session, "cashier")
+        res = await client.put(
+            f"/api/v1/staff/{sid}", json={"role": "manager"}, headers={"X-Staff-Id": sid}
+        )
+        assert res.status_code == 403
+
+    async def test_cashier_cannot_deactivate_staff(self, client, db_session):
+        """无 manage_staff 的员工停用员工 → 403."""
+        sid = await _create_staff(db_session, "cashier")
+        res = await client.delete(f"/api/v1/staff/{sid}", headers={"X-Staff-Id": sid})
+        assert res.status_code == 403
+
+    async def test_create_owner_role_rejected(self, client):
+        """owner 只能是商户本人：创建 role=owner 员工 → 400."""
+        res = await client.post("/api/v1/staff", json={"name": "冒名老板", "role": "owner"})
+        assert res.status_code == 400
+
+    async def test_update_to_owner_role_rejected(self, client, db_session):
+        """把员工（含自己）改成 owner → 400."""
+        sid = await _create_staff(db_session, "cashier")
+        res = await client.put(f"/api/v1/staff/{sid}", json={"role": "owner"})
+        assert res.status_code == 400
+
+    async def test_owner_can_still_manage_staff(self, client):
+        """owner 不被锁死：create → update → deactivate 全链路 200."""
+        res = await client.post("/api/v1/staff", json={"name": "合法员工", "role": "cashier"})
+        assert res.status_code == 200
+        sid = res.json()["data"]["staff_id"]
+        res = await client.put(f"/api/v1/staff/{sid}", json={"role": "manager"})
+        assert res.status_code == 200
+        assert res.json()["data"]["role"] == "manager"
+        res = await client.delete(f"/api/v1/staff/{sid}")
+        assert res.status_code == 200
