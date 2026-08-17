@@ -34,6 +34,9 @@
       <input class="search-input" value="{{searchKeyword}}" bindinput="onSearchInput" placeholder="搜索供应商名称、联系人、品类…" placeholder-class="search-placeholder" />
       <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="onSearchClear">✕</text>
     </view>
+    <view class="search-compare-btn" bindtap="openCompare">
+      <text>比价</text>
+    </view>
     <view class="search-add-btn" bindtap="openForm">
       <text>+ 新增</text>
     </view>
@@ -46,6 +49,14 @@
       <view class="sk-line w40"></view>
       <view class="sk-line w80"></view>
     </view>
+  </view>
+
+  <!-- 加载失败 -->
+  <view wx:elif="{{loadError}}" class="empty-state surface">
+    <mascot size="md" mood="think"/>
+    <text class="empty-title">供应商列表加载失败</text>
+    <text class="empty-desc">请检查网络后重试</text>
+    <button class="btn-primary empty-action" bindtap="retrySuppliers">重新加载</button>
   </view>
 
   <!-- Empty -->
@@ -312,6 +323,110 @@
         <button class="btn-secondary" bindtap="closeProdForm">取消</button>
         <button class="btn-primary" bindtap="saveProd" disabled="{{!prodForm.sku_id}}">关联</button>
       </view>
+    </view>
+  </view>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- 供应商比价弹窗 -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <view wx:if="{{showCompare}}" class="picker-mask" bindtap="closeCompare">
+    <view class="picker-sheet compare-sheet" catchtap="stopMaskTap">
+      <text class="picker-title">供应商比价</text>
+
+      <!-- 阶段1：选择 SKU -->
+      <block wx:if="{{!compareSkuId}}">
+        <view class="form-field">
+          <text class="form-label">选择商品</text>
+          <input class="form-input" value="{{compareSkuKeyword}}" bindinput="onCompareSkuSearch" placeholder="搜索商品名称…" placeholder-class="form-placeholder" />
+        </view>
+        <scroll-view class="sku-picker-list compare-sku-list" scroll-y="true">
+          <view wx:if="{{filteredCompareSkus.length === 0}}" class="detail-empty">
+            <text>{{compareLoading ? '正在加载商品…' : (compareError ? compareError : (compareSkus.length === 0 ? '暂无商品，请先在商品管理中创建SKU' : '未找到匹配商品'))}}</text>
+          </view>
+          <view wx:for="{{filteredCompareSkus}}" wx:key="sku_id" class="sku-picker-item" data-id="{{item.sku_id}}" data-name="{{item.name}}" bindtap="pickCompareSku">
+            <text class="sku-picker-name">{{item.name}}</text>
+            <text class="sku-picker-check">›</text>
+          </view>
+        </scroll-view>
+        <view class="picker-actions">
+          <button class="btn-secondary" bindtap="closeCompare">取消</button>
+        </view>
+      </block>
+
+      <!-- 阶段2：比价结果 -->
+      <block wx:else>
+        <view class="compare-head">
+          <view class="compare-sku-info">
+            <text class="compare-sku-name">{{compareSkuName || (compareResult && compareResult.sku_name)}}</text>
+            <text wx:if="{{compareResult && compareResult.canonical_unit}}" class="compare-sku-unit">标准单位：{{compareResult.canonical_unit}}</text>
+          </view>
+          <text class="section-link" bindtap="resetCompareSku">重新选择商品</text>
+        </view>
+
+        <view wx:if="{{compareLoading}}" class="compare-loading">
+          <text>正在加载比价数据…</text>
+        </view>
+        <block wx:elif="{{compareResult && compareResult.suppliers.length}}">
+          <view wx:if="{{compareError}}" class="compare-error compare-inline-error">
+            <text>{{compareError}}</text>
+          </view>
+
+          <!-- 排序切换 -->
+          <view class="compare-sorts">
+            <text class="sort-chip {{compareSort === 'value' ? 'on' : ''}}" data-sort="value" bindtap="switchCompareSort">综合价值</text>
+            <text class="sort-chip {{compareSort === 'price' ? 'on' : ''}}" data-sort="price" bindtap="switchCompareSort">价格优先</text>
+            <text class="sort-chip {{compareSort === 'score' ? 'on' : ''}}" data-sort="score" bindtap="switchCompareSort">质量优先</text>
+          </view>
+
+          <!-- 智能推荐 -->
+          <button class="btn-sm btn-secondary recommend-btn" bindtap="loadCompareRecommend" loading="{{compareRecommendLoading}}" disabled="{{compareRecommendLoading}}">智能推荐</button>
+          <view wx:if="{{compareRecommend && compareRecommend.recommendation}}" class="recommend-card">
+            <view class="rec-badge">智能推荐</view>
+            <text class="rec-supplier">{{compareRecommend.recommendation.supplier_name}}</text>
+            <text wx:if="{{compareRecommend.recommendation.last_price}}" class="rec-price">¥{{fmt.fixed(compareRecommend.recommendation.last_price, 2)}}/{{compareResult.canonical_unit || '斤'}}</text>
+            <text wx:if="{{compareRecommend.recommendation.recommendation_score}}" class="rec-score">推荐分 {{fmt.fixed(compareRecommend.recommendation.recommendation_score, 1)}}</text>
+            <text wx:if="{{compareRecommend.recommendation.reasoning}}" class="rec-reason">{{compareRecommend.recommendation.reasoning}}</text>
+            <view wx:if="{{compareRecommend.recommendation.decision_factors && compareRecommend.recommendation.decision_factors.length}}" class="rec-factors">
+              <text wx:for="{{compareRecommend.recommendation.decision_factors}}" wx:key="*this" class="rec-factor">{{item}}</text>
+            </view>
+          </view>
+
+          <!-- 供应商比价列表 -->
+          <scroll-view class="compare-scroll" scroll-y="true">
+            <view class="compare-list">
+              <view wx:for="{{compareResult.suppliers}}" wx:key="supplier_id" class="compare-row {{item.is_best ? 'best' : ''}}">
+                <view class="cmp-rank">
+                  <text wx:if="{{item.is_best}}" class="cmp-best">★</text>
+                  <text wx:else class="cmp-num">{{index + 1}}</text>
+                </view>
+                <view class="cmp-info">
+                  <text class="cmp-name">{{item.supplier_name}}</text>
+                  <view class="cmp-meta">
+                    <text wx:if="{{item.last_price}}" class="cmp-price">¥{{fmt.fixed(item.last_price, 2)}}/{{compareResult.canonical_unit || '斤'}}</text>
+                    <text wx:else class="cmp-price muted">—</text>
+                    <text wx:if="{{item.value_score}}" class="cmp-value">性价比 {{fmt.fixed(item.value_score, 1)}}</text>
+                  </view>
+                  <view class="cmp-metrics">
+                    <text wx:if="{{item.composite_score}}" class="cmp-metric {{item.composite_score >= 80 ? 'good' : item.composite_score >= 60 ? 'ok' : 'warn'}}">综合 {{fmt.fixed(item.composite_score, 0)}}分</text>
+                    <text wx:if="{{item._leadTimeDisplay}}" class="cmp-metric">供货 {{item._leadTimeDisplay}}</text>
+                    <text wx:if="{{item.min_order_qty}}" class="cmp-metric">起订 {{fmt.fixed(item.min_order_qty, 1)}}</text>
+                    <text wx:if="{{item.default_credit_days}}" class="cmp-metric">账期 {{item.default_credit_days}}天</text>
+                  </view>
+                </view>
+                <text wx:if="{{item.is_best}}" class="cmp-best-tag">最佳</text>
+              </view>
+            </view>
+          </scroll-view>
+        </block>
+        <view wx:elif="{{compareError}}" class="compare-error">
+          <text>{{compareError}}</text>
+        </view>
+        <text wx:elif="{{compareResult}}" class="detail-empty">暂无比价数据</text>
+
+        <view class="picker-actions">
+          <button class="btn-secondary" bindtap="closeCompare">关闭</button>
+        </view>
+      </block>
     </view>
   </view>
 

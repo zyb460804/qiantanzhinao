@@ -1,4 +1,4 @@
-<!-- 今日账目 · 营业实况（v4.0 去 AI 化：删除"数字孪生/健康度圆环/实时芯片"等演示话术） -->
+<!-- 经营镜像 · 今日账目与营业实况（v4.0 去 AI 化：删除"数字孪生/健康度圆环/实时芯片"等演示话术） -->
 <view class="page-shell dashboard-page {{skinClass}}">
   <view class="page-hero ledger-hero" wx:if="{{dashboard}}">
     <text class="eyebrow">{{skinLabel}} · 今日账目</text>

@@ -1,16 +1,15 @@
 """V5-H3/V5-M3 回归：天气日历键与销量 CST 业务日分桶的端到端对齐。
 
-三条链路共用一个不变量：**业务日一律按 CST（UTC+8）切，与部署服务器时区无关**。
-UTC 16:00-24:00（= CST 次日 0-8 点）是错位高发窗口，本文件全部用例都在这个
+两条链路共用一个不变量：**业务日一律按 CST（UTC+8）切，与部署服务器时区无关**。
+UTC 16:00-24:00（= CST 次日 0-8 点）是错位高发窗口，本文件用例都在这个
 窗口内构造数据，锁死：
 
 1. 天气写端（weather.py）与读端（environment.py）用同一把 CST 尺子 —— 否则
    在非 CST 时区部署机上 0-8 点会写错/读错日历键，缓存永不命中。
-2. 经验云天气关联（experience_cloud.py）按 CST 业务日把销售匹配到环境行 ——
-   旧 SQL ``func.date(event_time) == EnvironmentRecord.date`` 只能按 UTC 日期键
-   join，CST 0-8 点的销售会错配到前一天的环境行（或 miss）。
-3. 异常扫描（anomalies.py）按 CST 业务日分桶 —— 旧 SQL func.date 分桶会把
+2. 异常扫描（anomalies.py）按 CST 业务日分桶 —— 旧 SQL func.date 分桶会把
    CST 0-8 点的销售记到前一天，「最后一天 = current_value」随之取错。
+
+（原第 2 条「经验云天气关联」随 app/services/experience_cloud.py 下线一并移除。）
 """
 
 import sys
@@ -109,85 +108,7 @@ async def test_env_today_writes_and_reads_cst_day(client, db_session, monkeypatc
 
 
 # ------------------------------------------------------------------
-# 2. 经验云：CST 00:30 的销售按 CST 日关联当日环境行
-# ------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_weather_impact_correlates_sales_by_cst_day(db_session):
-    """高温判定窗口按 CST 日关联：CST 00:30 的销售算「当天」高温销量。
-
-    旧实现（SQL func.date UTC 键 join）会把 CST 00:30 的销售关联到前一天
-    的常温环境行 → 高温组为空 → 不产出任何洞察。
-    """
-    from app.services.experience_cloud import get_weather_impact_rules
-
-    today = cst_today()
-    hot_sale_dt = _cst_to_utc_naive(today, 0, 30)  # 今天 CST 00:30 = 前一 UTC 日 16:30
-    normal_sale_dt = _cst_to_utc_naive(today - timedelta(days=1), 12, 0)
-
-    merchants = [
-        uuid.UUID(TEST_MERCHANT_ID),
-        uuid.UUID("00000000-0000-0000-0000-000000000002"),
-        uuid.UUID("00000000-0000-0000-0000-000000000003"),
-    ]
-
-    async with db_session() as session:
-        session.add_all(
-            [
-                EnvironmentRecord(
-                    date=today,
-                    city="上海",
-                    temp_high=Decimal("32"),
-                    temp_low=Decimal("22"),
-                    rainfall_prob=Decimal("0"),
-                ),
-                EnvironmentRecord(
-                    date=today - timedelta(days=1),
-                    city="上海",
-                    temp_high=Decimal("22"),
-                    temp_low=Decimal("12"),
-                    rainfall_prob=Decimal("0"),
-                ),
-            ]
-        )
-        for mid in merchants:
-            session.add_all(
-                [
-                    InventoryRecord(
-                        merchant_id=mid,
-                        product_id=1,
-                        quantity=Decimal("-10"),
-                        unit="斤",
-                        event_type="sale",
-                        total_amount=Decimal("20"),
-                        event_time=hot_sale_dt,
-                        source="manual",
-                    ),
-                    InventoryRecord(
-                        merchant_id=mid,
-                        product_id=1,
-                        quantity=Decimal("-2"),
-                        unit="斤",
-                        event_type="sale",
-                        total_amount=Decimal("4"),
-                        event_time=normal_sale_dt,
-                        source="manual",
-                    ),
-                ]
-            )
-        await session.commit()
-
-        insights = await get_weather_impact_rules(session, city="上海")
-
-    match = [i for i in insights if i["product"] == "白菜"]
-    assert match, "CST 00:30 的销售必须按 CST 业务日关联到当日高温环境行"
-    # 高温日均 10 vs 常温日均 2 → +400%（DP 噪声 scale=5，方向不变）
-    assert match[0]["direction"] == "increase"
-
-
-# ------------------------------------------------------------------
-# 3. 异常扫描：CST 0-8 点的销售落在 CST 当天桶
+# 2. 异常扫描：CST 0-8 点的销售落在 CST 当天桶
 # ------------------------------------------------------------------
 
 

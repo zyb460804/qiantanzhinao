@@ -11,7 +11,7 @@ Page({
     productIndex: 0,
     productsEmpty: false,
 
-    // 输入参数
+    // 输入参数（unitCost/unitPrice 会按所选商品的历史进价/售价自动预填，用户可改）
     purchaseQty: 50,
     unitCost: 0.5,
     unitPrice: 2.0,
@@ -41,12 +41,37 @@ Page({
     wx.stopPullDownRefresh();
   },
 
-  // ── 加载商品列表 ─────────────────────────────────────
+  // ── 加载商品列表（含价格预填数据源） ─────────────────
 
   loadProducts: function () {
     var self = this;
-    // 只请求品类(库存数据在沙盘中未使用,移除冗余请求)
-    app.request({ url: '/vision/categories' }).then(function (categories) {
+    // 品类列表 + 当前库存并行请求。
+    // /inventory/current 同时返回 avg_cost（加权进货均价）与 sale_price/default_sale_price
+    // （促销价/默认售价），正好覆盖沙盘两个手输小数（进货单价/计划售价）的预填来源；
+    // 该端点已是 index/ops 页在用的接口，不引入新后端依赖。
+    Promise.all([
+      app.request({ url: '/vision/categories' }).catch(function () { return null; }),
+      app.request({ url: '/inventory/current' }).catch(function () { return null; }),
+    ]).then(function (results) {
+      // product_id → { cost: 最近进价均价, price: 售价 }，无数据的商品保持 null
+      self._priceMap = {};
+      (Array.isArray(results[1]) ? results[1] : []).forEach(function (it) {
+        if (!it || it.product_id == null) return;
+        var cost = Number(it.avg_cost);
+        var price = Number(it.sale_price != null ? it.sale_price : it.default_sale_price);
+        self._priceMap[String(it.product_id)] = {
+          cost: cost > 0 ? cost : null,
+          price: price > 0 ? price : null,
+        };
+      });
+
+      var categories = results[0];
+      if (!categories) {
+        self._productIdMap = {};
+        self.setData({ products: [], productIndex: 0, productsEmpty: true });
+        wx.showToast({ title: '商品列表加载失败', icon: 'none' });
+        return;
+      }
       var cats = (categories || []).filter(function (c) {
         return c && c.name && (c.product_id || c.id);
       });
@@ -61,17 +86,28 @@ Page({
         productIndex: 0,
         productsEmpty: names.length === 0,
       });
-    }).catch(function () {
-      self._productIdMap = {};
-      self.setData({ products: [], productIndex: 0, productsEmpty: true });
-      wx.showToast({ title: '商品列表加载失败', icon: 'none' });
+      // 首个商品的价格预填
+      self._prefillPrices(names[0]);
+    });
+  },
+
+  /** 按商品历史价格预填进货单价/计划售价；无数据时回退到默认值（0.5 / 2.0），用户可改 */
+  _prefillPrices: function (productName) {
+    var pid = productName && this._productIdMap ? this._productIdMap[productName] : null;
+    var price = pid != null && this._priceMap ? this._priceMap[String(pid)] : null;
+    this.setData({
+      unitCost: (price && price.cost != null) ? price.cost : 0.5,
+      unitPrice: (price && price.price != null) ? price.price : 2.0,
     });
   },
 
   // ── 表单交互 ─────────────────────────────────────────
 
   onProductChange: function (e) {
-    this.setData({ productIndex: parseInt(e.detail.value) });
+    var idx = parseInt(e.detail.value);
+    this.setData({ productIndex: idx });
+    // 换商品后价格跟随该商品的历史进价/售价，避免沿用上一个商品的价格误导试算
+    this._prefillPrices(this.data.products[idx]);
   },
 
   onSliderChange: function (e) {
@@ -167,6 +203,10 @@ Page({
       self.setData({ loading: false });
       wx.showToast({ title: (err && err.body && err.body.detail) || '模拟失败，请检查参数', icon: 'none' });
     });
+  },
+
+  goPurchase: function () {
+    wx.navigateTo({ url: '/pages/purchase/purchase' });
   },
 
   // ── 图表渲染 (Canvas-based fallback) ─────────────────

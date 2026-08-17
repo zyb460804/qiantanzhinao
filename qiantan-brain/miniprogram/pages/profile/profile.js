@@ -1,9 +1,12 @@
 /**
- * 「我的」页面 v3.1 — 经营快照 + 快捷操作 + 设备同步 + 工具网格 + 设置入口 + 帮助
+ * 「我的」页面 v3.2 — 经营快照 + 快捷操作 + 设备同步 + 工具直达/折叠 + 设置入口 + 帮助
  * 摊位设置已拆为独立页面 /pages/stall-settings/stall-settings
+ * v3.2 工具区收敛：17 职能宫格 → 常用 6 直达 + 更多工具折叠；租户入口移除；
+ * v3.2.1 员工管理保留在「更多工具」折叠组（顶栏切换只管切身份，增删员工/配权限仍需入口）
  */
 var app = getApp();
 var Theme = require('../../utils/theme');
+var Permissions = require('../../utils/permissions');
 
 Page({
   data: {
@@ -22,50 +25,40 @@ Page({
     // 员工身份切换（权限体系）
     staffMode: false,
     currentStaff: null,
+    // 快捷操作可见性（老板全开，员工按权限过滤）
+    canDashboard: true,
+    canPos: true,
+    canPurchase: true,
 
     // ③ 设备与同步
     devices: [], offlineQueueCount: 0, deviceError: false,
 
-    // ④ 经营工具 — 按职能分组（共 17 项），避免一屏宫格过于拥挤
-    toolGroups: [
-      {
-        title: '经营分析', caption: '看数据、做决策',
-        items: [
-          { page: 'dashboard', name: '经营镜像', glyph: '镜', tone: 'green' },
-          { page: 'report', name: '经营报告', glyph: '报', tone: 'blue' },
-          { page: 'sandbox', name: '决策沙盘', glyph: '算', tone: 'corn' },
-          { page: 'calendar', name: '经营日历', glyph: '历', tone: 'blue' },
-        ],
-      },
-      {
-        title: '进货与货', caption: '采购、库存、商品',
-        items: [
-          { page: 'purchase', name: '采购管理', glyph: '购', tone: 'corn' },
-          { page: 'stocktake', name: '库存盘点', glyph: '盘', tone: 'corn' },
-          { page: 'catalog', name: '商品目录', glyph: '录', tone: 'green' },
-          { page: 'supplier', name: '供应商档案', glyph: '供', tone: 'corn' },
-          { page: 'vision', name: '拍照识货', glyph: '识', tone: 'blue' },
-        ],
-      },
-      {
-        title: '钱与安全', caption: '财务、经营、追溯',
-        items: [
-          { page: 'pos', name: '收银开单', glyph: '收', tone: 'tomato' },
-          { page: 'finance', name: '财务管理', glyph: '财', tone: 'green' },
-          { page: 'ops', name: '经营管理', glyph: '管', tone: 'corn' },
-          { page: 'trace', name: '安全追溯', glyph: '溯', tone: 'green' },
-        ],
-      },
-      {
-        title: '团队与设置', caption: '员工、设备、订阅',
-        items: [
-          { page: 'staff', name: '员工管理', glyph: '员', tone: 'corn' },
-          { page: 'devices', name: '设备管理', glyph: '设', tone: 'blue' },
-          { page: 'tenant', name: '租户中心', glyph: '租', tone: 'green' },
-          { page: 'notices', name: '市场通知', glyph: '告', tone: 'tomato' },
-        ],
-      },
+    // ④ 经营工具（v3.2 收敛）— 常用 6 直达 + 更多工具折叠
+    //    原 17 宫格按开发者职能域分组，摊主视角改为「高频直达 + 低频折叠」。
+    //    员工管理入口删除（顶栏身份切换已覆盖员工场景）；租户中心整页已下线。
+    quickTools: [
+      { page: 'purchase', name: '采购', glyph: '购', tone: 'corn' },
+      { page: 'stocktake', name: '盘点', glyph: '盘', tone: 'blue' },
+      { page: 'pos', name: '收银', glyph: '收', tone: 'green' },
+      { page: 'ops', url: '/pages/ops/ops?tab=waste', name: '报损', glyph: '损', tone: 'corn' },
+      { page: 'finance', name: '财务', glyph: '财', tone: 'green' },
+      { page: 'catalog', name: '商品目录', glyph: '录', tone: 'blue' },
     ],
+    moreTools: [
+      { page: 'dashboard', name: '经营镜像', glyph: '镜', tone: 'green' },
+      { page: 'report', name: '经营报告', glyph: '报', tone: 'blue' },
+      { page: 'sandbox', name: '决策沙盘', glyph: '算', tone: 'corn' },
+      { page: 'calendar', name: '经营日历', glyph: '历', tone: 'blue' },
+      { page: 'vision', name: '拍照识货', glyph: '识', tone: 'blue' },
+      { page: 'supplier', name: '供应商', glyph: '供', tone: 'corn' },
+      { page: 'trace', name: '安全追溯', glyph: '溯', tone: 'green' },
+      { page: 'ops', url: '/pages/ops/ops?tab=clearance', name: '临期清货', glyph: '清', tone: 'corn' },
+      { page: 'ops', url: '/pages/ops/ops?tab=export', name: '数据导出', glyph: '出', tone: 'blue' },
+      { page: 'devices', name: '设备管理', glyph: '设', tone: 'blue' },
+      { page: 'staff', name: '员工管理', glyph: '员', tone: 'corn' },
+      { page: 'notices', name: '市场通知', glyph: '告', tone: 'green' },
+    ],
+    moreOpen: false,
 
     // ⑤ 摊位设置入口（详情页：/pages/stall-settings/stall-settings）
     merchantName: '',
@@ -93,6 +86,49 @@ Page({
       staff.roleLabel = this._ROLE_LABELS[staff.role] || staff.role;
     }
     this.setData({ staffMode: app.isStaffMode(), currentStaff: staff });
+    this._applyToolGroups();
+    this._applyQuickActions();
+  },
+
+  /** 按当前身份过滤工具入口：老板全量，员工只保留有权限页面（常用+更多同规则） */
+  _applyToolGroups: function () {
+    if (!this._allQuickTools) {
+      this._allQuickTools = this.data.quickTools;
+      this._allMoreTools = this.data.moreTools;
+    }
+    if (!app.isStaffMode()) {
+      this.setData({ quickTools: this._allQuickTools, moreTools: this._allMoreTools });
+      return;
+    }
+    var permissions = (app.globalData.currentStaff && app.globalData.currentStaff.permissions) || [];
+    var filterByPerm = function (list) {
+      return (list || []).filter(function (item) {
+        return Permissions.can(item.page, permissions);
+      });
+    };
+    this.setData({
+      quickTools: filterByPerm(this._allQuickTools),
+      moreTools: filterByPerm(this._allMoreTools),
+    });
+  },
+
+  /** 更多工具折叠/展开 */
+  toggleMoreTools: function () {
+    this.setData({ moreOpen: !this.data.moreOpen });
+  },
+
+  /** 快捷操作同样按权限收敛，避免员工看到无权限入口 */
+  _applyQuickActions: function () {
+    if (!app.isStaffMode()) {
+      this.setData({ canDashboard: true, canPos: true, canPurchase: true });
+      return;
+    }
+    var permissions = (app.globalData.currentStaff && app.globalData.currentStaff.permissions) || [];
+    this.setData({
+      canDashboard: Permissions.can('dashboard', permissions),
+      canPos: Permissions.can('pos', permissions),
+      canPurchase: Permissions.can('purchase', permissions),
+    });
   },
 
   onIdentityTap: function () {
@@ -325,7 +361,10 @@ Page({
 
   goDeep: function (e) {
     var page = e.currentTarget.dataset.page;
-    if (!page) return;
+    var url = e.currentTarget.dataset.url;
+    if (!page && !url) return;
+    // 带 url 的入口（如报损/清货/导出直达 ops 对应 tab）直接使用完整地址
+    if (url) { wx.navigateTo({ url: url }); return; }
     // tabBar 页必须用 switchTab，否则 navigateTo 会失败
     if (page === 'voice' || page === 'inventory' || page === 'advisor') {
       wx.switchTab({ url: '/pages/' + page + '/' + page });

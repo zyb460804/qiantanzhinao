@@ -41,10 +41,10 @@ logger = logging.getLogger(__name__)
 
 _tenant_id_var: ContextVar[uuid.UUID | None] = ContextVar("tenant_id", default=None)
 
-# ── 过渡期配置：tenant_id 为空时是否阻断请求 ──
-# True: 缺 tenant 时直接 403（上线后启用）
-# False: 缺 tenant 时仅 WARNING 日志，不阻断（迁移过渡期）
-STRICT_TENANT_REQUIRED = False
+# ── 严格模式配置：tenant_id 为空时是否阻断请求 ──
+# True: 缺 tenant 时直接 403（SaaS 门禁严格态，已启用）
+# False: 缺 tenant 时仅 WARNING 日志，不阻断（仅回滚/本地调试使用）
+STRICT_TENANT_REQUIRED = True
 
 
 def get_current_tenant_id() -> uuid.UUID | None:
@@ -109,8 +109,7 @@ async def require_active_tenant(
 
     检查顺序：tenant_id 存在 → Tenant 记录存在 → status 不为 suspended/deleted。
 
-    过渡期（STRICT_TENANT_REQUIRED=False）：tenant_id 为空时仅 WARNING，不阻断。
-    完成后切换为 True 强制要求。
+    严格模式（STRICT_TENANT_REQUIRED=True）：tenant_id 为空时直接 403。
     """
     tenant_id = get_current_tenant_id()
 
@@ -146,7 +145,7 @@ async def require_active_subscription(
     允许状态：trialing（试用期）/ active（正常付费）
     拒绝状态：past_due（逾期）/ canceled（已取消）/ expired（已过期）
 
-    过渡期：租户为 None（无 tenant_id）时放行。
+    严格模式：require_active_tenant 已保证 tenant 非空。
     """
     if tenant is None:
         return None  # 过渡期放行
@@ -200,7 +199,7 @@ async def require_plan_feature(
     用法：Depends(lambda: require_plan_feature("ai_advisor"))
 
     检查 plan.features JSON 中是否包含对应 key 且为 truthy。
-    过渡期：租户为 None 时放行。
+    严格模式：require_active_tenant 已保证 tenant 非空。
     """
     _ = feature  # 闭包捕获
 
@@ -244,7 +243,7 @@ async def require_quota_check(
         仅在 record 后复核并 logger.warning（含 tenant/metric/超限量），
         供运营侧跟进升级套餐或风控。若未来要改为硬配额，需在 DB 侧
         用条件 UPSERT（WHERE value + inc <= limit）原子收口。
-    过渡期：租户为 None 时放行。
+    严格模式：require_active_tenant 已保证 tenant 非空。
     """
     _ = metric  # 闭包捕获
     _inc = increment  # 闭包捕获

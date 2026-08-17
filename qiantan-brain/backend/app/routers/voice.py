@@ -9,12 +9,15 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
 from app.core.security import get_current_merchant, get_merchant_id
 from app.core.timezone import utc_now, utc_today_start
 from app.database import get_db
 from app.models.audit import AuditLog
+from app.models.batch import BatchLifecycle
+from app.models.catalog import ProductAlias, ProductSKU
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
 from app.models.product import ProductCategory
@@ -39,8 +42,9 @@ from app.services import asr_iflytek
 from app.services.accounts_service import record_customer_receivable
 from app.services.batch import consume_batches_fifo, create_batch, rollback_batch_on_void
 from app.services.sku_service import resolve_sku_id
+from app.services.unit_conversion import convert_to_base_unit
 from app.services.voice_ledger import sync_voice_receivables, void_voice_confirmed_record
-from app.services.voice_parser import parse_voice_text
+from app.services.voice_parser import parse_voice_events
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +67,17 @@ def _load_product_names() -> list[str]:
     return ["白菜", "土豆", "豆腐", "猪肉"]
 
 
+def _json_safe(value):
+    """JSON 列不能存 Decimal：parsed_event 里的数值统一 float 化。
+
+    旧代码往 parsed_event 塞 Decimal 却因 JSON 列原地变更不被追踪而从未
+    真正落库；flag_modified 修复后 flush 会真实序列化，必须先转 float。
+    """
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
 async def _lookup_product(db: AsyncSession, name: str) -> int | None:
     """Look up product_id by name. Returns None if not found."""
     if not name:
@@ -71,6 +86,190 @@ async def _lookup_product(db: AsyncSession, name: str) -> int | None:
     result = await db.execute(query)
     pid = result.scalar_one_or_none()
     return pid
+
+
+async def _load_sku_terms(db: AsyncSession, merchant_id: uuid.UUID) -> list[str]:
+    """本商户 SKU 名称 + 别名，并入解析器词表，让商户自有商品可被识别。"""
+    sku_names = (
+        (
+            await db.execute(
+                select(ProductSKU.name).where(
+                    ProductSKU.merchant_id == merchant_id,
+                    ProductSKU.is_active == True,  # noqa: E712
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    aliases = (
+        (
+            await db.execute(
+                select(ProductAlias.alias).where(ProductAlias.merchant_id == merchant_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [t for t in [*sku_names, *aliases] if t]
+
+
+async def _match_merchant_sku(
+    db: AsyncSession, merchant_id: uuid.UUID, word: str | None
+) -> ProductSKU | None:
+    """按用户原词匹配商户 SKU：标准名精确 → 别名精确 → 模糊包含。"""
+    if not word:
+        return None
+    w = word.strip()
+    if not w:
+        return None
+    q_name = select(ProductSKU).where(
+        ProductSKU.merchant_id == merchant_id,
+        ProductSKU.name == w,
+        ProductSKU.is_active == True,  # noqa: E712
+    )
+    sku = (await db.execute(q_name)).scalar_one_or_none()
+    if sku is None:
+        q_alias = (
+            select(ProductSKU)
+            .join(ProductAlias, ProductAlias.sku_id == ProductSKU.id)
+            .where(ProductAlias.merchant_id == merchant_id, ProductAlias.alias == w)
+        )
+        sku = (await db.execute(q_alias)).scalar_one_or_none()
+    if sku is None and len(w) >= 2:
+        like = f"%{w}%"
+        q_alias_like = (
+            select(ProductSKU)
+            .join(ProductAlias, ProductAlias.sku_id == ProductSKU.id)
+            .where(ProductAlias.merchant_id == merchant_id, ProductAlias.alias.like(like))
+            .limit(1)
+        )
+        sku = (await db.execute(q_alias_like)).scalars().first()
+    if sku is None and len(w) >= 2:
+        q_name_like = (
+            select(ProductSKU)
+            .where(
+                ProductSKU.merchant_id == merchant_id,
+                ProductSKU.is_active == True,  # noqa: E712
+                ProductSKU.name.like(f"%{w}%"),
+            )
+            .limit(1)
+        )
+        sku = (await db.execute(q_name_like)).scalars().first()
+    return sku
+
+
+async def _ensure_category_id(db: AsyncSession, sku: ProductSKU) -> int:
+    """SKU 命中但全局品类缺失时按 SKU 名补建品类（product_id 非空约束兜底）。"""
+    pid = await _lookup_product(db, sku.name)
+    if pid is not None:
+        return pid
+    category = ProductCategory(
+        name=sku.name,
+        unit=sku.canonical_unit or "斤",
+        shelf_life_hours=sku.shelf_life_hours or 72,
+        category_group=sku.category_group,
+        default_price=sku.default_sale_price,
+    )
+    db.add(category)
+    await db.flush()
+    return category.id
+
+
+async def _enrich_event_with_sku(db: AsyncSession, merchant_id: uuid.UUID, event: dict) -> dict:
+    """SKU 优先回填：命中 → product=SKU 标准名 + sku_id；未命中 → 回退品类表。"""
+    word = event.get("product") or event.get("product_word")
+    sku = await _match_merchant_sku(db, merchant_id, word)
+    if sku is not None:
+        event["product_word"] = word
+        event["product"] = sku.name
+        event["sku_id"] = str(sku.id)
+        event["product_id"] = await _lookup_product(db, sku.name)
+    else:
+        event["sku_id"] = None
+        product = event.get("product")
+        event["product_id"] = await _lookup_product(db, product) if product else None
+        if product and word and word != product:
+            event["note"] = f"未找到商品“{word}”，已按品类记录"
+    return event
+
+
+async def _parse_events_with_context(
+    db: AsyncSession, merchant_id: uuid.UUID, asr_text: str
+) -> list[dict]:
+    """带商户上下文解析：SKU 词表并入品类词表，逐事件做 SKU 优先回填。"""
+    sku_terms = await _load_sku_terms(db, merchant_id)
+    product_names = list(dict.fromkeys([*sku_terms, *_load_product_names()]))
+    events = parse_voice_events(asr_text, product_names)
+    for event in events:
+        await _enrich_event_with_sku(db, merchant_id, event)
+    return events
+
+
+def _multi_event_warning(events: list[dict]) -> str | None:
+    """多意图提示文案（与小程序端约定字段一字不差）。"""
+    if len(events) > 1:
+        return f"检测到{len(events)}笔，仅返回第1笔"
+    return None
+
+
+async def _persist_voice_logs(
+    db: AsyncSession,
+    *,
+    merchant_id: uuid.UUID,
+    asr_text: str,
+    events: list[dict],
+    client_id: str | None,
+    audio_url: str | None = None,
+) -> list[VoiceLog]:
+    """一次话语的事件各建一条独立 VoiceLog（多意图前后端契约修复）。
+
+    旧实现整句只建 1 条 log，events[1:] 是「展示卡不可确认」：前端逐卡
+    「确认入账」时对缺 voice_log_id 的事件回退顶层 id，第二笔起与第一笔
+    共用同一 log id，被 confirm 幂等键 voice:{log.id} 误去重（只入第一
+    笔的账）。
+
+    现约定：len(events)>1 时每笔事件独立成单（同 asr_text、各自
+    parsed_event=该事件、各自待确认状态），confirm/void/edit 按 log 行
+    天然隔离；len(events)<=1 时恰好一条，行为与旧版逐字段一致（无事件
+    时 parsed_event=None、status=pending）。提交后把各自 voice_log_id
+    回填进 events[i]——仅响应携带，落库值与旧版一致不含该字段。
+    """
+    logs = [
+        VoiceLog(
+            merchant_id=merchant_id,
+            audio_url=audio_url,
+            asr_text=asr_text,
+            parsed_event=events[i] if events else None,
+            status="parsed" if events else "pending",
+            client_id=client_id,
+        )
+        for i in range(max(len(events), 1))
+    ]
+    db.add_all(logs)
+    await db.commit()
+    for log in logs:
+        await db.refresh(log)
+    for event, log in zip(events, logs, strict=False):
+        event["voice_log_id"] = str(log.id)
+    return logs
+
+
+# 单位换算（A1 契约）：convert_to_base_unit(session, sku_id, quantity, from_unit)
+# 返回 (换算数量, 基准单位) 或 None（SKU 未配置该换算）。
+async def _convert_to_base(db: AsyncSession, sku_id: uuid.UUID, quantity: Decimal, from_unit: str):
+    """调用单位换算服务，把任意单位数量换到 SKU 基准单位。"""
+    return await convert_to_base_unit(db, sku_id, quantity, from_unit)
+
+
+async def _sellable_qty(db: AsyncSession, merchant_id: uuid.UUID, product_id: int) -> float:
+    """可售批次余量（基准单位），用于单位换算缺失时的 409 文案。"""
+    q = select(func.coalesce(func.sum(BatchLifecycle.remaining_qty), 0)).where(
+        BatchLifecycle.merchant_id == merchant_id,
+        BatchLifecycle.product_id == product_id,
+        BatchLifecycle.status.in_(("sellable", "near_expiry")),
+    )
+    return float((await db.execute(q)).scalar() or 0)
 
 
 @router.post("/upload", response_model=VoiceUploadResponse)
@@ -105,7 +304,7 @@ async def upload_voice(
     audio_url = f"/uploads/audio/{saved_name}"
 
     asr_text = ""
-    parsed = None
+    events: list[dict] = []
 
     # Only attempt transcription when full credentials are present.
     if settings.asr_app_id and settings.asr_api_key and settings.asr_api_secret:
@@ -116,28 +315,22 @@ async def upload_voice(
             asr_text = ""
 
         if asr_text:
-            product_names = _load_product_names()
-            parsed = parse_voice_text(asr_text, product_names)
-            product_name = parsed.get("product")
-            product_id = await _lookup_product(db, product_name) if product_name else None
-            parsed["product_id"] = product_id
+            events = await _parse_events_with_context(db, merchant.id, asr_text)
     else:
         logger.warning("ASR credentials not configured; upload saved without transcription")
 
-    voice_log = VoiceLog(
+    # 多意图契约：每笔事件各建一条 VoiceLog（events[i] 内嵌各自
+    # voice_log_id）；识别失败/单意图仍恰好一条，行为与旧版一致。
+    logs = await _persist_voice_logs(
+        db,
         merchant_id=merchant.id,
-        audio_url=audio_url,
         asr_text=asr_text,
-        parsed_event=parsed,
-        status="parsed" if parsed else "pending",
+        events=events,
         client_id=client_id,
+        audio_url=audio_url,
     )
-    db.add(voice_log)
-    await db.commit()
-    await db.refresh(voice_log)
-
-    if parsed:
-        parsed["voice_log_id"] = str(voice_log.id)
+    voice_log = logs[0]
+    parsed = events[0] if events else None
 
     message = (
         "ASR transcription and parsing completed" if asr_text else "语音识别未成功，请使用文字输入"
@@ -149,6 +342,9 @@ async def upload_voice(
             "voice_log_id": str(voice_log.id),
             "asr_text": asr_text,
             "parsed": parsed,
+            "event": parsed,
+            "events": events,
+            "warning": _multi_event_warning(events),
         },
     }
 
@@ -164,28 +360,21 @@ async def parse_text(
     身份来自 token（get_current_merchant），不再信任客户端 merchant_id。
     """
     asr_text = body.text
-    product_names = _load_product_names()
+    # 空内容（空串/纯空格）直接 422，不再产出垃圾语音记录。
+    if not asr_text.strip():
+        raise HTTPException(status_code=422, detail="请说出或输入要记的内容")
 
-    parsed = parse_voice_text(asr_text, product_names)
+    # SKU 优先：商户 SKU 名称/别名并入词表，命中带 sku_id 并以 SKU 名为 product。
+    events = await _parse_events_with_context(db, merchant.id, asr_text)
 
-    # If product name was parsed, look up its real database ID
-    product_name = parsed.get("product")
-    product_id = await _lookup_product(db, product_name) if product_name else None
-    parsed["product_id"] = product_id
-
-    voice_log = VoiceLog(
-        merchant_id=merchant.id,
-        asr_text=asr_text,
-        parsed_event=parsed,
-        status="parsed",
-        client_id=body.client_id,
+    # 多意图契约：每笔事件各建一条 VoiceLog，events[i] 内嵌各自
+    # voice_log_id 供前端逐卡 confirm；单意图路径行为与旧版完全一致
+    # （voice_log_id 即 events[0] 的，兼容旧客户端）。
+    logs = await _persist_voice_logs(
+        db, merchant_id=merchant.id, asr_text=asr_text, events=events, client_id=body.client_id
     )
-    db.add(voice_log)
-    await db.commit()
-    await db.refresh(voice_log)
-
-    # Embed voice_log_id so frontend can use it for confirm/correct
-    parsed["voice_log_id"] = str(voice_log.id)
+    parsed = events[0]
+    voice_log = logs[0]
 
     return {
         "code": 0,
@@ -193,6 +382,9 @@ async def parse_text(
             "voice_log_id": str(voice_log.id),
             "asr_text": asr_text,
             "parsed": parsed,
+            "event": parsed,
+            "events": events,
+            "warning": _multi_event_warning(events),
         },
     }
 
@@ -276,16 +468,34 @@ async def correct_voice(
 
     if log.parsed_event:
         # 修复 C-1：corrections 已是强类型 VoiceCorrection，白名单字段 + 范围约束。
-        # 只取非 None 字段 update 进 parsed_event，杜绝任意键注入。
-        updates = body.corrections.model_dump(exclude_none=True)
-        log.parsed_event.update(updates)
-        log.parsed_event["missing_fields"] = []
-        log.parsed_event["confidence"] = 1.0
+        # 只取非 None 字段合并进 parsed_event，杜绝任意键注入。
+        updates = {
+            k: _json_safe(v) for k, v in body.corrections.model_dump(exclude_none=True).items()
+        }
 
-        # Re-lookup product_id if product name was corrected
+        # 商品修正走 SKU 优先解析：命中则以 SKU 标准名入账并带 sku_id。
         if "product" in updates:
-            pid = await _lookup_product(db, updates["product"])
-            log.parsed_event["product_id"] = pid
+            corrected_name = updates["product"]
+            sku = await _match_merchant_sku(db, merchant.id, corrected_name)
+            if sku is not None:
+                updates["product"] = sku.name
+                updates["product_word"] = corrected_name
+                updates["sku_id"] = str(sku.id)
+                updates["product_id"] = await _lookup_product(db, sku.name)
+            else:
+                updates["sku_id"] = None
+                updates["product_id"] = await _lookup_product(db, corrected_name)
+
+        # P0：parsed_event 是 JSON 列，原地 .update() 不会被 SQLAlchemy 变更追踪，
+        # commit 不生成 UPDATE → 用户修正静默丢失。必须赋新 dict + flag_modified。
+        merged = {
+            **dict(log.parsed_event),
+            **updates,
+            "missing_fields": [],
+            "confidence": 1.0,
+        }
+        log.parsed_event = merged
+        flag_modified(log, "parsed_event")
 
     log.status = "parsed"
     log.correction_count = (log.correction_count or 0) + 1
@@ -330,7 +540,7 @@ async def confirm_voice(
             "data": {
                 "voice_log_id": str(log.id),
                 "event_type": parsed.get("event_type", "purchase"),
-                "product": parsed.get("product") or "未知商品",
+                "product": parsed.get("product") or parsed.get("product_word") or "未知商品",
                 "product_id": parsed.get("product_id"),
                 "quantity": abs(parsed.get("quantity") or 0),
                 "unit": parsed.get("unit", "斤"),
@@ -345,29 +555,73 @@ async def confirm_voice(
     ALLOWED_EVENT_TYPES = ("purchase", "sale", "waste")
     if event_type not in ALLOWED_EVENT_TYPES:
         raise HTTPException(400, f"不支持的事件类型: {event_type}")
-    product_name = parsed.get("product") or "未知商品"
+    # 保留用户原词：商品未识别时错误提示不再丢失原词（“火龙果”≠“未知商品”）。
+    product_word = parsed.get("product_word") or parsed.get("product")
+    product_name = parsed.get("product") or product_word or "未知商品"
 
-    # Resolve product_id: use cached value from parsing, or look up fresh
-    product_id = parsed.get("product_id")
-    if product_id is None and product_name:
-        product_id = await _lookup_product(db, product_name)
+    # SKU 优先校验（与 parse-text 同一套）：缓存 sku_id / 原词匹配商户 SKU
+    # （名称+别名，模糊包含），命中则挂 SKU 账本并以 SKU 名为 product；
+    # 未命中回退全局品类表。
+    sku = None
+    cached_sku_id = parsed.get("sku_id")
+    if cached_sku_id:
+        try:
+            candidate = await db.get(ProductSKU, uuid.UUID(str(cached_sku_id)))
+        except (ValueError, TypeError):
+            candidate = None
+        # 跨商户 sku_id 注入防护：只认本商户的 SKU。
+        if candidate is not None and candidate.merchant_id == log.merchant_id:
+            sku = candidate
+    if sku is None and product_word:
+        sku = await _match_merchant_sku(db, log.merchant_id, product_word)
 
-    if product_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"商品 '{product_name}' 未在品类表中找到，请先添加品类",
-        )
-
-    # P0-B: 解析本商户 SKU（按名/别名），让账本挂到 SKU 上，category 仅兼容。
-    sku_id = await resolve_sku_id(db, merchant.id, product_name=product_name)
+    if sku is not None:
+        sku_id = sku.id
+        product_name = sku.name
+        product_id = await _ensure_category_id(db, sku)
+    else:
+        # P0-B: 解析本商户 SKU（按名/别名），让账本挂到 SKU 上，category 仅兼容。
+        sku_id = await resolve_sku_id(db, log.merchant_id, product_name=product_name)
+        product_id = parsed.get("product_id")
+        if product_id is None and product_name:
+            product_id = await _lookup_product(db, product_name)
+        if product_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"未找到商品“{product_word or '未知商品'}”，请先在商品目录添加该商品或品类"
+                ),
+            )
 
     qty = parsed.get("quantity") or 0
+    # 单位换算：账本/批次统一以 SKU 基准单位入账，换算只在语音边界完成
+    # （catalog 模型设计约定）。服务返回 None 且单位非基准 → 409 引导补
+    # 换算规则，而不是把「2箱」当「2斤」直接卖出。
+    user_unit = parsed.get("unit") or "斤"
+    book_qty = Decimal(str(abs(qty)))
+    book_unit = user_unit
+    converted = False
+    if sku is not None and book_qty > 0:
+        conv = await _convert_to_base(db, sku.id, book_qty, user_unit)
+        if conv is None:
+            if user_unit != sku.canonical_unit:
+                available = await _sellable_qty(db, log.merchant_id, product_id)
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"库存不足：可用{available}{sku.canonical_unit}；"
+                        f"按“{user_unit}”卖出需先在商品目录设置单位换算"
+                    ),
+                )
+        else:
+            new_qty, base_unit = Decimal(str(conv[0])), str(conv[1])
+            converted = new_qty != book_qty or base_unit != user_unit
+            book_qty, book_unit = abs(new_qty), base_unit
+
     if event_type in ("sale", "waste"):
-        record_qty = -abs(qty)
-    elif event_type == "purchase":
-        record_qty = abs(qty)
+        record_qty = -book_qty
     else:
-        record_qty = qty
+        record_qty = book_qty
 
     batch_label = f"{product_name}-{utc_now().strftime('%m%d%H%M')}"
 
@@ -382,12 +636,18 @@ async def confirm_voice(
     unit_price = parsed.get("unit_price")
     if unit_price is not None:
         unit_price = Decimal(str(unit_price))
+    # 换算后数量变了：单价/成本按基准单位重摊（80元/2箱 → 每基准单位重算）。
+    if converted and total_amount is not None and book_qty > 0:
+        if unit_cost is not None:
+            unit_cost = (total_amount / book_qty).quantize(Decimal("0.01"))
+        if unit_price is not None:
+            unit_price = (total_amount / book_qty).quantize(Decimal("0.01"))
     record = InventoryRecord(
         merchant_id=log.merchant_id,
         product_id=product_id,
         sku_id=sku_id,
-        quantity=Decimal(str(record_qty)),
-        unit=parsed.get("unit", "斤"),
+        quantity=record_qty,
+        unit=book_unit,
         unit_cost=unit_cost if event_type == "purchase" else None,
         unit_price=unit_price if event_type == "sale" else None,
         total_amount=total_amount,
@@ -411,24 +671,23 @@ async def confirm_voice(
             product_id=product_id,
             product_name=product_name,
             batch_label=batch_label,
-            quantity=Decimal(str(abs(qty))),
+            quantity=book_qty,
             purchase_time=record.event_time,
             sku_id=sku_id,
             unit_cost=unit_cost,
         )
     elif event_type in ("sale", "waste"):
-        requested_qty = Decimal(str(abs(qty)))
         consumed_from_batches = await consume_batches_fifo(
-            db, log.merchant_id, product_id, requested_qty
+            db, log.merchant_id, product_id, book_qty, sku_id=sku_id
         )
         # F3: reject instead of silently under-consuming — otherwise the
         # InventoryRecord (already db.add-ed above) would book a sale/waste
         # that FIFO could not fulfil, driving stock negative.
-        if consumed_from_batches < requested_qty:
+        if consumed_from_batches < book_qty:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"库存不足，需要{float(requested_qty)}{parsed.get('unit', '斤')}，"
+                    f"库存不足，需要{float(book_qty)}{book_unit}，"
                     f"可用{float(consumed_from_batches)}"
                 ),
             )
@@ -476,8 +735,8 @@ async def confirm_voice(
             "event_type": event_type,
             "product": product_name,
             "product_id": product_id,
-            "quantity": abs(qty),
-            "unit": parsed.get("unit", "斤"),
+            "quantity": float(book_qty),
+            "unit": book_unit,
             "total_amount": parsed.get("total_amount") or 0,
             "consumed_from_batches": consumed_from_batches,
         },
@@ -605,15 +864,21 @@ async def edit_confirmed_record(
     old_record.void_reason = body.reason or "修改后冲正"
     old_record.voided_by = "edit"
 
-    new_product_id = await _lookup_product(db, new_product_name)
-    if new_product_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"商品 '{new_product_name}' 未在品类表中找到",
-        )
-
-    # P0-B: 解析本商户 SKU（按名/别名），让冲正后的账本也挂到 SKU 上。
-    new_sku_id = await resolve_sku_id(db, merchant.id, product_name=new_product_name)
+    # SKU 优先（与 confirm 同一套）：命中则以 SKU 名入账并补建品类兜底。
+    edit_sku = await _match_merchant_sku(db, merchant.id, new_product_name)
+    if edit_sku is not None:
+        new_sku_id = edit_sku.id
+        new_product_name = edit_sku.name
+        new_product_id = await _ensure_category_id(db, edit_sku)
+    else:
+        new_product_id = await _lookup_product(db, new_product_name)
+        if new_product_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"未找到商品“{new_product_name}”，请先在商品目录添加该商品或品类",
+            )
+        # P0-B: 解析本商户 SKU（按名/别名），让冲正后的账本也挂到 SKU 上。
+        new_sku_id = await resolve_sku_id(db, merchant.id, product_name=new_product_name)
 
     if event_type in ("sale", "waste"):
         record_qty = -abs(new_qty)
@@ -676,21 +941,22 @@ async def edit_confirmed_record(
                 detail=(f"库存不足，需要{float(requested_qty)}{new_unit}，可用{float(consumed)}"),
             )
 
-    parsed.update(
-        {
-            "product": new_product_name,
-            "product_id": new_product_id,
-            "quantity": abs(new_qty),
-            "unit": new_unit,
-        }
-    )
+    parsed = {
+        **parsed,
+        "product": new_product_name,
+        "product_id": new_product_id,
+        "quantity": float(abs(new_qty)),
+        "unit": new_unit,
+    }
     if new_unit_cost is not None:
-        parsed["unit_cost"] = new_unit_cost
+        parsed["unit_cost"] = _json_safe(new_unit_cost)
     if new_unit_price is not None:
-        parsed["unit_price"] = new_unit_price
+        parsed["unit_price"] = _json_safe(new_unit_price)
     if new_total is not None:
-        parsed["total_amount"] = new_total
-    log.parsed_event = parsed
+        parsed["total_amount"] = _json_safe(new_total)
+    # JSON 列不能原地赋同一对象：新 dict + flag_modified 才会生成 UPDATE。
+    log.parsed_event = dict(parsed)
+    flag_modified(log, "parsed_event")
     log.correction_count = (log.correction_count or 0) + 1
 
     # 往来账对齐：把该语音单名下应收净额冲平后按修正后金额重新入账

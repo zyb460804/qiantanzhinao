@@ -51,7 +51,9 @@ async def get_tenant_merchant(
 def _require_tenant_id(merchant: Merchant) -> uuid.UUID:
     """Narrow the legacy nullable ORM field before service/DB boundaries.
 
-    过渡期：为空时返回 None，调用方自行处理空值。
+    严格模式（生产，STRICT_TENANT_REQUIRED=True）下为空直接 403；
+    非严格回滚/本地调试模式下可能返回 None，后续查询自然为空结果，
+    不再有开发模式假数据分支。
     """
     from app.core.tenant_context import STRICT_TENANT_REQUIRED
 
@@ -86,22 +88,6 @@ async def get_my_subscription(
 ):
     """查看本租户的订阅信息。"""
     tenant_id = _require_tenant_id(merchant)
-    if tenant_id is None:
-        return {
-            "code": 0,
-            "data": {
-                "plan_code": "free",
-                "plan_name": "免费版（开发模式）",
-                "billing_cycle": None,
-                "status": "active",
-                "current_period_start": None,
-                "current_period_end": None,
-                "auto_renew": False,
-                "max_merchants": 1,
-                "max_api_calls_monthly": 999,
-                "max_storage_mb": 999,
-            },
-        }
     result = await db.execute(
         select(Subscription).where(
             Subscription.tenant_id == tenant_id,
@@ -163,35 +149,6 @@ async def get_my_quotas(
     from app.core.quota import get_all_quotas
 
     tenant_id = _require_tenant_id(merchant)
-    if tenant_id is None:
-        return {
-            "code": 0,
-            "data": {
-                "quotas": [
-                    {
-                        "metric": "api_calls",
-                        "current": 0,
-                        "limit": 999,
-                        "remaining": 999,
-                        "exceeded": False,
-                    },
-                    {
-                        "metric": "storage_mb",
-                        "current": 0,
-                        "limit": 999,
-                        "remaining": 999,
-                        "exceeded": False,
-                    },
-                    {
-                        "metric": "merchant_count",
-                        "current": 1,
-                        "limit": 99,
-                        "remaining": 98,
-                        "exceeded": False,
-                    },
-                ]
-            },
-        }
     quotas = await get_all_quotas(db, tenant_id)
     return {"code": 0, "data": {"quotas": quotas}}
 
@@ -206,8 +163,6 @@ async def get_my_usage_trend(
     from app.core.quota import get_usage_trend
 
     tenant_id = _require_tenant_id(merchant)
-    if tenant_id is None:
-        return {"code": 0, "data": {"metric": metric, "trend": []}}
     trend = await get_usage_trend(db, tenant_id, metric, 30)
     return {"code": 0, "data": {"metric": metric, "trend": trend}}
 
@@ -222,8 +177,6 @@ async def get_my_invoices(
 ):
     """查看本租户的发票列表。"""
     tenant_id = _require_tenant_id(merchant)
-    if tenant_id is None:
-        return {"code": 0, "data": []}
     result = await db.execute(
         select(Invoice).where(Invoice.tenant_id == tenant_id).order_by(Invoice.created_at.desc())
     )

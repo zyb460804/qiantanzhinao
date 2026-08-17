@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.idempotency import short_idem_key
 from app.core.security import get_current_merchant
-from app.core.timezone import utc_now
+from app.core.timezone import cst_day_bounds_utc, utc_now
 from app.database import get_db
 from app.models.accounts import CustomerCreditProfile, CustomerReceivable
 from app.models.audit import AuditLog
@@ -1083,6 +1083,47 @@ def _rows_to_csv(headers: list[str], rows: list[list]) -> str:
     return "﻿" + output.getvalue()
 
 
+async def _aggregate_current_inventory_for_export(db: AsyncSession, merchant_id: uuid.UUID) -> list:
+    """当前库存实时聚合（供 /ops/export/inventory）。
+
+    口径来源：GET /inventory/current（app/routers/inventory.py
+    get_current_inventory）——SUM(quantity) GROUP BY product_id、排除
+    is_voided、加权均价 = Σ(成本×入库量)/Σ(入库量)，仅有出库的商品均价记 0。
+    本地复制实现（inventory.py 的查询内联在路由函数里且含促销价等 UI 字段，
+    导出只需 商品/当前库存/平均成本 三列），两处口径需同步维护。
+    """
+    agg_query = (
+        select(
+            InventoryRecord.product_id,
+            func.coalesce(func.sum(InventoryRecord.quantity), 0).label("qty"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            InventoryRecord.quantity > 0,
+                            InventoryRecord.unit_cost * InventoryRecord.quantity,
+                        ),
+                        else_=0,
+                    )
+                )
+                / func.nullif(
+                    func.sum(
+                        case((InventoryRecord.quantity > 0, InventoryRecord.quantity), else_=0)
+                    ),
+                    0,
+                ),
+                0,
+            ).label("avg_cost"),
+        )
+        .where(
+            InventoryRecord.merchant_id == merchant_id,
+            InventoryRecord.is_voided == False,  # noqa: E712
+        )
+        .group_by(InventoryRecord.product_id)
+    )
+    return (await db.execute(agg_query)).all()
+
+
 @router.get("/export/sales")
 async def export_sales(
     start_date: date,
@@ -1095,11 +1136,14 @@ async def export_sales(
     P0 修复：原返回 StreamingResponse CSV，前端 app.request 期待 {code:0} JSON
     信封，CSV 字符串落入 business_error 分支永远失败。改为 JSON 信封后前端
     可直接读 data.csv 落盘分享。
-    """
-    from datetime import time as dt_time
 
-    day_start = datetime.combine(start_date, dt_time.min)
-    day_end = datetime.combine(end_date, dt_time.max)
+    口径修复：start/end_date 是摊主在 CST 日历上选的日期，created_at 落库为
+    naive UTC —— 必须经 cst_day_bounds_utc 换算成 CST 业务日区间再比较
+    （原 naive UTC 拼接会把 CST 0-8 点的订单漏出导出窗口，与全仓 CST 日界
+    约定冲突，见 app/core/timezone.py 模块注释 / 审计 C4）。
+    """
+    day_start = cst_day_bounds_utc(start_date)[0]
+    day_end = cst_day_bounds_utc(end_date)[1]
 
     orders = (
         (
@@ -1108,7 +1152,7 @@ async def export_sales(
                 .where(
                     SaleOrder.merchant_id == merchant.id,
                     SaleOrder.created_at >= day_start,
-                    SaleOrder.created_at <= day_end,
+                    SaleOrder.created_at < day_end,
                 )
                 .order_by(SaleOrder.created_at.asc())
             )
@@ -1145,18 +1189,14 @@ async def export_inventory(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Export current inventory as CSV."""
-    from app.models.inventory import CurrentInventory
+    """Export current inventory as CSV.
 
-    rows = (
-        (
-            await db.execute(
-                select(CurrentInventory).where(CurrentInventory.merchant_id == merchant.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    修复（V6 导出口径）：原读 CurrentInventory 快照表 —— 该表生产路径零写入
+    （仅 scripts/seed_data 写过），导出永远是空表/陈旧数据，与
+    GET /inventory/current 的实时聚合互相矛盾。现改为与其同口径的
+    InventoryRecord 实时聚合（见 _aggregate_current_inventory_for_export）。
+    """
+    rows = await _aggregate_current_inventory_for_export(db, merchant.id)
 
     product_ids = {r.product_id for r in rows}
     product_names = {}
@@ -1172,7 +1212,7 @@ async def export_inventory(
     inv_rows = [
         {
             "商品": product_names.get(r.product_id, f"商品{r.product_id}"),
-            "当前库存": float(r.current_qty),
+            "当前库存": float(r.qty),
             "平均成本": float(r.avg_cost) if r.avg_cost else "",
         }
         for r in rows
@@ -1194,11 +1234,15 @@ async def export_waste(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Export waste records as CSV."""
-    from datetime import time as dt_time
+    """Export waste records as CSV.
 
-    day_start = datetime.combine(start_date, dt_time.min)
-    day_end = datetime.combine(end_date, dt_time.max)
+    口径修复（与 /export/sales 同病同治）：
+    ① 日期参数按 CST 业务日换算（event_time 为 naive UTC）；
+    ② 排除 is_voided —— 已撤销的报损流水批次已回滚（rollback_batch_on_void），
+      仍导出会给摊主双重报损假象；全仓报表口径均排除作废记录。
+    """
+    day_start = cst_day_bounds_utc(start_date)[0]
+    day_end = cst_day_bounds_utc(end_date)[1]
 
     rows = (
         (
@@ -1207,8 +1251,9 @@ async def export_waste(
                 .where(
                     InventoryRecord.merchant_id == merchant.id,
                     InventoryRecord.event_type == "waste",
+                    InventoryRecord.is_voided == False,  # noqa: E712
                     InventoryRecord.event_time >= day_start,
-                    InventoryRecord.event_time <= day_end,
+                    InventoryRecord.event_time < day_end,
                 )
                 .order_by(InventoryRecord.event_time.asc())
             )

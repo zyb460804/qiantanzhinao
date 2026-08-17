@@ -1,14 +1,16 @@
 """经营行为跟踪 API router — adoption tracking + preference learning."""
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_merchant_id
 from app.database import get_db
 from app.schemas.behavior import FeedbackResponse, ProfileResponse
+from app.schemas.common import AnyResponse
 from app.services.behavior import PROFILES, get_merchant_profile, record_adoption
 
 
@@ -66,4 +68,50 @@ async def get_profile(
             {"key": key, "label": definition["label"], "desc": definition["description"]}
             for key, definition in PROFILES.items()
         ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 产品意见反馈（原 app/routers/feedback.py 合并至此，路径保持 /api/v1/feedback）
+# ---------------------------------------------------------------------------
+
+feedback_router = APIRouter(prefix="/api/v1", tags=["feedback"])
+
+
+class ProductFeedbackRequest(BaseModel):
+    """产品意见反馈提交 schema。"""
+
+    content: str = Field(..., min_length=2, max_length=2000, description="反馈内容")
+    page: str | None = Field(None, max_length=100, description="反馈来源页面")
+    app_version: str | None = Field(None, max_length=20, description="小程序版本号")
+
+
+@feedback_router.post("/feedback", response_model=AnyResponse)
+async def submit_product_feedback(
+    body: ProductFeedbackRequest,
+    merchant_id: uuid.UUID = Depends(get_merchant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """提交产品意见反馈。
+
+    Feedback is stored as a row in the merchant_feedback table.
+    Simple text feedback with optional page context and app version.
+    """
+    from app.models.feedback import MerchantFeedback
+
+    feedback = MerchantFeedback(
+        id=uuid.uuid4(),
+        merchant_id=merchant_id,
+        content=body.content,
+        page=body.page,
+        app_version=body.app_version,
+        created_at=date.today(),
+    )
+    db.add(feedback)
+    await db.commit()
+
+    return {
+        "code": 0,
+        "message": "反馈已提交，感谢你的建议！",
+        "data": {"feedback_id": str(feedback.id)},
     }

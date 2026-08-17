@@ -70,3 +70,50 @@
 .pending-panel .error-title { color: #b87b1a; }
 .pending-panel .error-desc { color: #977043; }
 .pending-panel .retry-btn { color: #b87b1a; }
+
+/* ── 多意图（v3.2）：汇总条 + 逐笔卡片 ── */
+.multi-bar { display: flex; align-items: center; gap: 16rpx; margin-top: 20rpx; padding: 22rpx 24rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.multi-copy { flex: 1; min-width: 0; }
+.multi-title, .multi-done { display: block; }
+.multi-title { color: var(--ink); font-size: 27rpx; font-weight: 740; }
+.multi-done { margin-top: 4rpx; color: var(--muted); font-size: 21rpx; }
+.multi-btn { flex-shrink: 0; padding: 16rpx 22rpx; color: #fff; background: var(--green-800); border-radius: 16rpx; font-size: 23rpx; font-weight: 720; }
+.multi-btn.done { color: var(--green-700); background: var(--green-50); }
+.multi-btn:active { opacity: .8; }
+.multi-item { margin-top: 18rpx; }
+.multi-item.done { opacity: .72; }
+.multi-item-head { display: flex; align-items: center; }
+.multi-item-tag { display: inline-flex; align-items: center; min-height: 38rpx; padding: 0 16rpx; margin-left: 8rpx; color: var(--green-700); background: var(--green-50); border: 2rpx solid var(--green-200); border-radius: 999rpx; font-size: 20rpx; font-weight: 700; }
+.multi-item-tag.ok { color: #fff; background: var(--green-700); border-color: var(--green-700); }
+
+/* 后端 warning 提示条（玉米色警示，不阻断操作） */
+.parse-warning { margin-top: 16rpx; padding: 16rpx 22rpx; color: var(--corn-ink); background: var(--corn-soft); border-radius: var(--radius-lg); font-size: 23rpx; line-height: 1.5; }
+
+/* ── 页内纠错卡（v3.2，低置信兜底主路径）── */
+.cp { margin-top: 20rpx; padding: 28rpx; background: var(--paper); border: 2rpx dashed var(--green-300); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.cp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16rpx; }
+.cp-eyebrow, .cp-title { display: block; }
+.cp-eyebrow { color: var(--muted); font-size: 17rpx; letter-spacing: 2rpx; }
+.cp-title { margin-top: 4rpx; color: var(--ink); font-size: 30rpx; font-weight: 760; }
+.cp-close { flex-shrink: 0; padding: 8rpx 18rpx; color: var(--muted); background: var(--paper-2); border-radius: 999rpx; font-size: 21rpx; }
+.cp-close:active { opacity: .7; }
+.cp-field { margin-top: 22rpx; }
+.cp-grid .cp-field { margin-top: 18rpx; }
+.cp-label { display: block; margin-bottom: 12rpx; color: var(--ink-2); font-size: 22rpx; font-weight: 700; }
+.cp-chips { display: flex; flex-wrap: wrap; gap: 12rpx; }
+.cp-chip { padding: 12rpx 24rpx; color: var(--green-800); background: var(--green-50); border: 2rpx solid var(--green-200); border-radius: 999rpx; font-size: 24rpx; font-weight: 650; }
+.cp-chip.active { color: #fff; background: var(--green-700); border-color: var(--green-700); }
+.cp-chip:active { opacity: .7; }
+.cp-input { width: 100%; min-height: 78rpx; padding: 0 20rpx; box-sizing: border-box; color: var(--ink); background: var(--paper-2); border: 2rpx solid transparent; border-radius: 16rpx; font-size: 27rpx; }
+.cp-input-text { margin-top: 14rpx; }
+.cp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14rpx; }
+.cp-input-wrap { display: flex; align-items: center; gap: 12rpx; padding-right: 18rpx; background: var(--paper-2); border-radius: 16rpx; }
+.cp-input-wrap .cp-input { flex: 1; min-width: 0; background: transparent; }
+.cp-unit { flex-shrink: 0; color: var(--muted); font-size: 22rpx; }
+.cp-respeak { display: flex; align-items: center; justify-content: center; gap: 10rpx; margin-top: 22rpx; min-height: 72rpx; color: var(--green-700); background: var(--green-50); border: 2rpx dashed var(--green-300); border-radius: 16rpx; font-size: 24rpx; font-weight: 700; }
+.cp-respeak.on { color: #c93a30; background: var(--red-soft); border-color: #c93a30; animation: cp-pulse 1.1s var(--ease-spring) infinite; }
+.cp-respeak:active { opacity: .75; }
+@keyframes cp-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+.reduce-motion .cp-respeak.on { animation: none !important; }
+.cp-submit { margin-top: 22rpx; min-height: 88rpx; display: flex; align-items: center; justify-content: center; border-radius: 19rpx; font-size: 27rpx; font-weight: 720; }
+.cp-submit[disabled] { opacity: .55; }

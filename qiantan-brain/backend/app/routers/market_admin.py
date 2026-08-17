@@ -3,10 +3,12 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant
+from app.core.timezone import utc_now
 from app.database import get_db
 from app.models.market import (
     Market,
@@ -20,6 +22,35 @@ from app.schemas.common import AnyResponse
 
 
 router = APIRouter(prefix="/api/v1/market-admin", tags=["market-admin"])
+
+
+class CreateInspectionRequest(BaseModel):
+    market_id: uuid.UUID
+    inspector: str
+    inspection_type: str = "food_safety"
+    result: str = "pass"
+    notes: str | None = None
+    photos: str | None = None
+    merchant_id: uuid.UUID | None = None
+
+
+class CreateComplaintRequest(BaseModel):
+    market_id: uuid.UUID
+    complaint_type: str
+    description: str
+    complainant: str | None = None
+    merchant_id: uuid.UUID | None = None
+
+
+class ResolveComplaintRequest(BaseModel):
+    resolution: str = ""
+
+
+async def _require_market_admin_role(merchant: Merchant) -> None:
+    """校验当前操作者具备市场/租户/平台管理员角色。"""
+    role = getattr(merchant, "_token_role", None) or "owner"
+    if role not in ("market_admin", "tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅市场/租户管理员可操作")
 
 
 # ═══ 市场 ═══
@@ -216,23 +247,27 @@ async def list_inspections(
 
 @router.post("/inspections", response_model=AnyResponse)
 async def create_inspection(
-    body: dict,
+    body: CreateInspectionRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    market_id = uuid.UUID(body["market_id"])
+    # 修复（审计 R1）：写巡检必须具有市场/租户/平台管理员角色。
+    await _require_market_admin_role(merchant)
+    market_id = body.market_id
     # 校验当前商户属于该市场（审计 P1-权限语义错位）
     await _require_market_member(db, merchant.id, market_id)
+    # 修复（审计 R1）：若指定目标商户，必须校验其属于同一市场。
+    if body.merchant_id is not None:
+        await _require_market_member(db, body.merchant_id, market_id)
     i = MarketInspection(
         market_id=market_id,
-        inspector=body["inspector"],
-        inspection_type=body.get("inspection_type", "food_safety"),
-        result=body.get("result", "pass"),
-        notes=body.get("notes"),
-        photos=body.get("photos"),
+        inspector=body.inspector,
+        inspection_type=body.inspection_type,
+        result=body.result,
+        notes=body.notes,
+        photos=body.photos,
+        merchant_id=body.merchant_id,
     )
-    if body.get("merchant_id"):
-        i.merchant_id = uuid.UUID(body["merchant_id"])
     db.add(i)
     await db.commit()
     return {"code": 0, "data": {"id": str(i.id), "result": i.result}}
@@ -284,21 +319,25 @@ async def list_complaints(
 
 @router.post("/complaints", response_model=AnyResponse)
 async def create_complaint(
-    body: dict,
+    body: CreateComplaintRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    market_id = uuid.UUID(body["market_id"])
+    # 修复（审计 R1）：写投诉必须具有市场/租户/平台管理员角色。
+    await _require_market_admin_role(merchant)
+    market_id = body.market_id
     # 校验当前商户属于该市场（审计 P1-权限语义错位）
     await _require_market_member(db, merchant.id, market_id)
+    # 修复（审计 R1）：若指定被投诉商户，必须校验其属于同一市场。
+    if body.merchant_id is not None:
+        await _require_market_member(db, body.merchant_id, market_id)
     c = MarketComplaint(
         market_id=market_id,
-        complainant=body.get("complainant"),
-        complaint_type=body["complaint_type"],
-        description=body["description"],
+        complainant=body.complainant,
+        complaint_type=body.complaint_type,
+        description=body.description,
+        merchant_id=body.merchant_id,
     )
-    if body.get("merchant_id"):
-        c.merchant_id = uuid.UUID(body["merchant_id"])
     db.add(c)
     await db.commit()
     return {"code": 0, "data": {"id": str(c.id), "status": "open"}}
@@ -307,18 +346,20 @@ async def create_complaint(
 @router.put("/complaints/{complaint_id}/resolve", response_model=AnyResponse)
 async def resolve_complaint(
     complaint_id: uuid.UUID,
-    body: dict,
+    body: ResolveComplaintRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 修复（审计 R1）：处置投诉必须具有市场/租户/平台管理员角色。
+    await _require_market_admin_role(merchant)
     c = await db.get(MarketComplaint, complaint_id)
     if not c:
         raise HTTPException(status_code=404, detail="投诉不存在")
     # 校验当前商户属于投诉所在市场（审计 P0-1：原实现任意商户可处置他人投诉）
     await _require_market_member(db, merchant.id, c.market_id)
     c.status = "resolved"
-    c.resolution = body.get("resolution", "")
-    c.resolved_at = None  # use server time
+    c.resolution = body.resolution
+    c.resolved_at = utc_now()
     await db.commit()
     return {"code": 0, "message": "投诉已处理"}
 

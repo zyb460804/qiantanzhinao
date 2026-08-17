@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 from fastapi import Depends, Request  # noqa: E402
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -25,11 +26,14 @@ from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.merchant import Merchant  # noqa: E402
 from app.models.product import ProductCategory  # noqa: E402
+from app.models.saas import Tenant  # noqa: E402
 
 
 # Shared constants — tests can import these
 TEST_MERCHANT_ID = "00000000-0000-0000-0000-000000000001"
 TEST_PRODUCT_ID = 1
+DEFAULT_TENANT_ID = "00000000-0000-0000-0000-0000000000aa"
+DEFAULT_TENANT_SLUG = "default"
 
 
 @pytest.fixture(scope="session")
@@ -59,6 +63,9 @@ async def db_session():
 
     # Seed minimal test data
     async with session_factory() as session:
+        # 注意：默认租户不在这里预置，避免污染 admin 租户列表/导出统计。
+        # 需要绑定默认租户的 merchant 端测试由 _override_get_current_merchant
+        # 按需创建并绑定；auth_client 走真实登录时会由 auth.wechat_login 创建。
         merchant = Merchant(
             id=uuid.UUID(TEST_MERCHANT_ID),
             name="测试摊位",
@@ -110,6 +117,26 @@ async def _override_get_current_merchant(
         db.add(merchant)
         await db.commit()
         await db.refresh(merchant)
+
+    # 默认测试商户按需绑定默认租户：让 client fixture 在严格模式下仍能通过
+    # 带租户门禁的常规接口；其它 X-Test-Merchant-Id 隔离商户保持无租户，
+    # 供未绑定租户 403 测试使用。
+    if mid == uuid.UUID(TEST_MERCHANT_ID) and merchant.tenant_id is None:
+        result = await db.execute(select(Tenant).where(Tenant.slug == DEFAULT_TENANT_SLUG))
+        tenant = result.scalar_one_or_none()
+        if tenant is None:
+            tenant = Tenant(
+                id=uuid.UUID(DEFAULT_TENANT_ID),
+                name="默认租户",
+                slug=DEFAULT_TENANT_SLUG,
+                status="active",
+            )
+            db.add(tenant)
+            await db.flush()
+        merchant.tenant_id = tenant.id
+        await db.commit()
+        await db.refresh(merchant)
+
     # 测试角色模拟：注入 _token_role，与生产 get_current_merchant 行为对齐
     test_role = request.headers.get("X-Test-Token-Role")
     if test_role:
@@ -117,6 +144,12 @@ async def _override_get_current_merchant(
     else:
         # 与生产默认行为一致：无 token 时 _token_role 默认 "owner"
         merchant._token_role = "owner"
+
+    # 与生产 get_current_merchant 对齐：把商户租户写入请求上下文。
+    # 未绑定租户的商户（隔离测试）会得到 None，供严格模式 403 验证。
+    from app.core.tenant_context import set_tenant_id
+
+    set_tenant_id(merchant.tenant_id)
     return merchant
 
 

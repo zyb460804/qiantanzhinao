@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.admin_permissions import DASHBOARD_READ, require_admin_permission
 from app.database import get_db
 from app.models.merchant import Merchant
-from app.models.saas import ApiKey, Invoice, Plan, Subscription, Tenant, UsageRecord
+from app.models.saas import Invoice, Plan, Subscription, Tenant, UsageRecord
 
 
 router = APIRouter(
@@ -49,16 +49,13 @@ class DashboardTrendItem(BaseModel):
     date: str
     api_calls: int
     storage_mb: int
-    voice_seconds: int
     new_tenants: int
 
 
 class DashboardAnalytics(BaseModel):
     range_days: int
     month_api_calls: int
-    month_voice_seconds: int
     month_paid_revenue: Decimal
-    active_api_keys: int
     active_tenant_rate: float
     trend: list[DashboardTrendItem]
 
@@ -153,9 +150,6 @@ async def get_dashboard_analytics(
             func.sum(case((UsageRecord.metric == "storage_mb", UsageRecord.value), else_=0)).label(
                 "storage_mb"
             ),
-            func.sum(
-                case((UsageRecord.metric == "voice_seconds", UsageRecord.value), else_=0)
-            ).label("voice_seconds"),
         )
         .where(UsageRecord.recorded_date >= start_date.isoformat())
         .group_by(UsageRecord.recorded_date)
@@ -165,7 +159,6 @@ async def get_dashboard_analytics(
         row.recorded_date: {
             "api_calls": int(row.api_calls or 0),
             "storage_mb": int(row.storage_mb or 0),
-            "voice_seconds": int(row.voice_seconds or 0),
         }
         for row in usage_result
     }
@@ -187,7 +180,6 @@ async def get_dashboard_analytics(
                 date=key,
                 api_calls=usage.get("api_calls", 0),
                 storage_mb=usage.get("storage_mb", 0),
-                voice_seconds=usage.get("voice_seconds", 0),
                 new_tenants=tenants_by_date.get(key, 0),
             )
         )
@@ -195,10 +187,9 @@ async def get_dashboard_analytics(
     month_usage = await db.execute(
         select(
             func.sum(case((UsageRecord.metric == "api_calls", UsageRecord.value), else_=0)),
-            func.sum(case((UsageRecord.metric == "voice_seconds", UsageRecord.value), else_=0)),
         ).where(UsageRecord.recorded_date >= month_start)
     )
-    month_api_calls, month_voice_seconds = month_usage.one()
+    month_api_calls = month_usage.scalar()
 
     month_paid_revenue = await db.scalar(
         select(func.coalesce(func.sum(Invoice.amount), 0)).where(
@@ -206,9 +197,6 @@ async def get_dashboard_analytics(
             Invoice.paid_at.isnot(None),
             Invoice.paid_at >= datetime.combine(today.replace(day=1), datetime.min.time()),
         )
-    )
-    active_api_keys = await db.scalar(
-        select(func.count(ApiKey.id)).where(ApiKey.is_active == True)  # noqa: E712
     )
     tenant_total = await db.scalar(select(func.count(Tenant.id))) or 0
     tenant_active = (
@@ -218,9 +206,7 @@ async def get_dashboard_analytics(
     return DashboardAnalytics(
         range_days=days,
         month_api_calls=int(month_api_calls or 0),
-        month_voice_seconds=int(month_voice_seconds or 0),
         month_paid_revenue=month_paid_revenue or Decimal("0"),
-        active_api_keys=active_api_keys or 0,
         active_tenant_rate=round(tenant_active / max(tenant_total, 1) * 100, 1),
         trend=trend,
     )

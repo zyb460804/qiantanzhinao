@@ -8,16 +8,20 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, case, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.admin_permissions import (
     AI_ACTION_READ,
     DASHBOARD_READ,
+    EXPORT_DATA,
     require_admin_permission,
 )
+from app.core.admin_security import get_current_admin
+from app.core.audit import log_action
+from app.core.export import export_csv_response
 from app.database import get_db
 from app.models.admin_audit import AdminAuditLog
 from app.models.ai_action import AIAction
@@ -26,6 +30,7 @@ from app.models.merchant import Merchant
 from app.models.saas import (
     Invoice,
     Plan,
+    PlatformAdmin,
     Subscription,
     Tenant,
     UsageRecord,
@@ -216,11 +221,58 @@ class DeviceListResponse(BaseModel):
 async def list_devices(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None),
+    status_filter: str | None = Query(None, alias="status"),
+    device_type: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> DeviceListResponse:
-    """获取设备列表（所有租户聚合）。"""
+    """获取设备列表（所有租户聚合），支持服务端搜索、状态/类型过滤与分页。"""
     now = datetime.now(UTC).replace(tzinfo=None)
     heartbeat_threshold = now - DEVICE_HEARTBEAT_TIMEOUT
+
+    filters: list = []
+    if device_type:
+        filters.append(Device.device_type == device_type)
+    if status_filter:
+        if status_filter not in ("online", "offline", "warning"):
+            raise HTTPException(status_code=400, detail="状态筛选须为 online/offline/warning")
+        if status_filter == "online":
+            filters.append(
+                and_(
+                    Device.is_active.is_(True),
+                    Device.last_error.is_(None),
+                    Device.last_heartbeat.isnot(None),
+                    Device.last_heartbeat >= heartbeat_threshold,
+                )
+            )
+        elif status_filter == "warning":
+            filters.append(and_(Device.is_active.is_(True), Device.last_error.isnot(None)))
+        else:
+            filters.append(
+                or_(
+                    Device.is_active.is_(False),
+                    Device.last_heartbeat.is_(None),
+                    Device.last_heartbeat < heartbeat_threshold,
+                )
+            )
+    if search:
+        pattern = f"%{search}%"
+        filters.append(
+            or_(
+                Device.device_name.ilike(pattern),
+                Device.serial_number.ilike(pattern),
+                Device.firmware_version.ilike(pattern),
+                Merchant.name.ilike(pattern),
+                Tenant.name.ilike(pattern),
+            )
+        )
+
+    base_join = (
+        select(Device)
+        .outerjoin(Merchant, Device.merchant_id == Merchant.id)
+        .outerjoin(Tenant, Merchant.tenant_id == Tenant.id)
+    )
+
     count_result = await db.execute(
         select(
             func.count(Device.id),
@@ -251,6 +303,9 @@ async def list_devices(
                 )
             ),
         )
+        .outerjoin(Merchant, Device.merchant_id == Merchant.id)
+        .outerjoin(Tenant, Merchant.tenant_id == Tenant.id)
+        .where(*filters)
     )
     total, online, warning = count_result.one()
     total = int(total or 0)
@@ -259,7 +314,7 @@ async def list_devices(
     offline = max(0, total - online - warning)
 
     query = (
-        select(Device)
+        base_join.where(*filters)
         .order_by(desc(Device.created_at))
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -310,6 +365,81 @@ async def list_devices(
         online=online,
         offline=offline,
         warning=warning,
+    )
+
+
+# ────────────────────────────────────────────────────────────
+# 租户批量导出（按 ID 或当前筛选结果）
+# ────────────────────────────────────────────────────────────
+
+
+class TenantBatchExportRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+    search: str | None = None
+    status: str | None = None
+
+
+@router.post("/export/tenants/batch")
+async def export_tenants_batch(
+    req: TenantBatchExportRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: PlatformAdmin = Depends(get_current_admin),
+    _perm=Depends(require_admin_permission(EXPORT_DATA)),
+):
+    """按租户 ID（或当前筛选条件）导出 CSV — 高风险操作，需审计。"""
+    from uuid import UUID
+
+    filters: list = []
+    if req.ids:
+        ids: list[UUID] = []
+        for raw_id in req.ids:
+            try:
+                ids.append(UUID(raw_id))
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"无效的租户 ID: {raw_id}") from None
+        filters.append(Tenant.id.in_(ids))
+    if req.search:
+        pattern = f"%{req.search}%"
+        filters.append(or_(Tenant.name.ilike(pattern), Tenant.slug.ilike(pattern)))
+    if req.status:
+        filters.append(Tenant.status == req.status)
+
+    result = await db.execute(select(Tenant).where(*filters).order_by(Tenant.created_at.desc()))
+    tenants = result.scalars().all()
+
+    await log_action(
+        db,
+        admin.id,
+        admin.email,
+        "export",
+        resource_type="export",
+        resource_id="tenants",
+        detail={
+            "data_type": "tenants",
+            "ids_count": len(req.ids),
+            "filter_search": req.search,
+            "filter_status": req.status,
+        },
+        request=request,
+    )
+    await db.commit()
+
+    return export_csv_response(
+        [
+            {
+                "ID": str(tenant.id),
+                "名称": tenant.name,
+                "Slug": tenant.slug,
+                "状态": tenant.status,
+                "联系邮箱": tenant.contact_email or "",
+                "联系电话": tenant.contact_phone or "",
+                "试用到期": tenant.trial_ends_at.isoformat() if tenant.trial_ends_at else "",
+                "创建时间": tenant.created_at.isoformat() if tenant.created_at else "",
+            }
+            for tenant in tenants
+        ],
+        "tenants",
     )
 
 
@@ -571,7 +701,7 @@ async def get_dashboard_activities(db: AsyncSession = Depends(get_db)):
                 priority="high" if has_error else "medium",
                 tenant_id=str(tenant.id) if tenant else None,
                 tenant_name=tenant.name if tenant else None,
-                target_path="/devices",
+                target_path="/monitoring?tab=devices",
                 due_at=device.last_heartbeat.isoformat() if device.last_heartbeat else None,
             )
         )
@@ -710,6 +840,17 @@ async def get_monitoring_overview(
         await db.scalar(select(func.count(Subscription.id)).where(Subscription.status == "active"))
         or 0
     )
+    expiring_subscriptions = (
+        await db.scalar(
+            select(func.count(Subscription.id)).where(
+                Subscription.status == "active",
+                Subscription.current_period_end.isnot(None),
+                Subscription.current_period_end <= now_naive + timedelta(days=7),
+                Subscription.current_period_end >= now_naive,
+            )
+        )
+        or 0
+    )
 
     health_score = 100
     if not db_ok:
@@ -746,9 +887,13 @@ async def get_monitoring_overview(
         MonitoringCheck(
             key="subscriptions",
             name="订阅服务",
-            status="normal",
+            status=(
+                "warning" if expiring_subscriptions > 0 or active_subscriptions == 0 else "normal"
+            ),
             value=f"{active_subscriptions} 个活跃",
-            detail=f"当前 {active_tenants} 个活跃租户",
+            detail=(
+                f"当前 {active_tenants} 个活跃租户，{expiring_subscriptions} 个订阅 7 天内到期"
+            ),
         ),
     ]
 
@@ -887,22 +1032,27 @@ async def retry_dead_letter(
     dead_letter_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """将死信事件标记为重试（重置计数，设置下次重试时间为现在）。"""
+    """立即重放一条死信事件并返回真实结果（不再只是改状态等消费者）。
+
+    重放逻辑与 worker 定时扫描共用 app.services.offline_sync.replay_dead_letter：
+    成功 → resolved；失败 → 计数+1、指数退避；超上限 → failed。
+    """
     from uuid import UUID
 
     from app.models.dead_letter import DeadLetterEvent
+    from app.services.offline_sync import replay_dead_letter
 
-    dl_id = UUID(dead_letter_id)
+    try:
+        dl_id = UUID(dead_letter_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的死信 ID") from None
     dead_letter = await db.get(DeadLetterEvent, dl_id)
     if not dead_letter:
         raise HTTPException(status_code=404, detail="死信事件不存在")
 
-    dead_letter.retry_count = 0
-    dead_letter.next_retry_at = datetime.now(UTC)
-    dead_letter.status = "pending"
-    await db.flush()
-
-    return {"id": str(dead_letter.id), "status": dead_letter.status, "message": "已标记为重试"}
+    outcome = await replay_dead_letter(db, dead_letter)
+    await db.commit()
+    return outcome
 
 
 @router.post("/dead-letters/{dead_letter_id}/resolve")
@@ -910,19 +1060,23 @@ async def resolve_dead_letter(
     dead_letter_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """将死信事件标记为已解决。"""
+    """将死信事件标记为已解决（人工豁免，不触发重放）。"""
     from uuid import UUID
 
+    from app.core.timezone import utc_now
     from app.models.dead_letter import DeadLetterEvent
 
-    dl_id = UUID(dead_letter_id)
+    try:
+        dl_id = UUID(dead_letter_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的死信 ID") from None
     dead_letter = await db.get(DeadLetterEvent, dl_id)
     if not dead_letter:
         raise HTTPException(status_code=404, detail="死信事件不存在")
 
     dead_letter.status = "resolved"
-    dead_letter.resolved_at = datetime.now(UTC)
-    await db.flush()
+    dead_letter.resolved_at = utc_now()
+    await db.commit()
 
     return {"id": str(dead_letter.id), "status": dead_letter.status, "message": "已标记为已解决"}
 

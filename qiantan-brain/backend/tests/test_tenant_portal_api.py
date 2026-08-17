@@ -8,22 +8,20 @@ from app.models.merchant import Merchant
 from app.models.saas import Plan, Tenant
 
 
-async def test_unbound_merchant_gets_mock_data_in_nonstrict_mode(client, db_session):
-    """非严格模式下，无 tenant_id 的商户收到模拟数据而非 403。"""
+async def test_unbound_merchant_blocked_in_strict_mode(client, db_session):
+    """严格模式下，无 tenant_id 的商户访问租户自助接口直接 403。"""
+    # 使用独立未绑定商户，避免默认测试商户被 conftest 自动绑定。
+    unbound_merchant_id = str(uuid.uuid4())
     async with db_session() as session:
-        merchant = await session.get(Merchant, uuid.UUID(TEST_MERCHANT_ID))
-        assert merchant is not None
-        merchant.tenant_id = None
-        merchant.role = "owner"
+        session.add(Merchant(id=uuid.UUID(unbound_merchant_id), name="未绑定商户", role="owner"))
         await session.commit()
 
-    response = await client.get("/api/v1/tenant/usage/quotas")
-    assert response.status_code == 200, response.text
-    data = response.json()["data"]
-    assert len(data["quotas"]) == 3
-    # 模拟数据不应 exceeded
-    for q in data["quotas"]:
-        assert q["exceeded"] is False
+    response = await client.get(
+        "/api/v1/tenant/usage/quotas",
+        headers={"X-Test-Merchant-Id": unbound_merchant_id},
+    )
+    assert response.status_code == 403, response.text
+    assert "未绑定租户" in response.json()["detail"]
 
 
 async def test_bound_tenant_quota_service_receives_concrete_uuid(client, db_session):

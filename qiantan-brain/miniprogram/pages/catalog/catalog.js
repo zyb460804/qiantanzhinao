@@ -28,7 +28,7 @@ Page({
   stopMaskTap: function () {},
 
   data: {
-    skin: '', loading: false, submitting: false,
+    skin: '', loading: false, submitting: false, loadError: false,
 
     // ── SKU 列表 ──
     skus: [], searchKeyword: '', filteredSkus: [], pricedCount: 0, unpricedCount: 0,
@@ -87,6 +87,10 @@ Page({
   // SKU 列表
   // ═══════════════════════════════════════════════════════════
 
+  retrySkus: function () {
+    this._loadSkus();
+  },
+
   _loadSkus: function () {
     var self = this;
     this.setData({ loading: true });
@@ -101,10 +105,11 @@ Page({
         skus: decorated,
         pricedCount: pricedCount,
         unpricedCount: decorated.length - pricedCount,
-        loading: false
+        loading: false,
+        loadError: false
       });
       self._filterSkus();
-    }).catch(function (err) { self.setData({ loading: false }); wx.showToast({ title: (err.body && err.body.detail) || '商品列表加载失败', icon: 'none' }); });
+    }).catch(function (err) { self.setData({ loading: false, loadError: true, skus: [], filteredSkus: [] }); wx.showToast({ title: (err.body && err.body.detail) || '商品列表加载失败', icon: 'none' }); });
   },
 
   _filterSkus: function () {

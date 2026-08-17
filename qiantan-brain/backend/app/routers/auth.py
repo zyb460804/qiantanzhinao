@@ -24,6 +24,7 @@ from app.core.security import (
 )
 from app.database import get_db
 from app.models.merchant import Merchant
+from app.models.saas import Tenant
 from app.schemas.auth import (
     LoginData,
     LogoutResponse,
@@ -40,6 +41,38 @@ from app.schemas.common import AnyResponse
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 _oauth2_scheme = HTTPBearer(auto_error=False)
+
+# 新商户/存量未绑定商户统一落入的默认租户。
+# slug 唯一，天然幂等：已存在时直接复用，避免重复建租户。
+DEFAULT_TENANT_SLUG = "default"
+
+
+async def _get_or_create_default_tenant(db: AsyncSession) -> Tenant:
+    """获取默认租户；不存在则创建（幂等）。
+
+    并发首次登录时可能同时插入相同 slug，捕获 IntegrityError 后回滚重查，
+    返回已由其它请求创建的默认租户。
+    """
+    result = await db.execute(select(Tenant).where(Tenant.slug == DEFAULT_TENANT_SLUG))
+    tenant = result.scalar_one_or_none()
+    if tenant is not None:
+        return tenant
+
+    tenant = Tenant(
+        name="默认租户",
+        slug=DEFAULT_TENANT_SLUG,
+        status="active",
+    )
+    db.add(tenant)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        result = await db.execute(select(Tenant).where(Tenant.slug == DEFAULT_TENANT_SLUG))
+        tenant = result.scalar_one_or_none()
+        if tenant is None:
+            raise
+    return tenant
 
 
 def _merchant_to_info(m: Merchant) -> MerchantInfo:
@@ -65,10 +98,13 @@ async def wechat_login(
     merchant = result.scalar_one_or_none()
     is_new = False
     if merchant is None:
+        # 新商户必须绑定默认租户；先确保默认租户存在，再创建商户。
+        tenant = await _get_or_create_default_tenant(db)
         merchant = Merchant(
             name=f"摊主{openid[-6:]}",
             wechat_openid=openid,
             role="owner",
+            tenant_id=tenant.id,
         )
         db.add(merchant)
         try:
@@ -84,6 +120,14 @@ async def wechat_login(
             ).scalar_one_or_none()
             if merchant is None:
                 raise  # 不该发生 — IntegrityError 说明 UNIQUE 约束被另一并发请求触发
+            # 并发商户可能由旧版本代码创建（tenant_id 为空），补绑默认租户。
+            if merchant.tenant_id is None:
+                tenant = await _get_or_create_default_tenant(db)
+                merchant.tenant_id = tenant.id
+    elif merchant.tenant_id is None:
+        # 存量老商户登录时自动补绑默认租户（幂等，避免重复建）。
+        tenant = await _get_or_create_default_tenant(db)
+        merchant.tenant_id = tenant.id
 
     await db.commit()
     await db.refresh(merchant)

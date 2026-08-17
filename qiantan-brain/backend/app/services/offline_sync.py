@@ -13,6 +13,9 @@ Key properties:
   duplicate is returned as `duplicate`, not an error.
 - FK-safe: `product_id` is resolved/created from `product_name` when the
   client only knows a name (e.g. the POS "现金收款" cash sale).
+- Replayable: failed items are dead-lettered with their original payload;
+  `replay_dead_letter()` re-executes them (worker 定时扫描 + admin 手动触发),
+  成功 → resolved，失败 → 计数 + 指数退避，超上限 → failed。
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.timezone import parse_iso_datetime, utc_now
+from app.models.dead_letter import DeadLetterEvent
 from app.models.inventory import InventoryRecord
 from app.services.batch import consume_batches_fifo_costed, create_batch
 from app.services.sku_service import ensure_sku_for_category, resolve_sku_id
@@ -44,6 +48,11 @@ logger = logging.getLogger(__name__)
 # Default category for cash-register collections. The client can also use a
 # real product_id / product_name for normal inventory events.
 CASH_PRODUCT_NAME = "现金收款"
+
+# 死信重放退避参数：第 n 次失败后等待 base * 2^(n-1) 分钟，封顶 max 分钟。
+RETRY_BACKOFF_BASE_MINUTES = 5
+RETRY_BACKOFF_MAX_MINUTES = 60
+DEFAULT_MAX_RETRIES = 3
 
 
 def _build_inventory_record(
@@ -289,8 +298,83 @@ async def _log_dead_letter(
         payload=item.model_dump(),
         error_message=str(result.get("message", ""))[:1000],
         retry_count=0,
-        max_retries=3,
+        max_retries=DEFAULT_MAX_RETRIES,
         status="pending",
-        next_retry_at=utc_now() + timedelta(minutes=5),
+        next_retry_at=utc_now() + timedelta(minutes=RETRY_BACKOFF_BASE_MINUTES),
     )
     db.add(dead_letter)
+
+
+def _retry_backoff_minutes(retry_count: int) -> int:
+    """指数退避：5/10/20/40/60 分钟封顶。"""
+    return min(
+        RETRY_BACKOFF_BASE_MINUTES * 2 ** max(retry_count - 1, 0),
+        RETRY_BACKOFF_MAX_MINUTES,
+    )
+
+
+async def replay_dead_letter(db: AsyncSession, dead_letter: DeadLetterEvent) -> dict:
+    """重放一条死信事件：按原 payload 重新执行离线入账并更新死信状态。
+
+    结果语义（返回 {"id", "status", "result", "message"}）：
+      - 重放成功（created）或事件此前已入账（duplicate）→ status=resolved；
+      - 重放失败 → retry_count+1、指数退避 next_retry_at，status 保持 pending；
+      - 失败次数达到 max_retries → status=failed（终态，不再自动重试）。
+
+    本函数只操作调用方事务（失败项用 savepoint 隔离），提交由调用方负责。
+    """
+    from app.schemas.inventory import OfflineSyncItem
+
+    try:
+        item = OfflineSyncItem.model_validate(dead_letter.payload)
+    except Exception as exc:  # noqa: BLE001 — payload 已损坏也必须能转入终态
+        logger.exception("dead-letter %s payload invalid", dead_letter.id)
+        result = {"status": "error", "message": f"payload 无法解析: {exc}"}
+    else:
+        try:
+            async with db.begin_nested():
+                result = await upsert_offline_item(db, dead_letter.merchant_id, item)
+        except Exception as exc:  # noqa: BLE001 — savepoint 已回滚，记录原因即可
+            logger.warning(
+                "dead-letter %s replay failed: %s",
+                dead_letter.id,
+                exc,
+            )
+            result = {"status": "error", "message": str(exc)}
+
+    if result["status"] in ("created", "duplicate"):
+        dead_letter.status = "resolved"
+        dead_letter.resolved_at = utc_now()
+        dead_letter.next_retry_at = None
+        return {
+            "id": str(dead_letter.id),
+            "status": "resolved",
+            "result": result["status"],
+            "message": "重放成功，事件已解决",
+        }
+
+    retry_count = (dead_letter.retry_count or 0) + 1
+    dead_letter.retry_count = retry_count
+    dead_letter.error_message = str(result.get("message", ""))[:1000]
+    max_retries = dead_letter.max_retries or DEFAULT_MAX_RETRIES
+    if retry_count >= max_retries:
+        dead_letter.status = "failed"
+        dead_letter.next_retry_at = None
+        return {
+            "id": str(dead_letter.id),
+            "status": "failed",
+            "result": "error",
+            "message": f"重放失败，已达最大重试次数 ({max_retries})",
+        }
+
+    dead_letter.status = "pending"
+    dead_letter.next_retry_at = utc_now() + timedelta(minutes=_retry_backoff_minutes(retry_count))
+    return {
+        "id": str(dead_letter.id),
+        "status": "pending",
+        "result": "error",
+        "message": (
+            f"重放失败，已安排第 {retry_count}/{max_retries} 次重试"
+            f"（{dead_letter.next_retry_at.strftime('%H:%M')} UTC 后）"
+        ),
+    }

@@ -76,12 +76,24 @@ class VoiceUploadData(BaseModel):
     voice_log_id: str
     asr_text: str
     parsed: dict | None = None
+    # 多意图契约（小程序端按 events 渲染多卡片）：event=events[0] 兼容别名，
+    # events 为全部识别结果，>1 笔时 warning 提示「检测到N笔，仅返回第1笔」。
+    # 每笔事件独立成单：events[i] 内嵌各自的 voice_log_id（逐卡 confirm 用），
+    # 顶层 voice_log_id 恒等于 events[0] 的（旧客户端兼容）。
+    event: dict | None = None
+    events: list[dict] = Field(default_factory=list)
+    warning: str | None = None
 
 
 class VoiceParseTextData(BaseModel):
     voice_log_id: str
     asr_text: str
     parsed: dict | None = None
+    # 同 VoiceUploadData：parsed/event 均为 events[0]，字段名与小程序端契约一致；
+    # events[i] 内嵌各自的 voice_log_id，多笔各自 confirm 互不被幂等误伤。
+    event: dict | None = None
+    events: list[dict] = Field(default_factory=list)
+    warning: str | None = None
 
 
 class VoiceTodayCountData(BaseModel):

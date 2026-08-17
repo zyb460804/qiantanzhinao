@@ -9,7 +9,7 @@ Page({
     totalCategories: 0, inStockCount: 0, healthyCount: 0, attentionCount: 0, emptyCount: 0,
     insightTitle: '库存记录平稳', insightText: '当前没有需要优先处理的库存问题。', insightTone: 'good',
     sortMode: 'low', filterMode: 'all', searchKeyword: '', filteredCount: 0,
-    updatedAt: '--:--', loading: true, isEmpty: false,
+    updatedAt: '--:--', loading: true, isEmpty: false, loadError: false,
   },
 
   onShow: function () {
@@ -106,12 +106,12 @@ Page({
         inventoryItems: decorated, totalCategories: decorated.length, inStockCount: inStock,
         healthyCount: healthy, attentionCount: attention, emptyCount: empty,
         insightTitle: insight.title, insightText: insight.text, insightTone: insight.tone,
-        updatedAt: updatedAt, loading: false, isEmpty: decorated.length === 0,
+        updatedAt: updatedAt, loading: false, isEmpty: decorated.length === 0, loadError: false,
       }, function () { self._applyView(); });
       if (onSuccess) onSuccess();
     }).catch(function (err) {
       self._loading = false;
-      self.setData({ loading: false });
+      self.setData({ loading: false, loadError: true, inventoryItems: [], displayItems: [] });
       app.logError('inventory/load', err, { silent: true });
       if (onError) onError();
       else wx.showToast({ title: '库存加载失败', icon: 'none' });

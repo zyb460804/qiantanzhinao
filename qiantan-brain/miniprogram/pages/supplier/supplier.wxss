@@ -48,6 +48,14 @@
   white-space: nowrap;
 }
 .search-add-btn:active { opacity: .85; }
+.search-compare-btn {
+  display: flex; align-items: center; justify-content: center;
+  height: 80rpx; padding: 0 26rpx;
+  background: var(--paper); border: 1.5rpx solid var(--green-200);
+  color: var(--green-800); border-radius: var(--r-pill);
+  font-size: 26rpx; font-weight: 700; white-space: nowrap;
+}
+.search-compare-btn:active { opacity: .85; }
 
 /* ── 骨架屏 ── */
 .supplier-skeleton { margin-top: 22rpx; }
@@ -231,3 +239,81 @@
   padding: 28rpx; text-align: center; font-size: 24rpx; color: var(--muted);
 }
 .load-more:active { opacity: .6; }
+
+/* ── 供应商比价弹窗 ── */
+.compare-sheet { max-height: 92%; }
+.compare-sku-list { max-height: 420rpx; }
+.compare-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16rpx; margin-bottom: 16rpx;
+}
+.compare-sku-info { flex: 1; min-width: 0; }
+.compare-sku-name {
+  display: block; font-size: 28rpx; font-weight: 750; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.compare-sku-unit { display: block; margin-top: 4rpx; font-size: 20rpx; color: var(--muted); }
+
+.compare-loading { text-align: center; padding: 30rpx 0; color: var(--muted); font-size: 22rpx; }
+.compare-error { padding: 20rpx 0; text-align: center; color: var(--tomato); font-size: 22rpx; }
+.compare-inline-error { padding: 12rpx 16rpx; margin-bottom: 12rpx; background: var(--tomato-soft); border-radius: var(--r-sm); }
+
+.compare-sorts { display: flex; gap: 12rpx; margin-bottom: 16rpx; }
+.sort-chip {
+  font-size: 20rpx; padding: 6rpx 20rpx; border-radius: 999rpx;
+  background: var(--paper-2); color: var(--muted);
+}
+.sort-chip.on { background: var(--green-600); color: #fff; font-weight: 700; }
+
+.recommend-btn { width: 100%; margin-bottom: 16rpx; }
+
+.recommend-card {
+  background: linear-gradient(135deg, var(--corn-soft), var(--green-50));
+  border-radius: var(--r-md); padding: 20rpx; margin-bottom: 16rpx;
+  border: 1rpx solid var(--corn-ink);
+}
+.rec-badge {
+  display: inline-block; background: var(--corn-ink); color: #fff;
+  font-size: 18rpx; padding: 2rpx 12rpx; border-radius: 999rpx; margin-bottom: 8rpx;
+}
+.rec-supplier { display: block; font-size: 26rpx; font-weight: 750; margin-bottom: 4rpx; color: var(--ink); }
+.rec-price { display: block; font-size: 22rpx; color: var(--green-800); font-weight: 700; margin-bottom: 4rpx; }
+.rec-score { display: block; font-size: 20rpx; color: var(--corn-ink); font-weight: 700; margin-bottom: 4rpx; }
+.rec-reason { display: block; font-size: 20rpx; color: var(--muted); margin-bottom: 8rpx; line-height: 1.5; }
+.rec-factors { display: flex; flex-wrap: wrap; gap: 8rpx; }
+.rec-factor {
+  font-size: 18rpx; background: var(--paper-1); padding: 2rpx 10rpx;
+  border-radius: 999rpx; color: var(--green-700);
+}
+
+.compare-scroll { max-height: 640rpx; }
+.compare-list { display: flex; flex-direction: column; gap: 8rpx; }
+.compare-row {
+  display: flex; align-items: flex-start; gap: 12rpx;
+  padding: 14rpx; background: var(--paper-2); border-radius: var(--r-sm);
+}
+.compare-row.best { background: var(--green-50); border: 1rpx solid var(--green-200); }
+.cmp-rank {
+  flex: 0 0 36rpx; width: 36rpx; height: 36rpx;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--paper-1);
+}
+.cmp-best { color: var(--corn-ink); font-size: 24rpx; }
+.cmp-num { font-size: 20rpx; color: var(--muted); font-weight: 700; }
+.cmp-info { flex: 1; min-width: 0; }
+.cmp-name { display: block; font-size: 22rpx; font-weight: 700; margin-bottom: 2rpx; color: var(--ink); }
+.cmp-meta { display: flex; gap: 16rpx; margin-bottom: 4rpx; }
+.cmp-price { font-size: 22rpx; color: var(--green-800); font-weight: 700; }
+.cmp-value { font-size: 18rpx; color: var(--corn-ink); }
+.cmp-metrics { display: flex; flex-wrap: wrap; gap: 6rpx; }
+.cmp-metric {
+  font-size: 17rpx; padding: 2rpx 8rpx; border-radius: 999rpx;
+  background: var(--paper-1); color: var(--muted);
+}
+.cmp-metric.good { color: var(--green-700); background: var(--green-50); }
+.cmp-metric.ok { color: var(--corn-ink); }
+.cmp-metric.warn { color: var(--tomato); }
+.cmp-best-tag {
+  flex: 0 0 auto; font-size: 17rpx; background: var(--corn-ink);
+  color: #fff; padding: 2rpx 10rpx; border-radius: 999rpx;
+}

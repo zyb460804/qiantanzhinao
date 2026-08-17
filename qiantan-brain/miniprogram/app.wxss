@@ -525,7 +525,7 @@ button::after { border: 0; }
 .dialog-actions .btn-primary, .dialog-actions .btn-secondary, .dialog-actions .btn-tomato { flex: 1; }
 
 /* =============================================================
- * 分段选项卡(统一 tenant 等页的 Tab 切换)
+ * 分段选项卡(统一各详情页的 Tab 切换)
  * ============================================================= */
 .seg-tabs {
   display: flex; margin: 0 var(--s-3); padding-bottom: 4rpx;

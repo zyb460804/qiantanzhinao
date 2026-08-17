@@ -12,7 +12,7 @@ function localMonth(d) { return localDate(d).slice(0, 7); }
 Page({
   data: {
     skin: '', loading: false, submitting: false, invoiceLoading: false, tab: 'expenses',
-    expensesLoaded: false, invoicesLoaded: false, reportLoaded: false,
+    expensesLoaded: false, invoicesLoaded: false, reportLoaded: false, loadError: false,
     // 费用
     expenses: [], showExpForm: false,
     expForm: { category: 'rent', amount: '', description: '', expense_date: '', payment_method: 'cash' },
@@ -38,9 +38,54 @@ Page({
     this.loadTab();
   },
 
-  // 数据导出入口：跳到经营管理页执行（避免重复实现）
-  goExport: function () {
-    wx.navigateTo({ url: '/pages/ops/ops?tab=export' });
+  // ── 数据导出：财务页直接导出费用/发票/对账，不再跳经营管理页 ──
+  _shareCsv: function (type, csv, filename, rowCount) {
+    if (!csv) { wx.showToast({ title: '暂无数据可导出', icon: 'none' }); return; }
+    var fs = wx.getFileSystemManager();
+    var filePath = wx.env.USER_DATA_PATH + '/export_' + type + '_' + Date.now() + '.csv';
+    fs.writeFile({
+      filePath: filePath, data: csv, encoding: 'utf8',
+      success: function () {
+        wx.shareFileMessage({
+          filePath: filePath, fileName: filename || (type + '.csv'),
+          success: function () { wx.showToast({ title: '已导出 ' + (rowCount != null ? rowCount : '') + ' 行', icon: 'success' }); },
+          fail: function (err) { if (!(err && err.errMsg && err.errMsg.indexOf('cancel') >= 0)) wx.showToast({ title: '文件分享失败', icon: 'none' }); },
+        });
+      },
+      fail: function () { wx.showToast({ title: '文件写入失败', icon: 'none' }); },
+    });
+  },
+
+  _exportCSV: function (type, rows) {
+    if (!rows || rows.length === 0) { wx.showToast({ title: '暂无数据可导出', icon: 'none' }); return; }
+    var headers = Object.keys(rows[0]);
+    var csv = '\uFEFF' + headers.join(',') + '\n';
+    rows.forEach(function (row) {
+      csv += headers.map(function (h) {
+        var v = row[h];
+        return v != null ? '"' + String(v).replace(/"/g, '""') + '"' : '';
+      }).join(',') + '\n';
+    });
+    this._shareCsv(type, csv, type + '.csv', rows.length);
+  },
+
+  exportFinance: function (e) {
+    var type = e.currentTarget.dataset.type;
+    var rows = [];
+    if (type === 'expenses') {
+      rows = (this.data.expenses || []).map(function (x) {
+        return { 日期: x.expense_date || '', 类别: x.category || '', 金额: x.amount != null ? x.amount : '', 描述: x.description || '' };
+      });
+    } else if (type === 'invoices') {
+      rows = (this.data.invoices || []).map(function (x) {
+        return { 发票号码: x.invoice_number || '', 开票方: x.supplier_name || '', 金额: x.amount != null ? x.amount : '', 日期: x.invoice_date || '' };
+      });
+    } else if (type === 'recon') {
+      rows = (this.data.reconTasks || []).map(function (x) {
+        return { 渠道: x.channel === 'wechat' ? '微信' : '支付宝', 日期: x.date || '', 系统金额: x.system_total != null ? x.system_total : '', 渠道金额: x.channel_total != null ? x.channel_total : '', 差额: x.diff_amount != null ? x.diff_amount : '', 匹配: x.matched_count != null ? x.matched_count : '', 状态: x.statusText || '' };
+      });
+    }
+    this._exportCSV(type, rows);
   },
 
   // 按当前 Tab 加载数据(原 loadAll,改名避免误解为"加载全部")
@@ -70,7 +115,7 @@ Page({
       end = today;
     }
 
-    this.setData({ loading: true, expensesLoaded: false });
+    this.setData({ loading: true, expensesLoaded: false, loadError: false });
     app.request({
       url: '/expenses',
       data: { start: localDate(start), end: localDate(end) },
@@ -78,9 +123,9 @@ Page({
       var list = data || [];
       var cat = self.data.expFilterCategory;
       if (cat !== 'all') list = list.filter(function (e) { return e.category === cat; });
-      self.setData({ expenses: list, loading: false, expensesLoaded: true });
+      self.setData({ expenses: list, loading: false, expensesLoaded: true, loadError: false });
     }).catch(function () {
-      self.setData({ expenses: [], loading: false, expensesLoaded: false });
+      self.setData({ expenses: [], loading: false, expensesLoaded: false, loadError: true });
       wx.showToast({ title: '费用加载失败', icon: 'none' });
     });
   },
@@ -141,17 +186,17 @@ Page({
   // ── 月度报表 ──
   loadReport: function () {
     var self = this;
-    this.setData({ reportLoading: true, reportLoaded: false });
+    this.setData({ reportLoading: true, reportLoaded: false, loadError: false });
     app.request({ url: '/expenses/monthly-report', data: { month: this.data.month } }).then(function (data) {
       // 确保 expense_breakdown 是数组(WXML 直接访问 .length 需要)
       var report = data || {};
       if (!Array.isArray(report.expense_breakdown)) report.expense_breakdown = [];
-      self.setData({ monthlyReport: report, reportLoading: false, reportLoaded: true }, function () {
+      self.setData({ monthlyReport: report, reportLoading: false, reportLoaded: true, loadError: false }, function () {
         // setData 回调中绘制图表,确保 Canvas DOM 已就绪
         self.drawReportChart(report);
       });
     }).catch(function () {
-      self.setData({ monthlyReport: null, reportLoading: false, reportLoaded: false });
+      self.setData({ monthlyReport: null, reportLoading: false, reportLoaded: false, loadError: true });
       wx.showToast({ title: '报表加载失败', icon: 'none' });
     });
   },
@@ -186,11 +231,11 @@ Page({
   // ── 发票 ──
   loadInvoices: function () {
     var self = this;
-    this.setData({ invoiceLoading: true, invoicesLoaded: false });
+    this.setData({ invoiceLoading: true, invoicesLoaded: false, loadError: false });
     app.request({ url: '/expenses/invoices' }).then(function (data) {
-      self.setData({ invoices: data || [], invoiceLoading: false, invoicesLoaded: true });
+      self.setData({ invoices: data || [], invoiceLoading: false, invoicesLoaded: true, loadError: false });
     }).catch(function () {
-      self.setData({ invoices: [], invoiceLoading: false, invoicesLoaded: false });
+      self.setData({ invoices: [], invoiceLoading: false, invoicesLoaded: false, loadError: true });
       wx.showToast({ title: '发票加载失败', icon: 'none' });
     });
   },
@@ -228,7 +273,7 @@ Page({
   // ── 支付渠道对账 ──
   loadReconciliation: function () {
     var self = this;
-    this.setData({ reconLoading: true });
+    this.setData({ reconLoading: true, loadError: false });
     app.request({ url: '/reconciliation/tasks', data: { limit: 30 } }).then(function (data) {
       var tasks = (data || []).map(function (item) {
         var statusText = item.status === 'balanced' ? '已平账'
@@ -236,9 +281,9 @@ Page({
             : item.status === 'exception' ? '有差异' : '待对账';
         return Object.assign({}, item, { statusText: statusText });
       });
-      self.setData({ reconTasks: tasks, reconLoading: false });
+      self.setData({ reconTasks: tasks, reconLoading: false, loadError: false });
     }).catch(function () {
-      self.setData({ reconTasks: [], reconLoading: false });
+      self.setData({ reconTasks: [], reconLoading: false, loadError: true });
       wx.showToast({ title: '对账任务加载失败', icon: 'none' });
     });
   },

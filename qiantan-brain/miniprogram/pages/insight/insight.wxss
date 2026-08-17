@@ -1,0 +1,139 @@
+/* 智能分析页 */
+.insight-page { padding-top: 22rpx; }
+.insight-hero { background: var(--green-950); }
+
+/* ── 骨架屏 ── */
+.skeleton-stack { display: flex; flex-direction: column; gap: 30rpx; margin-top: 24rpx; }
+.sk-section { display: flex; flex-direction: column; gap: 14rpx; }
+.sk-line { display: block; height: 26rpx; background: var(--paper-3); border-radius: var(--r-sm); }
+.sk-line.w40 { width: 40%; }
+.sk-card { height: 190rpx; background: var(--paper-3); border-radius: var(--r-lg); }
+.sk-card.short { height: 130rpx; }
+
+/* ── 区块标题 ── */
+.section-copy { display: flex; flex-direction: column; }
+.section-copy .section-title { line-height: 1.3; }
+.section-copy .section-caption { margin-top: 4rpx; }
+
+/* ── 列表卡片 ── */
+.insight-list { display: flex; flex-direction: column; gap: 16rpx; }
+.insight-card {
+  padding: 24rpx;
+  background: var(--paper);
+  border: 1rpx solid var(--ring);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; }
+.card-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 28rpx;
+  font-weight: 750;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-value { flex: 0 0 auto; color: var(--muted); font-size: 22rpx; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 14rpx; }
+.mini-tag { padding: 6rpx 14rpx; border-radius: var(--r-sm); font-size: 20rpx; font-weight: 650; }
+.mini-tag.tomato { color: var(--tomato-ink); background: var(--tomato-soft); }
+.mini-tag.green { color: var(--green-700); background: var(--green-50); }
+.card-desc { display: block; margin-top: 14rpx; color: var(--ink-2); font-size: 23rpx; line-height: 1.55; }
+
+/* ── 定价卡片 ── */
+.price-line {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 18rpx;
+  padding: 16rpx;
+  background: var(--paper-2);
+  border-radius: var(--r-md);
+}
+.price-old { color: var(--muted); font-size: 24rpx; text-decoration: line-through; }
+.price-arrow { color: var(--muted); font-size: 22rpx; }
+.price-new { color: var(--tomato); font-family: var(--font-num); font-size: 34rpx; font-weight: 800; }
+.discount-badge {
+  margin-left: auto;
+  padding: 6rpx 12rpx;
+  color: #fff;
+  background: var(--tomato);
+  border-radius: var(--r-sm);
+  font-size: 20rpx;
+  font-weight: 750;
+}
+.meta-row { display: flex; flex-wrap: wrap; gap: 8rpx 18rpx; margin-top: 12rpx; color: var(--muted); font-size: 20rpx; }
+.foot-note {
+  display: flex;
+  justify-content: space-between;
+  gap: 14rpx;
+  margin-top: 12rpx;
+  padding-top: 12rpx;
+  border-top: 1rpx solid var(--line-soft);
+  color: var(--muted);
+  font-size: 20rpx;
+}
+
+/* ── 进货建议卡片 ── */
+.qty-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10rpx; margin-top: 16rpx; }
+.qty-cell { padding: 12rpx 8rpx; text-align: center; background: var(--paper-2); border-radius: var(--r-md); }
+.qty-label { display: block; color: var(--muted); font-size: 19rpx; }
+.qty-num {
+  display: block;
+  margin-top: 6rpx;
+  color: var(--ink);
+  font-size: 26rpx;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.qty-num.strong { color: var(--green-700); font-size: 30rpx; font-weight: 800; }
+
+/* ── 失败 / 空状态 ── */
+.section-fail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28rpx 20rpx;
+  color: var(--muted);
+  background: var(--paper);
+  border: 1rpx dashed var(--line);
+  border-radius: var(--r-lg);
+  font-size: 22rpx;
+}
+.empty-state.mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14rpx;
+  padding: 44rpx 24rpx;
+  text-align: center;
+  color: var(--muted);
+  background: var(--paper);
+  border: 2rpx dashed var(--line);
+  border-radius: var(--r-lg);
+  font-size: 24rpx;
+}
+.insight-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
+  padding: 80rpx 32rpx;
+  text-align: center;
+}
+.error-desc { display: block; color: var(--muted); font-size: 22rpx; }
+.retry-btn {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  min-height: 72rpx;
+  padding: 0 30rpx;
+  margin-top: 10rpx;
+  color: var(--green-800);
+  background: var(--green-50);
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+}

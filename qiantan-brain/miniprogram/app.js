@@ -39,6 +39,27 @@ function formatRuntimeError(value) {
   }
 }
 
+/**
+ * 422 校验错误 → 摊主可读的中文文案（纯函数，例试试可直接 require 冒烟）。
+ * FastHTTPException 的字符串 detail（多为中文）直接透出；
+ * pydantic 的 detail 是 [{type, loc, msg}] 数组，取首条：
+ *   - missing / "field required"（v1）→「缺少必填项」
+ *   - 其余取 msg；识别不了退化为通用文案。
+ */
+function mapValidationError(detail) {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    var first = detail[0] || {};
+    var type = String(first.type || '');
+    var msg = String(first.msg || '');
+    if (type.indexOf('missing') >= 0 || msg.toLowerCase().indexOf('required') >= 0) {
+      return '缺少必填项';
+    }
+    if (first.msg) return String(first.msg);
+  }
+  return '输入有误，请检查后再试';
+}
+
 App({
   globalData: {
     apiBase: '',
@@ -346,9 +367,17 @@ App({
               return;
             }
             var type = res.statusCode >= 500 ? 'server_error' : res.statusCode === 404 ? 'not_found' : 'business_error';
-            var msg = body && (body.message || body.detail);
-            if (type === 'server_error') self.showToast('服务器异常，请稍后重试');
-            else if (msg) self.showToast(String(msg));
+            if (type === 'server_error') {
+              // 500：原始 detail 只进控制台供调试，摊主只看友好文案。
+              console.error('[服务端错误]', method, options.url, res.statusCode, (body && body.detail) || body);
+              self.showToast('服务开小差了，请稍后再试');
+            } else if (res.statusCode === 422) {
+              // 422：pydantic 校验数组映射为中文，不再裸吐英文数组。
+              self.showToast(mapValidationError(body && body.detail));
+            } else {
+              var msg = body && (body.message || body.detail);
+              if (msg) self.showToast(String(msg));
+            }
             reject({ type: type, statusCode: res.statusCode, body: body });
           }
         },
@@ -531,3 +560,8 @@ App({
     }
   },
 });
+
+// 例试试/调试用：暴露纯文案映射函数（微信运行时不会 import app.js，无副作用）。
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { mapValidationError: mapValidationError };
+}

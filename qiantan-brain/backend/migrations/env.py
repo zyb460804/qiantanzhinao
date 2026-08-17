@@ -18,7 +18,11 @@ from app.models import *  # noqa: F401,F403
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers 必须显式为 False：默认 True 会把已创建的
+    # app/uvicorn logger 全部禁用——启动期执行迁移（run_migrations_on_startup）
+    # 时fileConfig重放日志配置，曾导致真实运行时 500 无任何 traceback/访问日志
+    # （测试进程不走启动迁移路径，因此测试全绿掩盖了该问题）。
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

@@ -181,6 +181,44 @@ def _resolve_unit_price(
     raise HTTPException(status_code=400, detail=f"{product_name}尚未设置售价")
 
 
+async def _resolve_stock_quantity(
+    db: AsyncSession,
+    sku: ProductSKU | None,
+    sku_id: uuid.UUID | None,
+    product_name: str,
+    quantity: Decimal,
+    from_unit: str,
+) -> tuple[Decimal, str]:
+    """把下单数量换算到 SKU 基准单位（库存/批次以基准单位记账）。
+
+    - 单位一致（或无 SKU 的历史商品）：原数量直接返回，保持旧行为。
+    - 配置了单位换算：返回换算后数量与基准单位，按换算后数量扣库存。
+    - 无换算且单位不一致：409 引导商户先在商品目录设置换算，
+      绝不按错误口径扣库存。
+    """
+    if sku is None or sku_id is None or from_unit == sku.canonical_unit:
+        return quantity, from_unit
+    try:
+        # A1 契约：convert_to_base_unit(session, sku_id, quantity, from_unit)
+        # → (换算数量, 基准单位)；无可用换算规则时返回 None。
+        from app.services.unit_conversion import convert_to_base_unit
+    except ImportError:
+        # 换算服务尚未部署：按「无换算」处理，走单位不匹配的拦截分支。
+        conversion = None
+    else:
+        conversion = await convert_to_base_unit(db, sku_id, quantity, from_unit)
+    if conversion is not None:
+        converted, base_unit = conversion
+        return Decimal(str(converted)).quantize(Decimal("0.01")), base_unit or sku.canonical_unit
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"{product_name}下单单位({from_unit})与库存单位({sku.canonical_unit})不一致，"
+            "需先在商品目录设置单位换算"
+        ),
+    )
+
+
 async def _create_order_items_and_consume(
     db: AsyncSession,
     order: SaleOrder,
@@ -210,23 +248,36 @@ async def _create_order_items_and_consume(
         unit_price = _resolve_unit_price(request_item.unit_price, sku, product.name)
         line_total = (quantity * unit_price).quantize(Decimal("0.01"))
 
+        # 单位换算（A1）：库存/批次以 SKU 基准单位记账，先换算再校验、扣减
+        stock_qty, stock_unit = await _resolve_stock_quantity(
+            db, sku, sku_id, product.name, quantity, request_item.unit
+        )
+
         consumption = await consume_batches_fifo_costed(
             db,
             merchant_id,
             request_item.product_id,
-            quantity,
+            stock_qty,
             sku_id=sku_id,
         )
         consumed = consumption["quantity"]
-        if consumed < quantity:
+        if consumed < stock_qty:
             raise HTTPException(
                 status_code=409,
-                detail=f"{product.name}库存不足，需要{quantity}{request_item.unit}，可售{consumed}{request_item.unit}",
+                detail=f"{product.name}库存不足，需要{stock_qty}{stock_unit}，可售{consumed}{stock_unit}",
             )
 
-        unit_cost = (
+        # 成本口径：total_cost 是该行消耗批次的成本。订单行按下单单位折算、
+        # 库存流水按基准单位折算各自的单位成本（未换算时两者一致）。
+        cost_complete = consumed > 0 and consumption["missing_cost_quantity"] == 0
+        line_unit_cost = (
+            (consumption["total_cost"] / quantity).quantize(Decimal("0.01"))
+            if cost_complete and quantity > 0
+            else None
+        )
+        ledger_unit_cost = (
             (consumption["total_cost"] / consumed).quantize(Decimal("0.01"))
-            if consumed > 0 and consumption["missing_cost_quantity"] == 0
+            if cost_complete
             else None
         )
         order_item = SaleOrderItem(
@@ -238,7 +289,7 @@ async def _create_order_items_and_consume(
             quantity=quantity,
             unit=request_item.unit,
             unit_price=unit_price,
-            unit_cost=unit_cost,
+            unit_cost=line_unit_cost,
             total_amount=line_total,
         )
         db.add(order_item)
@@ -247,9 +298,9 @@ async def _create_order_items_and_consume(
                 merchant_id=merchant_id,
                 product_id=request_item.product_id,
                 sku_id=sku_id,
-                quantity=-quantity,
-                unit=request_item.unit,
-                unit_cost=unit_cost,
+                quantity=-stock_qty,
+                unit=stock_unit,
+                unit_cost=ledger_unit_cost,
                 unit_price=unit_price,
                 total_amount=line_total,
                 event_type="sale",

@@ -8,7 +8,8 @@
   - 配额月度重置
   - 租户试用到期自动停服
   - 过期 Token 清理
-  - 审计日志归档（TODO）
+  - 审计日志归档
+  - 离线同步死信队列定时重放
 
 架构:
   - AsyncIOScheduler 在独立线程运行
@@ -30,13 +31,17 @@ from sqlalchemy import func, select, update
 
 from app.config import settings
 from app.core.invoicing import get_overlapping_invoice, insert_invoice
+from app.core.timezone import utc_now
 from app.database import async_session
 from app.models.auth import AuthRevokedToken
+from app.models.dead_letter import DeadLetterEvent
 from app.models.saas import (
     Plan,
     Subscription,
     Tenant,
 )
+from app.services.audit_archiver import archive_old_audit_logs
+from app.services.offline_sync import replay_dead_letter
 
 
 logging.basicConfig(
@@ -251,6 +256,60 @@ async def clean_expired_tokens():
             logger.info("cleaned %d expired revoked tokens", count)
 
 
+async def archive_audit_logs():
+    """每天归档超过保留期的审计日志（保留天数由 settings.audit_archive_days 控制）。"""
+    async with async_session() as db:
+        result = await archive_old_audit_logs(db)
+        logger.info("audit log archive result: %s", result)
+
+
+async def process_dead_letter_retries(
+    session_factory=async_session,
+    batch_size: int = 50,
+) -> dict:
+    """扫描到期的 pending 死信并重放（每分钟）。
+
+    成功 → resolved；失败 → 计数+1、指数退避 next_retry_at；超上限 → failed
+    （状态迁移逻辑统一在 app.services.offline_sync.replay_dead_letter）。
+    每条事件独立提交，单条崩溃不影响本批其余事件。session_factory 可注入，
+    供测试用内存库验证，不碰生产 DB。
+    """
+    stats = {"scanned": 0, "resolved": 0, "pending": 0, "failed": 0}
+    async with session_factory() as db:
+        result = await db.execute(
+            select(DeadLetterEvent)
+            .where(
+                DeadLetterEvent.status == "pending",
+                DeadLetterEvent.next_retry_at.isnot(None),
+                DeadLetterEvent.next_retry_at <= utc_now(),
+            )
+            .order_by(DeadLetterEvent.next_retry_at)
+            .limit(batch_size)
+        )
+        events = result.scalars().all()
+        stats["scanned"] = len(events)
+
+        for event in events:
+            try:
+                outcome = await replay_dead_letter(db, event)
+                await db.commit()
+            except Exception:  # noqa: BLE001 — 单条异常不拖垮整批
+                await db.rollback()
+                logger.exception("dead-letter %s replay crashed", event.id)
+                continue
+            stats[outcome["status"]] = stats.get(outcome["status"], 0) + 1
+            logger.info(
+                "dead-letter %s replay -> %s (%s)",
+                event.id,
+                outcome["status"],
+                outcome.get("message", ""),
+            )
+
+    if stats["scanned"]:
+        logger.info("dead-letter retry pass: %s", stats)
+    return stats
+
+
 # ── 辅助 ──
 # 发号已迁移至 app/core/invoicing.py（数据库侧 MAX+1，进程重启/双副本安全），
 # 原 _next_invoice_no 的 ts % 10000 在同秒多票/跨进程下必然撞号，已移除。
@@ -305,6 +364,24 @@ def start_scheduler():
         CronTrigger(hour=5, minute=0),
         id="clean_expired_tokens",
         name="过期 Token 清理",
+        replace_existing=True,
+    )
+
+    # 每天 06:00：审计日志归档
+    scheduler.add_job(
+        archive_audit_logs,
+        CronTrigger(hour=6, minute=0),
+        id="archive_audit_logs",
+        name="审计日志归档",
+        replace_existing=True,
+    )
+
+    # 每分钟：扫描到期的死信事件并重放
+    scheduler.add_job(
+        process_dead_letter_retries,
+        IntervalTrigger(minutes=1),
+        id="process_dead_letter_retries",
+        name="死信队列重放",
         replace_existing=True,
     )
 

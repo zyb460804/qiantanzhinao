@@ -14,7 +14,7 @@
 
 | 类别 | 数量 | 代表问题 |
 |------|------|----------|
-| 严重 BUG（功能不可用） | 8 | trace 页 WXML 调用方法、offline-media 鉴权失效、recorder 监听器泄漏 |
+| 严重 BUG（功能不可用） | 8 | trace 页 WXML 调用方法、offline-media 鉴权失效（已于 2026-08-16 审计删除）、recorder 监听器泄漏 |
 | 占位/空壳功能 | 7 | finance 图表未实现、profile 4 个"即将上线"Toast、ops 导出死按钮 |
 | 代码质量问题 | 3 | inventory 重复搜索框、report Canvas 时序竞态、sandbox 重复请求 |
 
@@ -65,7 +65,7 @@ if (this._typingTimerId && typeof this._typingTimerId.cancel === 'function') {
 ### 陷阱 3：字段名一致性（token vs accessToken）
 
 ```javascript
-// ❌ 错误：offline-media.js 读 app.globalData.token
+// ❌ 错误：offline-media.js 读 app.globalData.token（offline-media.js 已于 2026-08-16 审计删除，示例留档）
 var token = app.globalData.token || ''; // 永远是空字符串！
 
 // ✅ 正确：app.js 中定义的是 accessToken
@@ -398,7 +398,7 @@ recorder.stopRecording();
 | sandbox | 重复请求 | ✅ 优化 | 缓存 product_id；nextTick 替代 setTimeout |
 | vision | 成本未入库 | ✅ 完整 | 拼接成本文本；传 unit_cost；retakePhoto 副作用 |
 | inventory | 重复搜索框 | ✅ 干净 | 删除重复搜索框；移除未用组件 |
-| offline-media | 上传 404 | ✅ 可用 | 修正字段名和 URL 拼接 |
+| offline-media | 上传 404 | ✅ 可用 | 修正字段名和 URL 拼接（该文件已于 2026-08-16 审计删除） |
 | recorder | 监听器泄漏 | ✅ 稳定 | 顶层注册一次 |
 
 ---

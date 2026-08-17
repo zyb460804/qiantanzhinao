@@ -1,7 +1,0 @@
-{
-  "usingComponents": {
-    "mascot": "/components/mascot/mascot"
-  },
-  "enablePullDownRefresh": true,
-  "navigationBarTitleText": "租户中心"
-}

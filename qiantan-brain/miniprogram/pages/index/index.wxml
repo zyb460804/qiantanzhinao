@@ -11,6 +11,16 @@
     <view class="stale-banner" wx:if="{{staleData}}"><text>数据可能不是最新，下拉刷新 →</text></view>
     <!-- 错误状态: mascot 组件仅支持 idle/think/cheer, 用 think 表达"加载遇到问题" -->
     <view class="empty-state surface" wx:if="{{loadError}}"><mascot size="md" mood="think"/><text>数据加载失败，请下拉刷新重试</text></view>
+
+    <!-- 断网/加载失败仍保留离线可用的高频动作入口 -->
+    <block wx:if="{{loadError}}">
+      <view class="section-head"><text class="section-title">常用工作</text><text class="section-caption">离线可用 · 动作类入口</text></view>
+      <view class="action-grid work-grid">
+        <button class="action-card action-primary" bindtap="navigateToVoice"><icon name="mic" size="lg" color="#fff"/><text class="action-title">记一笔</text><text class="action-desc">说句话记进货/销售/损耗</text></button>
+        <button class="action-card" bindtap="navigateToWaste"><icon name="leaf" size="lg" color="var(--tomato-ink)"/><text class="action-title">报损</text><text class="action-desc">腐烂碰伤，随手记</text></button>
+      </view>
+    </block>
+
     <block wx:if="{{!loadError}}">
     <view class="page-hero home-hero">
       <view class="hero-topline">
@@ -44,16 +54,10 @@
       </view>
     </view>
 
-    <view class="section-head"><text class="section-title">常用工作</text><text class="section-caption">动作类入口 · 按一天的经营顺序</text></view>
+    <view class="section-head"><text class="section-title">常用工作</text><text class="section-caption">两个高频动作 · 其余在「我的」页</text></view>
     <view class="action-grid work-grid">
-      <!-- icon 组件仅支持 sm(32rpx)/md(44rpx)/lg(60rpx) 三档类名,
-           原 size="46"/"40"/"30"/"28" 生成的 ui-icon--46 等类不存在,
-           图标全部回落到基础 44rpx, 差异化尺寸失效。改为就近映射:
-           46→lg, 40→md, 30→sm, 28→sm -->
-      <button class="action-card action-primary" bindtap="navigateToVoice"><icon name="mic" size="lg" color="#fff"/><text class="action-title">记经营流水</text><text class="action-desc">进货、销售、损耗</text></button>
-      <button class="action-card" bindtap="navigateToPos"><icon name="cart" size="lg" color="var(--green-800)"/><text class="action-title">收银开单</text><text class="action-desc">商品、支付与日结</text></button>
-      <button class="action-card" bindtap="navigateToPurchase"><icon name="box" size="lg" color="var(--corn)"/><text class="action-title">采购清单</text><text class="action-desc">建议、编辑、确认入库</text></button>
-      <button class="action-card" bindtap="navigateToStocktake"><icon name="scan" size="lg" color="var(--blue)"/><text class="action-title">库存盘点</text><text class="action-desc">核对账面与实际数量</text></button>
+      <button class="action-card action-primary" bindtap="navigateToVoice"><icon name="mic" size="lg" color="#fff"/><text class="action-title">记一笔</text><text class="action-desc">说句话记进货/销售/损耗</text></button>
+      <button class="action-card" bindtap="navigateToWaste"><icon name="leaf" size="lg" color="var(--tomato-ink)"/><text class="action-title">报损</text><text class="action-desc">腐烂碰伤，随手记</text></button>
     </view>
 
     <!-- 今日建议单列：高频动作，从“分析工具”上移避免被淹没 -->
@@ -75,14 +79,6 @@
       <view class="summary-stat"><text class="summary-num" style="color:{{riskColor}}">{{riskScore}}</text><text class="summary-label">风险 {{riskLevel}}</text></view>
     </view>
     <text class="data-note">不同商品单位不可直接相加，因此首页按品类和风险展示，不再汇总成“总斤数”。</text>
-
-    <view class="section-head"><text class="section-title">分析与工具</text><text class="section-caption">查看类入口 · 低频功能</text></view>
-    <view class="tool-row">
-      <view class="tool-chip" bindtap="navigateToDashboard"><icon name="mirror" size="sm" color="var(--green-800)"/><text>经营镜像</text></view>
-      <view class="tool-chip" bindtap="navigateToReport"><icon name="chart" size="sm" color="var(--blue)"/><text>经营报告</text></view>
-      <view class="tool-chip" bindtap="navigateToVision"><icon name="camera" size="sm" color="var(--green-800)"/><text>拍照识货</text></view>
-      <view class="tool-chip" bindtap="navigateToSandbox"><icon name="spark" size="sm" color="var(--corn)"/><text>决策沙盘</text></view>
-    </view>
 
     <view class="section-head"><text class="section-title">最近记录</text><text class="section-link" bindtap="navigateToVoice">再记一笔 ›</text></view>
     <view class="record-list" wx:if="{{recentRecords.length > 0}}">

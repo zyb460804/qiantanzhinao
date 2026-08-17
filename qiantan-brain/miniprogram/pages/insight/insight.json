@@ -1,0 +1,10 @@
+{
+  "navigationBarTitleText": "智能分析",
+  "usingComponents": {
+    "icon": "/components/icon/icon",
+    "mascot": "/components/mascot/mascot"
+  },
+  "navigationBarBackgroundColor": "#FFFFFF",
+  "navigationBarTextStyle": "black",
+  "enablePullDownRefresh": true
+}

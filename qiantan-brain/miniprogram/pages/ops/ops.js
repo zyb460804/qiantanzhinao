@@ -4,6 +4,7 @@ var app = getApp();
 Page({
   data: {
     skin: '', tab: 'waste', loading: false, submitting: false,
+    loadError: false, wasteError: false, clearanceError: false, customersError: false,
     // 报损
     wasteReasons: [], wasteForm: { product_id: '', product_name: '', quantity: '', reason: '腐烂', notes: '' },
     products: [], showWasteForm: false, wasteRecords: [], wasteSubmitting: false,
@@ -22,6 +23,9 @@ Page({
     var valid = { waste: 1, clearance: 1, customers: 1, export: 1 };
     if (options && options.tab && valid[options.tab]) {
       this.setData({ tab: options.tab });
+      // 显式带 ?tab=waste 深链进来（如首页「报损」大按钮）说明用户此刻就要记一笔，
+      // 商品列表加载完成后自动弹出表单，省掉再点一次「+ 记录」。默认进入不弹。
+      if (options.tab === 'waste') this._autoOpenWaste = true;
     }
   },
 
@@ -44,9 +48,9 @@ Page({
     this._tabLoadAt = this._tabLoadAt || {};
     if (now - (this._tabLoadAt[t] || 0) > 30000) {
       this._tabLoadAt[t] = now;
-      if (t === 'waste') { this.loadWasteReasons(); this.loadWasteRecords(); this.loadProducts(); }
-      else if (t === 'clearance') this.loadClearance();
-      else if (t === 'customers') this.loadCustomers();
+      if (t === 'waste') { this.setData({ loadError: false, wasteError: false }); this.loadWasteReasons(); this.loadWasteRecords(); this.loadProducts(); }
+      else if (t === 'clearance') { this.setData({ loadError: false, clearanceError: false }); this.loadClearance(); }
+      else if (t === 'customers') { this.setData({ loadError: false, customersError: false }); this.loadCustomers(); }
     }
   },
 
@@ -57,6 +61,7 @@ Page({
     this._tabLoadAt.waste = now;
     this._tabLoadAt.clearance = now;
     this._tabLoadAt.customers = now;
+    this.setData({ loadError: false, wasteError: false, clearanceError: false, customersError: false });
     return Promise.all([
       this.loadWasteReasons(),
       this.loadWasteRecords(),
@@ -87,6 +92,7 @@ Page({
   },
   loadProducts: function () {
     var self = this;
+    this.setData({ wasteError: false, loadError: false });
     return app.request({ url: '/inventory/current' }).then(function (data) {
       var products = (data || []).map(function (x) {
         var qty = Number(x.current_qty != null ? x.current_qty : x.total_qty) || 0;
@@ -96,13 +102,23 @@ Page({
         return normalized;
       }).filter(function (x) { return x.current_qty > 0; });
       self.setData({ products: products });
-    }).catch(function () { self.setData({ products: [] }); wx.showToast({ title: '库存数据加载失败', icon: 'none' }); });
+      // 深链 ?tab=waste 首次进入：商品就绪即弹表单（表单内选商品依赖该列表）
+      if (self._autoOpenWaste) {
+        self._autoOpenWaste = false;
+        self.openWasteForm();
+      }
+    }).catch(function () {
+      self._autoOpenWaste = false; // 加载失败不自动弹，避免空表单；用户可手动「+ 记录」重试
+      self.setData({ products: [], wasteError: true, loadError: true });
+      wx.showToast({ title: '库存数据加载失败', icon: 'none' });
+    });
   },
   loadWasteRecords: function () {
     var self = this;
+    this.setData({ wasteError: false, loadError: false });
     return app.request({ url: '/ops/waste?limit=20' }).then(function (data) {
       self.setData({ wasteRecords: data || [] });
-    }).catch(function () { self.setData({ wasteRecords: [] }); wx.showToast({ title: '报损记录加载失败', icon: 'none' }); });
+    }).catch(function () { self.setData({ wasteRecords: [], wasteError: true, loadError: true }); wx.showToast({ title: '报损记录加载失败', icon: 'none' }); });
   },
 
   openWasteForm: function () { this.setData({ showWasteForm: true, wasteForm: { product_id: '', product_name: '', quantity: '', reason: '腐烂', notes: '' } }); },
@@ -141,9 +157,10 @@ Page({
   // ── 临期 ──
   loadClearance: function () {
     var self = this;
+    this.setData({ clearanceError: false, loadError: false });
     return app.request({ url: '/ops/expiry/clearance?within_hours=' + this.data.clearanceHours }).then(function (data) {
       self.setData({ clearanceItems: (data && data.items) || [] });
-    }).catch(function () { self.setData({ clearanceItems: [] }); wx.showToast({ title: '临期商品加载失败', icon: 'none' }); });
+    }).catch(function () { self.setData({ clearanceItems: [], clearanceError: true, loadError: true }); wx.showToast({ title: '临期商品加载失败', icon: 'none' }); });
   },
   changeClearanceHours: function (e) { this.setData({ clearanceHours: Number(e.currentTarget.dataset.h) }); this.loadClearance(); },
 
@@ -184,10 +201,11 @@ Page({
   // ── 客户 ──
   loadCustomers: function () {
     var self = this;
+    this.setData({ customersError: false, loadError: false });
     return app.request({ url: '/ops/customers' }).then(function (data) {
       var list = data || [];
       self.setData({ customers: list, filteredCustomers: list });
-    }).catch(function () { self.setData({ customers: [], filteredCustomers: [] }); wx.showToast({ title: '客户账款加载失败', icon: 'none' }); });
+    }).catch(function () { self.setData({ customers: [], filteredCustomers: [], customersError: true, loadError: true }); wx.showToast({ title: '客户账款加载失败', icon: 'none' }); });
   },
   onCustomerSearch: function (e) {
     var kw = (e.detail.value || '').trim().toLowerCase();

@@ -4,10 +4,8 @@ import {
   ApiOutlined,
   AppstoreOutlined,
   ArrowRightOutlined,
-  CheckCircleOutlined,
   CloudServerOutlined,
   DollarOutlined,
-  KeyOutlined,
   ReloadOutlined,
   ShopOutlined,
   TeamOutlined,
@@ -141,25 +139,11 @@ export default function Dashboard() {
         onClick: () => navigate('/subscriptions'),
       },
       {
-        title: 'API 密钥',
-        value: analytics.active_api_keys,
-        hint: '当前启用',
-        icon: <KeyOutlined />,
-        tone: 'blue',
-      },
-      {
         title: '存储用量',
         value: `${compact(stats.today_storage_mb)} MB`,
         hint: '今日计量值',
         icon: <CloudServerOutlined />,
         tone: 'cyan',
-      },
-      {
-        title: '语音处理',
-        value: `${compact(analytics.month_voice_seconds)} 秒`,
-        hint: '本月累计',
-        icon: <CheckCircleOutlined />,
-        tone: 'orange',
       },
       {
         title: '本月回款',
@@ -177,7 +161,7 @@ export default function Dashboard() {
       <div>
         <PageHeader title="数据看板" subtitle="平台经营与用量数据" />
         <Row gutter={[16, 16]}>
-          {Array.from({ length: 8 }).map((_, index) => (
+          {Array.from({ length: 6 }).map((_, index) => (
             <Col xs={12} md={6} key={index}>
               <StatSkeleton />
             </Col>

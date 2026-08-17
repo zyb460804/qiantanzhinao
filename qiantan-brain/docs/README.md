@@ -36,7 +36,8 @@
 | [算法设计](algorithm-design.md) | 核心算法原理 |
 | [ASR 集成](asr-integration.md) | 讯飞语音识别接入与方言适配 |
 | [模型训练](model-training.md) | YOLO 商品识别训练流程 |
-| [隐私设计](privacy-design.md) | 差分隐私经验云设计 |
+| [隐私设计](privacy-design.md) | 差分隐私经验云设计（功能已下线，留档） |
+| [架构文档·源码级](codebase-architecture.md) | 14 节全量架构：业务链路 / AI 决策层 / 多租户 / 边缘设备 / 技术债清单 |
 
 ---
 
@@ -48,6 +49,7 @@
 | [部署指南](deployment-guide.md) | 环境部署与配置 |
 | [硬件指南](hardware-guide.md) | 智能秤/价目屏等硬件接入 |
 | [全面升级实施规范](千摊智脑-全面升级实施规范与Codex提示词.md) | 项目演进规划 |
+| [团队代码质量指引](team-code-quality-guidance.md) | 团队协作与代码质量要求 |
 
 ---
 
@@ -55,9 +57,12 @@
 
 | 文档 | 内容 |
 |---|---|
-| [全面体检报告 2026-07-26](full-project-audit-2026-07-26.md) | 12 智能体并行审计 + 对抗复核，549 测试全绿 |
+| [全面体检报告 2026-07-13](full-project-audit-2026-07-13.md) | 首轮全项目审计与整改复验（历史快照） |
+| [全面体检报告 2026-07-26](full-project-audit-2026-07-26.md) | 12 智能体并行审计 + 对抗复核（历史快照，当时 549 测试全绿） |
+| [第一性原则审查 2026-08-16](first-principles-audit-2026-08-16.md) | 第一性原则审查 + 对抗性测试（历史快照，删减前状态） |
+| [审计复审 2026-08-16](full-project-audit-recheck-2026-08-16.md) | 对 07-26/07-27 审计发现逐条读码复核（历史快照，删减前状态） |
 | [参赛提升方案 2026-07-27](competition-readiness-2026-07-27.md) | 大创/计设/iCAN 三赛差距分析与行动表 |
-| [测试报告](test-report.md) | 系统测试结果（549 passed） |
+| [测试报告](test-report.md) | 系统测试结果（872 用例收集，详数见 pytest 运行） |
 | [实验报告](experiment-report.md) | 算法与性能实验（状态：待实地采集） |
 | [代码评审记录](code-review-2026-07-12.md) | 历次代码评审 |
 | [用户手册](user-manual.md) | 终端用户使用说明 |
@@ -72,13 +77,13 @@
 | 模块 | 路径 | 说明 |
 |---|---|---|
 | 小程序前端 | [`miniprogram/`](../miniprogram/) | 24 页面，微信原生 |
-| 后端服务 | [`backend/app/`](../backend/app/) | FastAPI，30 路由模块，250+ 端点 |
+| 后端服务 | [`backend/app/`](../backend/app/) | FastAPI，36 路由模块，248 端点 |
 | 管理后台 | [`backend/admin-web/`](../backend/admin-web/) | React + Ant Design |
 | 边缘端 | [`edge/`](../edge/) | 视觉推理 + 称重 + OTA |
 | ML 训练 | [`ml/`](../ml/) | YOLO / Prophet / 数据集 |
 | 数据集 | [`datasets/`](../datasets/) | 600 张合成占位图（非真实照片，详见 `datasets/products/README.md`） |
-| 迁移脚本 | [`backend/migrations/`](../backend/migrations/) | Alembic 数据库迁移（22 个版本） |
-| 后端测试 | [`backend/tests/`](../backend/tests/) | 44 个测试文件，549 个用例全绿 |
+| 迁移脚本 | [`backend/migrations/`](../backend/migrations/) | Alembic 数据库迁移（28 个版本） |
+| 后端测试 | [`backend/tests/`](../backend/tests/) | 72 个测试文件，872 个用例（详数见 pytest 运行） |
 
 ---
 

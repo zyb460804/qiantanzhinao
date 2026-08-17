@@ -15,34 +15,34 @@ const actionTypes = {
 }
 
 export default function AiOps() {
-  const [data, setData] = useState([])
-  const [_stats, setStats] = useState(null)
+  const [data, setData] = useState({ items: [], total: 0 })
+  const [stats, setStats] = useState(null)
   const [filterType, setFilterType] = useState(undefined)
-  const [_loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
+      const params = { page, page_size: pageSize }
+      if (filterType) params.action_type = filterType
       const [actionsRes, statsRes] = await Promise.all([
-        api.get('/aiops/actions?page_size=100').catch(() => ({ items: [], total: 0 })),
+        api.get('/aiops/actions', { params }).catch(() => ({ items: [], total: 0 })),
         api.get('/aiops/stats').catch(() => null),
       ])
-      setData(actionsRes.items || [])
+      setData(actionsRes)
       setStats(statsRes)
     } catch {
       // keep empty state
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [page, pageSize, filterType])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
-
-  const filtered = filterType ? data.filter((d) => d.action_type === filterType) : data
-  const executedCount = data.filter((d) => d.executed).length
-  const successCount = data.filter((d) => d.result === 'success').length
 
   const columns = [
     { title: '租户', dataIndex: 'tenant_name', key: 'tenant_name', width: 120 },
@@ -101,14 +101,18 @@ export default function AiOps() {
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={8}>
           <Card style={{ borderRadius: 10 }}>
-            <Statistic title="AI 动作总数" value={data.length} prefix={<BulbOutlined style={{ color: '#00A06A' }} />} />
+            <Statistic
+              title="AI 动作总数"
+              value={stats?.total_actions ?? data.total ?? 0}
+              prefix={<BulbOutlined style={{ color: '#00A06A' }} />}
+            />
           </Card>
         </Col>
         <Col xs={12} sm={8}>
           <Card style={{ borderRadius: 10 }}>
             <Statistic
               title="已自动执行"
-              value={executedCount}
+              value={stats?.executed ?? 0}
               prefix={<CheckCircleOutlined style={{ color: '#00B578' }} />}
             />
           </Card>
@@ -116,9 +120,8 @@ export default function AiOps() {
         <Col xs={12} sm={8}>
           <Card style={{ borderRadius: 10 }}>
             <Statistic
-              title="成功率"
-              value={executedCount > 0 ? Math.round((successCount / executedCount) * 100) : 100}
-              suffix="%"
+              title="执行率"
+              value={stats?.adoption_rate || '0%'}
               prefix={<CheckCircleOutlined style={{ color: '#3478F6' }} />}
             />
           </Card>
@@ -132,22 +135,37 @@ export default function AiOps() {
             placeholder="动作类型"
             style={{ width: 140 }}
             value={filterType}
-            onChange={setFilterType}
+            onChange={(value) => {
+              setFilterType(value)
+              setPage(1)
+            }}
             options={Object.entries(actionTypes).map(([v, t]) => ({ value: v, label: t.label }))}
           />
           <Button icon={<ReloadOutlined />} onClick={fetchData}>
             刷新
           </Button>
         </Space>
-        {filtered.length === 0 ? (
+        {data.items.length === 0 && !loading ? (
           <EmptyState description="暂无 AI 运营记录" />
         ) : (
           <Table
-            dataSource={filtered}
+            dataSource={data.items}
             columns={columns}
             rowKey="id"
             size="middle"
-            pagination={{ showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+            loading={loading}
+            pagination={{
+              current: page,
+              pageSize,
+              total: data.total || 0,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (t) => `共 ${t} 条`,
+              onChange: (nextPage, nextPageSize) => {
+                setPage(nextPage)
+                setPageSize(nextPageSize)
+              },
+            }}
             scroll={{ x: 900 }}
           />
         )}

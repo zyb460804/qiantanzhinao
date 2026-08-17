@@ -42,6 +42,7 @@
       </view>
       <view class="cost-lines"><view><text>进货成本</text><text>-¥{{result.single.output.total_cost}}</text></view><view><text>损耗损失</text><text>-¥{{result.single.output.waste_loss}}</text></view></view>
       <view class="recommendation"><text class="rec-mark">策</text><text>{{result.single.comparison.recommendation}}</text></view>
+      <button class="btn-sm btn-secondary result-action" bindtap="goPurchase">去采购</button>
     </view>
   </view>
 

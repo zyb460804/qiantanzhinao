@@ -13,7 +13,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.timezone import cst_days_ago_bounds_utc, cst_today, utc_now, utc_today_start
+from app.core.timezone import (
+    cst_date_of_utc_naive,
+    cst_days_ago_bounds_utc,
+    cst_today,
+    utc_now,
+    utc_today_start,
+)
 from app.models.ai_action import AIAction
 from app.models.environment import EnvironmentRecord
 from app.models.inventory import InventoryRecord
@@ -30,6 +36,88 @@ from app.services.sku_service import resolve_sku_id
 
 
 logger = logging.getLogger(__name__)
+
+# 冷启动阈值：商户非作废流水覆盖的 CST 业务日不足 3 天（含零数据）时，
+# 每日建议返回引导内容而非逐商品建议——零数据下每个商品 current_qty=0，
+# 会触发全品类「已缺货立即补货」告警风暴（新商户首屏 10 条缺货噪音）。
+COLD_START_MIN_DATA_DAYS = 3
+
+# 采样上限：够到上限即视为数据充足（远超冷启动阈值），不必精确数天数，
+# 也避免大商户把整张流水表拉进内存。
+_COLD_START_SAMPLE_CAP = 500
+
+
+async def _count_days_with_records(db: AsyncSession, merchant_id: uuid.UUID) -> int:
+    """统计商户非作废库存流水覆盖的不同 CST 业务日数（封顶采样）。
+
+    event_time 为 naive UTC，业务日归属经 cst_date_of_utc_naive 换算
+    （与全仓 CST 日界口径一致）。
+    """
+    rows = (
+        await db.execute(
+            select(InventoryRecord.event_time)
+            .where(
+                InventoryRecord.merchant_id == merchant_id,
+                InventoryRecord.is_voided == False,  # noqa: E712
+            )
+            .limit(_COLD_START_SAMPLE_CAP + 1)
+        )
+    ).scalars()
+    days: set = set()
+    sampled = 0
+    for t in rows:
+        sampled += 1
+        if t is not None:
+            days.add(cst_date_of_utc_naive(t))
+    if sampled > _COLD_START_SAMPLE_CAP:
+        return _COLD_START_SAMPLE_CAP
+    return len(days)
+
+
+def _cold_start_recommendations(days_with_data: int) -> list[dict]:
+    """冷启动引导建议：2-3 条上手引导，复用三行建议卡片结构
+    （suggestion/basis/confidence），前端 advisor 页无需改动即可渲染。"""
+    return [
+        {
+            "product_id": -1,
+            "product_name": "语音记账",
+            "suggestion": "先语音记 3 笔账（卖了多少、进了多少），我就能给你进货建议",
+            "basis": [
+                {
+                    "factor": "数据积累",
+                    "value": f"已记账{days_with_data}天/目标{COLD_START_MIN_DATA_DAYS}天",
+                    "impact": "+",
+                }
+            ],
+            "risk_warning": None,
+            "recommended_qty": 0,
+            "confidence": 1.0,
+            "forecast": None,
+            "is_onboarding": True,
+        },
+        {
+            "product_id": -2,
+            "product_name": "商品库",
+            "suggestion": "把常卖的商品添加进商品库（建议先加 3-5 个），建议才能对号入座",
+            "basis": [{"factor": "商品档案", "value": "添加后按商品出建议", "impact": "+"}],
+            "risk_warning": None,
+            "recommended_qty": 0,
+            "confidence": 1.0,
+            "forecast": None,
+            "is_onboarding": True,
+        },
+        {
+            "product_id": -3,
+            "product_name": "连续记账",
+            "suggestion": f"连续记账满{COLD_START_MIN_DATA_DAYS}天，我会按你的销量习惯给每日进货量",
+            "basis": [{"factor": "解锁条件", "value": "记账满3天", "impact": "+"}],
+            "risk_warning": None,
+            "recommended_qty": 0,
+            "confidence": 1.0,
+            "forecast": None,
+            "is_onboarding": True,
+        },
+    ]
 
 
 def generate_daily_advice(
@@ -295,6 +383,27 @@ async def build_daily_advice(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
         is_weekend=env_row.is_weekend if env_row else (today.weekday() >= 5),
         day_of_week=today.weekday(),
     )
+
+    # ── 冷启动：记录覆盖 < 3 个 CST 业务日（含零数据）时返回引导建议。
+    #    零数据下逐商品 current_qty=0 → 全品类「已缺货立即补货」告警风暴，
+    #    且会把垃圾 Recommendation/AIAction 落库。引导路径不写库。
+    days_with_data = await _count_days_with_records(db, merchant_id)
+    if days_with_data < COLD_START_MIN_DATA_DAYS:
+        logger.info("advice cold start: merchant=%s days_with_data=%d", merchant_id, days_with_data)
+        return {
+            "recommendations": _cold_start_recommendations(days_with_data),
+            "recommendation_ids": [],
+            "generated_at": utc_now().isoformat(),
+            "cold_start": True,
+            "days_with_data": days_with_data,
+            "env_summary": {
+                "temp_high": env_factors.temp_high,
+                "rainfall_prob": env_factors.rainfall_prob,
+                "is_weekend": env_factors.is_weekend,
+                "is_holiday": env_factors.is_holiday,
+            },
+            "message": f"记账满{COLD_START_MIN_DATA_DAYS}天后解锁每日进货建议",
+        }
 
     # 2. 在售商品
     products = (

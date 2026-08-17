@@ -6,7 +6,7 @@ merchant-facing reports with clear calculation logic.
 
 import uuid
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Literal, TypedDict
 
 from fastapi import APIRouter, Depends, Query
@@ -18,8 +18,6 @@ from app.core.timezone import (
     cst_day_bounds_utc,
     cst_days_ago_bounds_utc,
     cst_today,
-    utc_now,
-    utc_today_start,
 )
 from app.database import get_db
 from app.models.batch import BatchLifecycle
@@ -117,14 +115,22 @@ async def _estimate_cogs(
 
 @router.get("/daily", response_model=AnyResponse)
 async def daily_report(
+    date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Daily business report — revenue, cost, profit, top products, AI summary."""
-    today_start, today_end = cst_day_bounds_utc(cst_today())
-    yesterday_start = cst_day_bounds_utc(cst_today() - timedelta(days=1))[0]
+    """Daily business report — revenue, cost, profit, top products, AI summary.
 
-    # --- Today's records (event_time is naive UTC; day boundary is CST) ---
+    date 不传（None）= CST 业务「今天」；传历史日期返回该业务日快照
+    （语音数/建议采纳/临期参考点同样随目标日平移到该日的 CST 日界内）。
+    非法日期由 FastAPI 参数解析自动 422。
+    """
+    target_day = date or cst_today()
+    day_label = "今日" if target_day == cst_today() else f"{target_day.month}月{target_day.day}日"
+    today_start, today_end = cst_day_bounds_utc(target_day)
+    yesterday_start = cst_day_bounds_utc(target_day - timedelta(days=1))[0]
+
+    # --- Target day's records (event_time is naive UTC; day boundary is CST) ---
     today_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
@@ -164,22 +170,23 @@ async def daily_report(
     if yesterday_revenue > 0:
         revenue_change = round((revenue - yesterday_revenue) / yesterday_revenue * 100, 1)
 
-    # --- Voice count today (created_at is UTC) ---
-    today_start_utc = utc_today_start()
+    # --- Voice count for the target CST business day (created_at is naive UTC) ---
     voice_query = select(func.count(VoiceLog.id)).where(
         VoiceLog.merchant_id == merchant_id,
-        VoiceLog.created_at >= today_start_utc,
+        VoiceLog.created_at >= today_start,
+        VoiceLog.created_at < today_end,
     )
     voice_result = await db.execute(voice_query)
     voice_count = int(voice_result.scalar() or 0)
 
-    # --- Expiring count ---
+    # --- Expiring count（参考点 = 目标业务日结束后 24h，随 date 参数平移；
+    #     不传 date 时等价于原 utc_now()+24h 的日界化版本）---
     expiring_query = select(func.count(BatchLifecycle.id)).where(
         BatchLifecycle.merchant_id == merchant_id,
         BatchLifecycle.remaining_qty > 0,
         BatchLifecycle.status != "spoiled",
         BatchLifecycle.expiry_date.isnot(None),
-        BatchLifecycle.expiry_date <= utc_now() + timedelta(hours=24),
+        BatchLifecycle.expiry_date <= today_end + timedelta(hours=24),
     )
     expiring_result = await db.execute(expiring_query)
     expiring_count = int(expiring_result.scalar() or 0)
@@ -234,11 +241,11 @@ async def daily_report(
                 }
             )
 
-    # --- Recommendation adoption ---
-    today_start_utc = utc_today_start()
+    # --- Recommendation adoption (target CST business day) ---
     rec_query = select(Recommendation).where(
         Recommendation.merchant_id == merchant_id,
-        Recommendation.created_at >= today_start_utc,
+        Recommendation.created_at >= today_start,
+        Recommendation.created_at < today_end,
     )
     rec_result = await db.execute(rec_query)
     recs = rec_result.scalars().all()
@@ -248,7 +255,7 @@ async def daily_report(
     # --- AI summary ---
     summary_parts = []
     if revenue > 0:
-        summary_parts.append(f"今日营业额{round(revenue, 1)}元")
+        summary_parts.append(f"{day_label}营业额{round(revenue, 1)}元")
     if estimated_gross_profit > 0:
         summary_parts.append(f"估算毛利{round(estimated_gross_profit, 1)}元")
     elif cash_balance > 0:
@@ -261,7 +268,7 @@ async def daily_report(
         elif revenue_change < 0:
             summary_parts.append(f"较昨日下降{abs(revenue_change)}%")
 
-    ai_summary = "，".join(summary_parts) + "。" if summary_parts else "今日暂无经营数据。"
+    ai_summary = "，".join(summary_parts) + "。" if summary_parts else f"{day_label}暂无经营数据。"
 
     # --- Action items for tomorrow ---
     action_items = []
@@ -271,13 +278,13 @@ async def daily_report(
         action_items.append(f"{item['product_name']}库存{item['stock_qty']}斤未售出，建议促销")
     if waste_amount > revenue * 0.1 and revenue > 0:
         action_items.append(
-            f"今日损耗率较高({round(waste_amount / revenue * 100, 1)}%)，建议减少进货量"
+            f"{day_label}损耗率较高({round(waste_amount / revenue * 100, 1)}%)，建议减少进货量"
         )
 
     return {
         "code": 0,
         "data": {
-            "date": cst_today().isoformat(),
+            "date": target_day.isoformat(),
             "revenue": round(revenue, 2),
             "cost": round(cost, 2),
             "profit": round(profit, 2),
@@ -303,18 +310,28 @@ async def daily_report(
 
 @router.get("/weekly", response_model=AnyResponse)
 async def weekly_report(
+    end_date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Weekly report — 7-day trends, rankings, weather impact, health score."""
-    start_7d, _end = _date_range(7)
-    start_14d = cst_day_bounds_utc(cst_today() - timedelta(days=13))[0]
+    """Weekly report — 7-day trends, rankings, weather impact, health score.
+
+    end_date 不传 = 以 CST 今天为窗口最后一天；传历史日期则统计
+    [end_date-6, end_date] 共 7 个完整 CST 业务日，对比期为再往前 7 天。
+    """
+    anchor = end_date or cst_today()
+    start_7d = cst_day_bounds_utc(anchor - timedelta(days=6))[0]
+    # 窗口上界（含 anchor 全天）。默认 anchor=今天时与旧「无上界」等价；
+    # 历史 anchor 若不封上界，窗口之后的新记录会被错误计入。
+    end_7d = cst_day_bounds_utc(anchor)[1]
+    start_14d = cst_day_bounds_utc(anchor - timedelta(days=13))[0]
 
     # This week's records
     week_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
         InventoryRecord.event_time >= start_7d,
+        InventoryRecord.event_time < end_7d,
     )
     week_result = await db.execute(week_query)
     week_records = week_result.scalars().all()
@@ -344,11 +361,10 @@ async def weekly_report(
     if last_week_revenue > 0:
         revenue_change = round((week_revenue - last_week_revenue) / last_week_revenue * 100, 1)
 
-    # Daily trends (per CST business day)
-    today = cst_today()
+    # Daily trends (per CST business day, anchored on end_date)
     daily_trends = []
     for i in range(7):
-        d = today - timedelta(days=6 - i)
+        d = anchor - timedelta(days=6 - i)
         day_start, day_end = cst_day_bounds_utc(d)
         day_sale_records = [
             r
@@ -421,10 +437,11 @@ async def weekly_report(
     ]
     waste_ranking = sorted(waste_rows, key=lambda row: row["amount"], reverse=True)[:10]
 
-    # Recommendation adoption rate
+    # Recommendation adoption rate (within the anchored 7-day window)
     rec_query = select(Recommendation).where(
         Recommendation.merchant_id == merchant_id,
         Recommendation.created_at >= start_7d,
+        Recommendation.created_at < end_7d,
     )
     rec_result = await db.execute(rec_query)
     recs = rec_result.scalars().all()
@@ -445,7 +462,8 @@ async def weekly_report(
     health = max(0, min(100, round(health)))
 
     # Weekly summary
-    summary = f"本周营业额{round(week_revenue, 1)}元"
+    period_label = "本周" if anchor == cst_today() else "近7日"
+    summary = f"{period_label}营业额{round(week_revenue, 1)}元"
     if revenue_change is not None:
         if revenue_change > 0:
             summary += f"，较上周增长{revenue_change}%"
@@ -625,24 +643,32 @@ async def product_ranking(
 
 @router.get("/monthly", response_model=AnyResponse)
 async def monthly_report(
+    end_date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Monthly report — 30-day trends, rankings, waste, health score, AI summary.
 
+    end_date 不传 = 以 CST 今天为 30 天滚动窗口最后一天；传历史日期则统计
+    [end_date-29, end_date] 共 30 个完整 CST 业务日，对比期为再往前 30 天。
+
     Unlike the frontend client-side aggregation fallback, this endpoint
     computes sales ranking, waste ranking, health score, and a data-driven
     AI summary server-side, giving the monthly tab the same depth as weekly.
     """
+    anchor = end_date or cst_today()
     days = 30
-    start, _end = _date_range(days)
-    start_60d = cst_day_bounds_utc(cst_today() - timedelta(days=59))[0]
+    start = cst_day_bounds_utc(anchor - timedelta(days=29))[0]
+    # 窗口上界（含 anchor 全天）：历史 anchor 不封上界会错计窗口后的新记录。
+    end_30d = cst_day_bounds_utc(anchor)[1]
+    start_60d = cst_day_bounds_utc(anchor - timedelta(days=59))[0]
 
     # This month's records
     month_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
         InventoryRecord.event_time >= start,
+        InventoryRecord.event_time < end_30d,
     )
     month_result = await db.execute(month_query)
     month_records = month_result.scalars().all()
@@ -694,11 +720,10 @@ async def monthly_report(
         cost_result = await db.execute(cost_query)
         avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
 
-    # Daily trends (per CST business day)
-    today = cst_today()
+    # Daily trends (per CST business day, anchored on end_date)
     daily_trends = []
     for i in range(days):
-        d = today - timedelta(days=days - 1 - i)
+        d = anchor - timedelta(days=days - 1 - i)
         day_start, day_end = cst_day_bounds_utc(d)
         day_records = [r for r in month_records if day_start <= r.event_time < day_end]
         day_sale_records = [r for r in day_records if r.event_type == "sale"]
@@ -775,10 +800,11 @@ async def monthly_report(
     ]
     waste_ranking = sorted(waste_rows, key=lambda row: row["amount"], reverse=True)[:10]
 
-    # Recommendation adoption
+    # Recommendation adoption (within the anchored 30-day window)
     rec_query = select(Recommendation).where(
         Recommendation.merchant_id == merchant_id,
         Recommendation.created_at >= start,
+        Recommendation.created_at < end_30d,
     )
     rec_result = await db.execute(rec_query)
     recs = rec_result.scalars().all()

@@ -40,6 +40,15 @@
     <view class="skeleton-block card-line short"></view>
   </view>
 
+  <block wx:elif="{{loadError}}">
+    <view class="empty-state surface">
+      <mascot size="md" mood="think"/>
+      <text>库存加载失败</text>
+      <text class="data-note">请检查网络后重试</text>
+      <button class="btn-primary" bindtap="manualRefresh">重新加载</button>
+    </view>
+  </block>
+
   <block wx:else>
     <!-- 小智洞察 -->
     <view class="insight-card {{insightTone}}" wx:if="{{inventoryItems.length > 0}}">

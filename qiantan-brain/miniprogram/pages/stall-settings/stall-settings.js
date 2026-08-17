@@ -137,7 +137,8 @@ Page({
       url: '/auth/me', method: 'PUT',
       data: { name: this.data.merchantName },
     }).then(function () {}).catch(function () { /* 名称更新失败不阻塞偏好保存 */ });
-    // 推送偏好到后端（跨设备同步）
+    // 推送偏好到后端（跨设备同步）；成功才提示已保存，失败明确报错
+    var self = this;
     app.request({
       url: '/auth/me/preferences', method: 'PUT',
       data: {
@@ -147,7 +148,11 @@ Page({
         notification_enabled: this.data.notificationEnabled,
         merchant_city: this.data.merchantCity,
       },
-    }).then(function () {}).catch(function () {});
-    wx.showToast({ title: '偏好已保存', icon: 'success' });
+    }).then(function () {
+      wx.showToast({ title: '偏好已保存', icon: 'success' });
+    }).catch(function (err) {
+      var msg = (err && err.body && (err.body.detail || err.body.message)) || '偏好保存失败，请重试';
+      wx.showToast({ title: String(msg), icon: 'none' });
+    });
   },
 });

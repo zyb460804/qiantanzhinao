@@ -105,6 +105,10 @@ def require_permission(permission: str):
                     pass
 
         perms = ROLE_PERMISSIONS.get(role, set())
+        # 租户/平台管理员虽然不在 staff 的 ROLE_PERMISSIONS 中，但按安全要求
+        # 可以管理员工（尤其是授予 market_admin 角色）。
+        if role in ("tenant_admin", "platform_admin") and permission == "manage_staff":
+            perms = {permission}
         if permission not in perms:
             raise HTTPException(
                 status_code=403,
@@ -251,6 +255,10 @@ async def create_staff(
     # 安全（垂直提权修复）：owner 只能是商户本人，不允许经员工体系创建
     if role == "owner":
         raise HTTPException(status_code=400, detail="不允许创建 owner 角色的员工")
+    # 安全（审计 R1）：market_admin 属于管理员角色，仅租户/平台管理员可授予；
+    # owner 等普通商户操作者只能创建 manager/cashier/purchaser/stocker 等普通员工。
+    if role == "market_admin" and _perm.role not in ("tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅租户/平台管理员可创建市场管理员")
 
     s = StaffMember(
         merchant_id=merchant.id,
@@ -297,6 +305,10 @@ async def update_staff(
         # 安全（垂直提权修复）：禁止把员工（含自己）提升为 owner —— owner 只能是商户本人
         if body["role"] == "owner":
             raise HTTPException(status_code=400, detail="不允许将员工角色修改为 owner")
+        # 安全（审计 R1）：市场管理员角色仅租户/平台管理员可授予，普通操作者不能
+        # 把已有员工（或自己）提升为 market_admin。
+        if body["role"] == "market_admin" and _perm.role not in ("tenant_admin", "platform_admin"):
+            raise HTTPException(status_code=403, detail="仅租户/平台管理员可授予市场管理员角色")
         s.role = body["role"]
     if "is_active" in body:
         s.is_active = bool(body["is_active"])

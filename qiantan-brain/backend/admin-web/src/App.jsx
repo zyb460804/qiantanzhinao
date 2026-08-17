@@ -21,7 +21,6 @@ const Usage = lazy(() => import('./pages/Usage'))
 const AuditLog = lazy(() => import('./pages/AuditLog'))
 const Onboarding = lazy(() => import('./pages/Onboarding'))
 const AiOps = lazy(() => import('./pages/AiOps'))
-const Devices = lazy(() => import('./pages/Devices'))
 const Admins = lazy(() => import('./pages/Admins'))
 
 const PageLoader = () => (
@@ -81,7 +80,6 @@ export default function App() {
         <Route path="audit" element={permitted(PERMISSIONS.AUDIT_READ, <AuditLog />)} />
         <Route path="onboarding" element={permitted(PERMISSIONS.TENANT_CREATE, <Onboarding />)} />
         <Route path="ai-ops" element={permitted(PERMISSIONS.AI_ACTION_READ, <AiOps />)} />
-        <Route path="devices" element={permitted(PERMISSIONS.DASHBOARD_READ, <Devices />)} />
         <Route path="admins" element={permitted(PERMISSIONS.ADMIN_MANAGE, <Admins />)} />
       </Route>
 

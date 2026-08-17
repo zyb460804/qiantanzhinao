@@ -28,8 +28,8 @@ graph TB
 
     subgraph B["后端层 (FastAPI · Python 3.13)"]
         MW["中间件层<br/>JWT · 幂等 · 租户上下文<br/>请求 ID · 限流"]
-        R["路由层 (34 模块 · 244 接口)<br/>voice · vision · pos · purchase<br/>inventory · twin · food_safety · ..."]
-        S["服务层<br/>批次 FIFO · 往来账<br/>数字孪生 · 经验云"]
+        R["路由层 (36 模块 · 248 接口)<br/>voice · vision · pos · purchase<br/>inventory · twin · food_safety · ..."]
+        S["服务层<br/>批次 FIFO · 往来账<br/>数字孪生 · 单位换算"]
         DAO["数据访问层<br/>SQLAlchemy async"]
     end
 
@@ -164,8 +164,8 @@ flowchart LR
 | **前端·管理后台** | React + Ant Design | 市场管理、SaaS 运营 | `backend/admin-web/` |
 | **边缘层** | Python + ONNX Runtime | 端侧视觉推理、称重采集、OTA | `edge/` |
 | **后端·中间件** | FastAPI Middleware | 鉴权、幂等、租户隔离、限流、审计 | `app/core/` |
-| **后端·路由** | FastAPI APIRouter (34 模块) | 244 个 REST 接口，薄层 | `app/routers/` |
-| **后端·服务** | Python | 批次 FIFO、往来账、数字孪生、经验云 | `app/services/` |
+| **后端·路由** | FastAPI APIRouter (36 模块) | 248 个 REST 接口，薄层 | `app/routers/` |
+| **后端·服务** | Python | 批次 FIFO、往来账、数字孪生、单位换算 | `app/services/` |
 | **AI/ML** | 讯飞 ASR、YOLOv8、Prophet | 语音识别、视觉识别、销量预测 | `app/services/` + `ml/` |
 | **数据层** | PostgreSQL / SQLite + Alembic | 持久化、迁移管理 | `app/database.py` + `migrations/` |
 | **工程基建** | GitHub Actions、Docker、Prometheus、Sentry | CI/CD、容器化、监控、错误追踪 | `.github/` + `docker-compose*.yml` |

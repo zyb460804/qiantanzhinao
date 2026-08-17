@@ -24,6 +24,7 @@
         <text class="cat-amount warn">-{{item.quantity}}{{item.unit}}</text>
       </view>
     </view>
+    <view wx:elif="{{wasteError}}" class="empty-state"><text>报损记录加载失败</text><button class="btn-primary" bindtap="loadWasteRecords">重新加载</button></view>
     <view wx:else class="empty-state"><text>暂无报损记录</text></view>
   </block>
 
@@ -49,7 +50,8 @@
     <view class="hours-row">
       <view wx:for="{{[{h:8,l:'8h'},{h:24,l:'24h'},{h:48,l:'48h'},{h:72,l:'72h'}]}}" wx:key="h" class="hours-chip {{clearanceHours===item.h?'active':''}}" data-h="{{item.h}}" bindtap="changeClearanceHours">{{item.l}}</view>
     </view>
-    <view wx:if="{{!clearanceItems.length}}" class="empty-state"><text>{{clearanceHours}}小时内无临期商品 ✓</text></view>
+    <view wx:if="{{clearanceError}}" class="empty-state"><text>临期商品加载失败</text><button class="btn-primary" bindtap="loadClearance">重新加载</button></view>
+    <view wx:elif="{{!clearanceItems.length}}" class="empty-state"><text>{{clearanceHours}}小时内无临期商品 ✓</text></view>
     <view wx:else class="clearance-list">
       <view wx:for="{{clearanceItems}}" wx:key="batch_id" class="clear-card">
         <view class="clear-head">
@@ -72,7 +74,8 @@
   <block wx:if="{{tab==='customers'}}">
     <view class="section-head"><text class="section-title">赊账客户</text></view>
     <view class="search-bar"><icon name="search" size="28" color="var(--muted)"/><input class="search-input" placeholder="搜索客户名" value="{{customerSearch}}" bindinput="onCustomerSearch"/></view>
-    <view wx:if="{{!customers.length}}" class="empty-state"><text>暂无赊账客户</text></view>
+    <view wx:if="{{customersError}}" class="empty-state"><text>客户账款加载失败</text><button class="btn-primary" bindtap="loadCustomers">重新加载</button></view>
+    <view wx:elif="{{!customers.length}}" class="empty-state"><text>暂无赊账客户</text></view>
     <view wx:elif="{{!filteredCustomers.length}}" class="empty-state"><text>未找到匹配 "{{customerSearch}}" 的客户</text></view>
     <view wx:else class="cat-list">
       <view wx:for="{{filteredCustomers}}" wx:key="customer_name" class="cat-item">
@@ -117,7 +120,7 @@
 
   <!-- ====== 导出 ====== -->
   <block wx:if="{{tab==='export'}}">
-    <view class="section-head"><text class="section-title">数据导出</text><text class="section-caption">费用/账单导出请前往财务管理</text></view>
+    <view class="section-head"><text class="section-title">数据导出</text><text class="section-caption">销售 / 库存 / 报损 / 往来账</text></view>
     <view class="export-card">
       <text class="form-label">日期范围</text>
       <view class="date-row"><input class="form-input flex-1" type="text" placeholder="开始 YYYY-MM-DD" value="{{exportStart}}" data-field="exportStart" bindinput="onExportDate"/><text class="date-sep">—</text><input class="form-input flex-1" type="text" placeholder="结束 YYYY-MM-DD" value="{{exportEnd}}" data-field="exportEnd" bindinput="onExportDate"/></view>

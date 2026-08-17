@@ -4,6 +4,7 @@
  */
 var app = getApp();
 var streamText = require('../../utils/stream-text').streamText;
+var PushRules = require('../../utils/push-rules');
 
 Page({
   data: {
@@ -61,12 +62,15 @@ Page({
       app.request({ url: '/env/today', data: { city: app.getCity() } }).catch(function () { return null; }),
       app.request({ url: '/voice/today-count' }).catch(function () { return null; }),
       app.request({ url: '/ai-actions/pending' }).catch(function () { return null; }),
+      // 低库存规则的数据源（与 index 页共用统一规则引擎，需同一份库存输入）
+      app.request({ url: '/inventory/current' }).catch(function () { return null; }),
     ]).then(function (results) {
       var advice = results[0];
       var dashboard = results[1];
       var weather = results[2];
       var voiceCount = (results[3] && results[3].today_count) || 0;
       var pendingActions = results[4] || [];
+      var inventory = Array.isArray(results[5]) ? results[5] : [];
 
       var recs = advice ? (advice.recommendations || []) : [];
       var ids = advice ? (advice.recommendation_ids || []) : [];
@@ -78,8 +82,24 @@ Page({
         env = { temp_high: '--', rainfall_prob: 0, is_weekend: false };
       }
 
-      // 数据驱动的主动推送
-      var pushCards = self._buildPushCards(dashboard, weather, voiceCount);
+      // 数据驱动的主动推送：消费统一规则引擎 utils/push-rules（与 index 待办同源），
+      // 仅做 advisor 版样式映射（severity → push-card tone）
+      var pushCards = PushRules.buildPushCards({
+        dashboard: dashboard,
+        inventory: inventory,
+        weather: weather,
+        voiceCount: voiceCount,
+      }).map(function (c) {
+        return {
+          id: c.id,
+          tone: c.severity === 'danger' ? 'warn' : c.severity,
+          icon: c.icon,
+          title: c.title,
+          desc: c.desc,
+          cta: c.cta,
+          route: c.route,
+        };
+      });
 
       // 美化 AI 动作卡片
       var aiCards = (pendingActions || []).map(function (a) {
@@ -111,71 +131,7 @@ Page({
     });
   },
 
-  // ── 推送规则引擎 (前端) ────────────────────
-  _buildPushCards: function (dashboard, weather, voiceCount) {
-    var cards = [];
-    if (!dashboard) return [];
-
-    // 规则1: 临期提醒
-    var expiring = Number(dashboard.expiring_count) || 0;
-    if (expiring > 0) {
-      var expText = '有 ' + expiring + ' 件商品临期，建议尽快处理';
-      cards.push({
-        id: 'expiry',
-        icon: 'bulb',
-        tone: 'warn',
-        title: expText,
-        desc: '损耗风险升高，先查看临期商品再决定促销或报损',
-        cta: '查看库存',
-        route: 'inventory',
-      });
-    }
-
-    // 规则2: 天气预警
-    if (weather) {
-      var rain = Number(weather.rainfall_prob) || 0;
-      if (rain > 60) {
-        cards.push({
-          id: 'weather',
-          icon: 'calendar',
-          tone: 'info',
-          title: '明日降雨概率 ' + rain + '%，叶菜走量放缓',
-          desc: '少进 15% 叶菜，转多备耐储根茎类',
-          cta: '调整进货',
-          route: 'sandbox',
-        });
-      }
-    }
-
-    // 规则3: 今日未记账
-    if (voiceCount === 0) {
-      cards.push({
-        id: 'no_record',
-        icon: 'mic',
-        tone: 'warn',
-        title: '今天还没有经营流水，别忘了记一笔',
-        desc: '进货、销售、损耗记完，利润和库存才会准确',
-        cta: '去记账',
-        route: 'voice',
-      });
-    }
-
-    // 规则4: 库存不足
-    var riskScore = Number(dashboard.risk_score) || 0;
-    if (riskScore >= 60) {
-      cards.push({
-        id: 'risk',
-        icon: 'bulb',
-        tone: 'warn',
-        title: '经营风险分偏高 (' + riskScore + '/100)',
-        desc: '打开经营镜像查看风险来源：库存、现金流还是客流波动',
-        cta: '看详情',
-        route: 'dashboard',
-      });
-    }
-
-    return cards.slice(0, 3);
-  },
+  // ── 推送规则引擎已收敛至 utils/push-rules.js（与 index 页共用同一实现）──
 
   // ── 效果复盘：加载已执行的 AI 动作历史 ────────
   loadAiHistory: function () {
@@ -370,7 +326,10 @@ Page({
           confirmText: '去查看', cancelText: '稍后',
           success: function (r) { if (r.confirm) wx.navigateTo({ url: '/pages/purchase/purchase' }); },
         });
-      }).catch(function () {});
+      }).catch(function (err) {
+        var msg = (err && err.body && (err.body.detail || err.body.message)) || '加入采购清单失败，请重试';
+        wx.showToast({ title: String(msg), icon: 'none' });
+      });
   },
 
   // ── 跳转决策沙盘（试算统一在 sandbox 页） ───────────

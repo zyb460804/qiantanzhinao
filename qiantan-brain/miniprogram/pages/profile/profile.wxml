@@ -38,10 +38,10 @@
   <view class="section-head"><text class="section-title">快捷操作</text></view>
   <view class="quick-grid">
     <view class="quick-card" data-page="voice" bindtap="goQuick"><icon name="mic" size="44" color="#fff"/><text class="quick-title">语音记账</text><text class="quick-desc">{{voiceLabel}}</text></view>
-    <view class="quick-card" data-page="dashboard" bindtap="goQuick"><icon name="mirror" size="44" color="var(--green-800)"/><text class="quick-title">经营镜像</text><text class="quick-desc">今日全貌</text></view>
-    <view class="quick-card" data-page="pos" bindtap="goQuick"><icon name="cart" size="44" color="var(--green-800)"/><text class="quick-title">收银开单</text><text class="quick-desc">快速开单</text></view>
+    <view class="quick-card" wx:if="{{canDashboard}}" data-page="dashboard" bindtap="goQuick"><icon name="mirror" size="44" color="var(--green-800)"/><text class="quick-title">经营镜像</text><text class="quick-desc">今日全貌</text></view>
+    <view class="quick-card" wx:if="{{canPos}}" data-page="pos" bindtap="goQuick"><icon name="cart" size="44" color="var(--green-800)"/><text class="quick-title">收银开单</text><text class="quick-desc">快速开单</text></view>
   </view>
-  <view class="quick-purchase" data-page="purchase" bindtap="goQuick">
+  <view class="quick-purchase" wx:if="{{canPurchase}}" data-page="purchase" bindtap="goQuick">
     <view class="qp-left"><icon name="box" size="36" color="var(--corn)"/><text class="qp-title">采购清单</text></view>
     <view class="qp-right">
       <text class="qp-badge" wx:if="{{purchasePending > 0}}">待补 {{purchasePending}} 件</text>
@@ -74,15 +74,21 @@
     </view>
   </view>
 
-  <!-- ④ 经营工具 — 按职能分组，避免单屏宫格过密 -->
-  <view class="section-head"><text class="section-title">全部工具</text><text class="section-caption">按职能分组</text></view>
-  <view class="tool-group" wx:for="{{toolGroups}}" wx:key="title" wx:for-item="group">
-    <view class="tool-group-head">
-      <text class="tool-group-title">{{group.title}}</text>
-      <text class="tool-group-caption">{{group.caption}}</text>
-    </view>
+  <!-- ④ 经营工具 — 常用 6 直达 + 更多工具折叠（v3.2 收敛） -->
+  <view class="section-head"><text class="section-title">常用直达</text><text class="section-caption">一天里用得最多</text></view>
+  <view class="tool-group" wx:if="{{quickTools.length}}">
     <view class="tool-grid">
-      <view wx:for="{{group.items}}" wx:key="page" wx:for-item="tool" class="tool-chip" data-page="{{tool.page}}" bindtap="goDeep">
+      <view wx:for="{{quickTools}}" wx:key="name" wx:for-item="tool" class="tool-chip" data-page="{{tool.page}}" data-url="{{tool.url}}" bindtap="goDeep">
+        <view class="tool-glyph {{tool.tone}}">{{tool.glyph}}</view>
+        <text class="tool-name">{{tool.name}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section-head"><text class="section-title">更多工具</text><text class="section-link" bindtap="toggleMoreTools">{{moreOpen ? '收起' : '展开'}} {{moreTools.length}} 项 ›</text></view>
+  <view class="tool-group" wx:if="{{moreOpen && moreTools.length}}">
+    <view class="tool-grid">
+      <view wx:for="{{moreTools}}" wx:key="name" wx:for-item="tool" class="tool-chip" data-page="{{tool.page}}" data-url="{{tool.url}}" bindtap="goDeep">
         <view class="tool-glyph {{tool.tone}}">{{tool.glyph}}</view>
         <text class="tool-name">{{tool.name}}</text>
       </view>

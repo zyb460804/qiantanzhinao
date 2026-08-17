@@ -4,6 +4,7 @@
     "pages/voice/voice",
     "pages/inventory/inventory",
     "pages/advisor/advisor",
+    "pages/insight/insight",
     "pages/sandbox/sandbox",
     "pages/dashboard/dashboard",
     "pages/profile/profile",
@@ -22,9 +23,7 @@
     "pages/supplier/supplier",
     "pages/staff/staff",
     "pages/notices/notices",
-    "pages/tenant/tenant",
-    "pages/stall-settings/stall-settings",
-    "pages/styleguide/styleguide"
+    "pages/stall-settings/stall-settings"
   ],
   "window": {
     "navigationBarBackgroundColor": "#FFFFFF",

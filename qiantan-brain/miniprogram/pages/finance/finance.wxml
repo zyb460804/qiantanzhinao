@@ -14,17 +14,17 @@
     <view wx:for="{{[{k:'expenses',l:'费用'},{k:'report',l:'月报'},{k:'invoices',l:'发票'},{k:'recon',l:'对账'},{k:'export',l:'导出'}]}}" wx:key="k" class="tab-chip {{tab===item.k?'active':''}}" data-tab="{{item.k}}" bindtap="switchTab">{{item.l}}</view>
   </view>
 
-  <!-- 数据导出：财务页为统一入口，跳到经营管理页执行（避免两处重复实现） -->
+  <!-- 数据导出：费用/发票/对账在本页直接导出 -->
   <block wx:if="{{tab==='export'}}">
-    <view class="section-head"><text class="section-title">数据导出</text></view>
+    <view class="section-head"><text class="section-title">数据导出</text><text class="section-caption">费用 / 发票 / 对账直接导出</text></view>
     <view class="export-portal">
-      <view class="export-portal-card">
+      <view class="export-portal-card" wx:for="{{[{k:'expenses',l:'费用'},{k:'invoices',l:'发票'},{k:'recon',l:'对账'}]}}" wx:key="k">
         <view class="export-portal-glyph">⬇</view>
         <view class="export-portal-copy">
-          <text class="export-portal-title">导出销售 / 库存 / 报损 / 往来账</text>
-          <text class="export-portal-desc">按日期范围生成导出文件，统一在经营管理页处理</text>
+          <text class="export-portal-title">导出{{item.l}}</text>
+          <text class="export-portal-desc">从当前已加载数据生成 CSV</text>
         </view>
-        <view class="btn-primary btn-sm" bindtap="goExport">去导出 ›</view>
+        <view class="btn-primary btn-sm" data-type="{{item.k}}" bindtap="exportFinance">导出</view>
       </view>
     </view>
   </block>
@@ -45,6 +45,7 @@
       <text class="chip {{expFilterCategory==='other'?'active':''}}" data-cat="other" bindtap="changeExpCat">其他</text>
     </view>
     <view wx:if="{{loading}}" class="empty-state"><text>费用加载中…</text></view>
+    <view wx:elif="{{loadError}}" class="empty-state"><text>费用加载失败</text><button class="btn-primary" bindtap="loadExpenses">重新加载</button></view>
     <view wx:elif="{{!expenses.length}}" class="empty-state"><text>暂无费用记录</text></view>
     <view wx:else class="cat-list">
       <view wx:for="{{expenses}}" wx:key="id" class="cat-item">
@@ -62,6 +63,7 @@
       <view class="form-input month-input">{{month}} ▾</view>
     </picker>
     <view wx:if="{{reportLoading}}" class="empty-state"><text>加载中…</text></view>
+    <view wx:elif="{{loadError}}" class="empty-state"><text>报表加载失败</text><button class="btn-primary" bindtap="loadReport">重新加载</button></view>
     <view wx:elif="{{monthlyReport}}" class="report-card">
       <view class="report-row"><text>收入</text><text class="ok">¥{{fmt.fixed(monthlyReport.revenue,2)}}</text></view>
       <view class="report-row"><text>采购成本</text><text>¥{{fmt.fixed(monthlyReport.purchase_cost,2)}}</text></view>
@@ -82,6 +84,7 @@
   <block wx:if="{{tab==='invoices'}}">
     <view class="section-head"><text class="section-title">发票归档</text><text class="link" bindtap="openInvForm">+ 归档</text></view>
     <view wx:if="{{invoiceLoading}}" class="empty-state"><text>发票加载中…</text></view>
+    <view wx:elif="{{loadError}}" class="empty-state"><text>发票加载失败</text><button class="btn-primary" bindtap="loadInvoices">重新加载</button></view>
     <view wx:elif="{{!invoices.length}}" class="empty-state"><text>暂无发票</text></view>
     <view wx:else class="cat-list">
       <view wx:for="{{invoices}}" wx:key="id" class="cat-item">
@@ -113,6 +116,7 @@
     </view>
 
     <view wx:if="{{reconLoading}}" class="empty-state"><text>对账任务加载中…</text></view>
+    <view wx:elif="{{loadError}}" class="empty-state"><text>对账任务加载失败</text><button class="btn-primary" bindtap="loadReconciliation">重新加载</button></view>
     <view wx:elif="{{!reconTasks.length}}" class="empty-state"><text>暂无对账任务</text></view>
     <view wx:else class="recon-list">
       <view wx:for="{{reconTasks}}" wx:key="id" class="recon-item {{selectedReconTaskId===item.id?'selected':''}}" data-id="{{item.id}}" bindtap="openReconTask">

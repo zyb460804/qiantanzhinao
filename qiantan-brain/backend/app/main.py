@@ -1,16 +1,19 @@
 """FastAPI application entry point — 千摊智脑."""
 
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.admin_security import get_current_admin
 from app.core.idempotency_middleware import IdempotencyMiddleware
-from app.core.middleware import RequestIDMiddleware
+from app.core.middleware import RequestIDMiddleware, get_request_id
 from app.core.tenant_context import TenantContextMiddleware
 from app.database import get_db, init_db
 from app.routers import (
@@ -21,16 +24,14 @@ from app.routers import (
     auth,
     behavior,
     catalog,
-    cloud,
     device,
     edge,
     environment,
     expense,
-    feedback,
     food_safety,
+    insights,
     inventory,
     market_admin,
-    media,
     operations,
     pos,
     purchase,
@@ -92,6 +93,90 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 全局异常处理：500 可观测性 + 422 中文摘要
+# ---------------------------------------------------------------------------
+
+
+def _validation_error_summary(exc: RequestValidationError) -> str:
+    """把 pydantic 422 校验错误翻译成面向用户的中文摘要（取第一条错误）。
+
+    常见类型映射：missing → 缺少字段X；value_error → 原 msg；
+    其余类型回退为「字段: 原 msg」，避免向前端暴露 pydantic 内部结构。
+    """
+    errors = exc.errors()
+    if not errors:
+        return "请求参数校验失败"
+    first = errors[0]
+    loc = [
+        str(part)
+        for part in first.get("loc", ())
+        if part not in ("body", "query", "path", "header")
+    ]
+    field = ".".join(loc) or "请求参数"
+    err_type = str(first.get("type", ""))
+    msg = str(first.get("msg", ""))
+    if err_type == "missing":
+        return f"缺少字段{field}"
+    if err_type.startswith("value_error"):
+        return msg or f"{field}取值不合法"
+    if err_type.endswith("_type"):
+        return f"{field}类型不正确（{msg}）"
+    # 日期/时间解析类错误（date_parsing / date_from_datetime 等）：pydantic 的
+    # msg 是英文技术文案，统一翻成用户可懂的格式提示。
+    # 注意只匹配 date/datetime/time 根类型的解析错误，uuid_parsing 等不放行。
+    if err_type.split("_", 1)[0] in ("date", "datetime", "time") or _looks_like_date_error(msg):
+        return f"{field}格式不正确，日期应为 YYYY-MM-DD"
+    return f"{field}: {msg}"
+
+
+def _looks_like_date_error(msg: str) -> bool:
+    """识别 pydantic 日期解析错误文案（英文），如 'Input should be a valid date ...'。"""
+    return "valid date" in msg or "valid datetime" in msg or "expected range" in msg
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """422 校验错误 → 中文摘要；状态码保持 422，完整错误列表记 debug 日志。"""
+    logger.debug(
+        "422 validation failed on %s %s: %s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _validation_error_summary(exc)},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """兜底 500：logger.exception 记录完整堆栈（带 request_id），响应统一文案。
+
+    此前未注册 Exception handler，500 时 uvicorn 日志抓不到 traceback，
+    线上问题无法定位；现在保证日志与响应同时落地。
+    """
+    # 异常穿过 BaseHTTPMiddleware 子任务冒泡后 ContextVar 可能已失联，
+    # 回退读请求头（RequestIDMiddleware 会接受客户端提供的 X-Request-ID）。
+    request_id = get_request_id() or request.headers.get("X-Request-ID", "")
+    logger.exception(
+        "Unhandled exception on %s %s (request_id=%s)",
+        request.method,
+        request.url.path,
+        request_id or "-",
+        extra={"request_id": request_id},
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "服务器开小差了，请稍后再试"},
+    )
+
+
 # Prometheus metrics — 自动暴露 /metrics 端点并采集 HTTP 耗时/状态码
 instrumentator = Instrumentator(
     should_group_status_codes=False,
@@ -131,8 +216,9 @@ app.include_router(inventory.router)
 app.include_router(advice.router)
 app.include_router(environment.router)
 app.include_router(twin.router)
-app.include_router(cloud.router)
 app.include_router(behavior.router)
+# 产品意见反馈（原独立 feedback.py 已合并进 behavior，路径保持 /api/v1/feedback）
+app.include_router(behavior.feedback_router)
 app.include_router(reports.router)
 app.include_router(purchase.router)
 app.include_router(edge.router)
@@ -148,9 +234,8 @@ app.include_router(reconciliation.router)
 app.include_router(device.router)
 app.include_router(expense.router)
 app.include_router(market_admin.router)
-app.include_router(feedback.router)
-app.include_router(media.router)
 app.include_router(anomalies.router)
+app.include_router(insights.router)
 
 # Admin panel routers (SaaS management)
 app.include_router(admin_auth.router)

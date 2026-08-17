@@ -3,20 +3,21 @@
 > 面向马路摊贩的多租户 SaaS 经营系统：AI 记账、生鲜动态定价、食品安全合规、离线优先。
 > 本文档基于 2026-08-14 对 `fix/security-correctness-systemic-audit` 分支的全量源码审计整理，
 > 所有结论均有源码出处（`文件:行号`）。CI/pre-commit 的 YAML 内文未逐行核验处已标注。
+> 2026-08-16 删减收口后同步：voice_parser_v2 / experience_cloud / HACCP food_safety 等服务已删除，数字按当前代码实测更新。
 
 ## 1. 总览
 
 ```
 ┌─ 客户端层 ──────────────────────────────────────────────────┐
 │ 微信小程序（24页，双身份，读写分级重试，离线队列 UI）              │
-│ admin-web 平台后台（React 19 + antd，8 页，租户/套餐/设备运营）  │
+│ admin-web 平台后台（React 19 + antd，13 页，租户/套餐/设备运营） │
 ├─ 接入层 ────────────────────────────────────────────────────┤
 │ 商户 JWT + 员工权限（require_permission）                      │
 │ 设备签名防重放（X-Api-Key/Timestamp/Nonce + scope）            │
 │ SaaS 四道门禁：租户 → 订阅 → 套餐功能 → 配额（403/402/403/429） │
 ├─ 业务层 ────────────────────────────────────────────────────┤
 │ POS → 渠道对账 → 日结封账    采购验收 → 批次 FIFO 成本          │
-│ 食品安全 CCP/NCR/锁批次      语音记账（讯飞 ASR + 解析器 v2）    │
+│ 食品安全 追溯/快检/锁批次    语音记账（讯飞 ASR + 语义解析器）   │
 ├─ 智能层 ────────────────────────────────────────────────────┤
 │ Prophet 预测 / 库存优化 / 动态定价(Q10 衰减) / 统计异常检测      │
 │   → Recommendation → AIAction(pending) → 人工执行 + 审计       │
@@ -31,10 +32,10 @@
 
 | 目录 | 内容 |
 |---|---|
-| `backend/app/` | FastAPI 主应用：`main.py`（API 入口）、`worker.py`（定时任务）、`routers/`（32 个）、`services/`（32 个）、`models/`、`schemas/`、`core/`（安全/租户/时区/配额） |
+| `backend/app/` | FastAPI 主应用：`main.py`（API 入口）、`worker.py`（定时任务）、`routers/`（36 个）、`services/`（26 个）、`models/`、`schemas/`、`core/`（安全/租户/时区/配额） |
 | `backend/admin-web/` | React 管理后台 |
 | `backend/migrations/` | Alembic（`env.py` 通配导入 `models/__init__.__all__`，防新增表漏迁移） |
-| `backend/tests/` | 55 个测试文件 ≈549 用例（API + 算法 + 对抗性 + 幂等/锁专项） |
+| `backend/tests/` | 72 个测试文件，872 用例（API + 算法 + 对抗性 + 幂等/锁专项） |
 | `miniprogram/` | 微信小程序：`app.js`（运行时中枢）、24 页面、6 组件、utils 工具层 |
 | `edge/` | 树莓派边缘控制器（vision/ + weighing/ + 离线 SQLite 队列） |
 | `ml/` | YOLO 训练/评估、Prophet 预测、合成数据生成 |
@@ -89,10 +90,11 @@
 
 录音（16k/16bit/mono）→ 讯飞 ASR v2（`services/asr_iflytek.py`：HMAC-SHA256 签名
 URL、1280B/帧流式、显式 `proxy=None` 防代理劫持、HTTP 降级、无凭证时空串回退文本
-输入；方言 pd 参数与前端 profile 对齐）→ 解析器 v2（`services/voice_parser_v2.py`：
-供应商抽取、包装/净重分离、别名→SKU→标准单位换算、`总额/净重`自动单价、
-sha256 派生幂等键、未知事件强制 `needs_confirmation`，置信度
-`1−0.1×缺失−0.05×猜测`）→ `VoiceLog` 状态机（pending→parsed→confirmed/voided，
+输入；方言 pd 参数与前端 profile 对齐）→ 语义解析器（`services/voice_parser.py`：
+关键词 + 正则抽取商品/数量/单价；2026-08 语音 P0 修复后支持汉字数字全量解析
+（两/十五/一百零五/两斤半/半斤）、口语金额抽取（块/元/毛/角/分及「花了80」
+形态，缺金额时 `missing_fields` 显式标记而非静默 0 元）、多意图按 又/然后/再/
+逗号/分号 切分一次多笔记账、数量绑定最近商品词并排除单价短语（X元一斤）内的数量）→ `VoiceLog` 状态机（pending→parsed→confirmed/voided，
 支持 correct/edit/void；修正字段白名单 `extra="forbid"`，见 `schemas/voice.py`
 C-1/L5 修复注释）→ confirm 落账 + FIFO 批次消耗。
 
@@ -124,10 +126,10 @@ C-1/L5 修复注释）→ confirm 落账 + FIFO 批次消耗。
 - 四道门禁依赖链：`require_active_tenant`(403) → `require_active_subscription`(402)
   → `require_plan_feature`(403) → `require_quota_check`(429，先检查后记账)；
   工厂糖 `PlanFeature("pos")` / `QuotaCheck("api_calls")`。
-- 行级隔离为**约定式**：所有查询显式带 `WHERE tenant_id/merchant_id`，
-  非数据库 RLS。
-- ⚠️ `STRICT_TENANT_REQUIRED = False`（`core/tenant_context.py:47`）：
-  迁移过渡期，未绑定租户仅告警放行，上线前须切 True。
+- 行级隔离为**应用层 WHERE 过滤**：所有查询显式带 `WHERE tenant_id/merchant_id`，
+  非数据库 RLS（`core/rls.py` 已删除，见 `database.py` 注释）。
+- `STRICT_TENANT_REQUIRED = True`（`core/tenant_context.py:47`）：
+  未绑定租户的请求直接 403。
 - 通用状态机 `services/state_machine.py`：Tenant/Subscription/Invoice/AIAction
   转移表 + 409 校验，禁止路由直接赋值 status。
 
@@ -146,13 +148,13 @@ APScheduler AsyncIOScheduler，每 Job 独立 session，可选 Redis 分布式�
 
 停服闭环：Worker 置 suspended → 门禁①拦截 → 欠费即全面停用，业务路由零改动。
 
-## 8. 食品安全（`services/food_safety.py`）
+## 8. 食品安全（`routers/food_safety.py`）
 
-简化版 HACCP，6 个 CCP：冷藏温度（分品类 4~10°C）/ 热柜（>60°C）/ 加工时间
-（熟食<4h，环境>32°C 收紧 2h）/ 清洁消毒 / 来源可溯 / 交叉污染。
-超标读数自动生成 NCR（按程度分级）；五维评分卡（25+25+20+15+15）映射 A~F；
-`check_expiry` 与动态定价共用同一质量衰减模型。
-⚠️ `CATEGORY_SHELF_LIFE` 在 `food_safety.py` 与 `dynamic_pricing.py` 各存一份（DRY 债）。
+批次追溯与合规：批次列表 / 全链路追溯（QR 码生成、公开扫码查询、二维码 PNG、
+消费者扫码反馈——均无需商户 token）、快检记录（inspect）、锁批次
+（POS 立即停售该批次，POS 与 AI 执行链 lock_batch 共用）。
+> 2026-08-16 审计删除了未接线的 HACCP CCP 服务（`services/food_safety.py`），
+> 货架期常量仅存于 `dynamic_pricing.py` 一份，原 DRY 债随之消除。
 
 ## 9. 边缘与设备（`edge/` + `models/device.py`）
 
@@ -179,8 +181,10 @@ APScheduler AsyncIOScheduler，每 Job 独立 session，可选 Redis 分布式�
 ## 11. admin-web（`backend/admin-web/`）
 
 React 19 + antd v5（`@ant-design/v5-patch-for-react-19`）+ react-router +
-AuthContext（对接 `/api/v1/admin/auth`）。8 页：Login/Dashboard/Tenants/
-TenantDetail/Plans/Devices/Monitoring/AiOps。品牌 CSS 变量运行时注入 `:root`，
+AuthContext（对接 `/api/v1/admin/auth`）。13 页：Login/Dashboard/Monitoring/
+Tenants/TenantDetail/Onboarding/Plans/Subscriptions/Invoices/Usage/AuditLog/
+AiOps/Admins（设备监控与死信队列已并入 Monitoring，租户新建跳转 Onboarding
+接入向导）。品牌 CSS 变量运行时注入 `:root`，
 与小程序色彩体系对齐。
 
 ## 12. 质量门禁
@@ -190,7 +194,7 @@ TenantDetail/Plans/Devices/Monitoring/AiOps。品牌 CSS 变量运行时注入 `
   - `scripts/check_large_files.py`：>1 MiB 拒绝；`.env/.pem/.key` 视为秘密拦截。
   - `scripts/wxss_lint.py`：WXSS 兼容性——禁 `@media`/`:root`/通配符/`vh vw rem`/
     本地 `url()`。
-- 后端 55 个测试文件 ≈549 用例；docker-compose 三层（base/dev/prod）。
+- 后端 72 个测试文件，872 用例；docker-compose 三层（base/dev/prod）。
 - ⚠️ 证据边界：ci.yml 具体 job 编排、pre-commit 完整 hook 清单、compose 服务
   拓扑未逐行核验（本文件生成会话无文件读取工具），如需补充请核对后更新本节。
 
@@ -198,8 +202,6 @@ TenantDetail/Plans/Devices/Monitoring/AiOps。品牌 CSS 变量运行时注入 `
 
 | 项 | 位置 | 说明 |
 |---|---|---|
-| 租户强制开关未开 | `core/tenant_context.py:47` | `STRICT_TENANT_REQUIRED=False` 过渡态，上线前必须切 True |
-| 货架期常量双份 | `food_safety.py:243` / `dynamic_pricing.py:94` | 应抽公共常量模块 |
 | 发票号时间戳取模 | `app/worker.py:226` | 注释自认应改 DB sequence |
 | CI 内文未核验 | `.github/workflows/ci.yml` | 见 §12 证据边界 |
 

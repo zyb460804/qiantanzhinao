@@ -46,6 +46,19 @@ class ProductSKU(Base):
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime, server_default=sa.func.now(), nullable=False
     )
+    __table_args__ = (
+        # 活跃 SKU 同商户内标准名唯一（部分唯一索引：软停用/软删的旧行
+        # is_active=False 不占坑，允许停用后同名重建）。迁移 s1d2e3f4a6b7
+        # 在存量库补齐同名索引 —— create_all 与迁移 DDL 必须一字不差。
+        sa.Index(
+            "uq_active_sku_name_per_merchant",
+            "merchant_id",
+            "name",
+            unique=True,
+            sqlite_where=sa.text("is_active = 1"),
+            postgresql_where=sa.text("is_active"),
+        ),
+    )
 
 
 class ProductAlias(Base):

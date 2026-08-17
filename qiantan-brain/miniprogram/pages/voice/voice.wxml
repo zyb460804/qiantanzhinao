@@ -31,6 +31,7 @@
       <text class="stage-tip" wx:if="{{state === 'idle'}}">例如：“今天进了白菜50斤，三毛一斤”</text>
       <text class="stage-tip active" wx:elif="{{state === 'listening'}}">正在记录，松开后自动识别</text>
       <text class="stage-tip active" wx:elif="{{state === 'uploading'}}">上传中 {{uploadProgress}}%</text>
+      <text class="stage-tip active" wx:elif="{{state === 'respeaking'}}">正在重说，说完点纠错卡上的按钮</text>
       <text class="stage-tip active" wx:elif="{{state === 'pending_retry'}}">网络异常，录音已暂存</text>
       <text class="stage-tip active" wx:else>正在把你的话整理成账目</text>
       <!-- 上传进度条：仅在上传中且未到 100% 时显示 -->
@@ -61,7 +62,75 @@
     <text class="asr-text">“{{asrText}}”</text>
   </view>
 
-  <record-card wx:if="{{parsed}}" record="{{parsed}}" show-actions="{{state === 'success' || state === 'confirm_needed'}}" bind:confirm="confirmRecord" bind:correct="correctAndConfirm" />
+  <!-- 多意图：汇总条（逐条确认进度 + 一键全部确认） -->
+  <view class="multi-bar" wx:if="{{parsedEvents && parsedEvents.length > 1 && showRecords}}">
+    <view class="multi-copy">
+      <text class="multi-title">一次听出 {{parsedEvents.length}} 笔</text>
+      <text class="multi-done">已确认 {{confirmedCount}}/{{parsedEvents.length}}</text>
+    </view>
+    <view class="multi-btn {{confirmedCount >= parsedEvents.length ? 'done' : ''}}" bindtap="confirmAll">
+      {{confirmedCount >= parsedEvents.length ? '都记好了' : '一键全部确认'}}
+    </view>
+  </view>
+
+  <!-- 后端 warning（如部分内容没听清，整体仍可确认） -->
+  <view class="parse-warning" wx:if="{{parseWarning}}"><text>{{parseWarning}}</text></view>
+
+  <!-- 多意图：逐笔确认卡 -->
+  <block wx:if="{{parsedEvents && parsedEvents.length > 1 && showRecords}}">
+    <view class="multi-item {{item._confirmed ? 'done' : ''}}" wx:for="{{parsedEvents}}" wx:key="_key">
+      <view class="multi-item-head">
+        <text class="multi-item-tag {{item._confirmed ? 'ok' : ''}}">{{item._confirmed ? '已入账' : '第' + (index + 1) + '笔'}}</text>
+      </view>
+      <record-card record="{{item}}" show-actions="{{!item._confirmed}}" bind:confirm="confirmRecord" bind:correct="correctAndConfirm" />
+    </view>
+  </block>
+
+  <!-- 单条：渲染行为与旧版一致 -->
+  <record-card wx:if="{{parsed && !(parsedEvents && parsedEvents.length > 1)}}" record="{{parsed}}" show-actions="{{showRecords}}" bind:confirm="confirmRecord" bind:correct="correctAndConfirm" />
+
+  <!-- 页内纠错卡：商品 chips 点选 + 数字键盘 + 重说这一项（替代串行弹窗） -->
+  <view class="cp" wx:if="{{correction}}">
+    <view class="cp-head">
+      <view>
+        <text class="cp-eyebrow">CORRECTION</text>
+        <text class="cp-title">改一改这笔账</text>
+      </view>
+      <text class="cp-close" bindtap="closeCorrection">收起</text>
+    </view>
+
+    <view class="cp-field">
+      <text class="cp-label">商品（点一下就选好）</text>
+      <view class="cp-chips" wx:if="{{correction.candidates.length > 0}}">
+        <view class="cp-chip {{correction.product === item ? 'active' : ''}}" wx:for="{{correction.candidates}}" wx:key="*this" data-name="{{item}}" bindtap="pickProductChip">{{item}}</view>
+      </view>
+      <input class="cp-input cp-input-text" type="text" value="{{correction.product}}" placeholder="列表没有？在这里改" bindinput="onCorrectProduct" />
+    </view>
+
+    <view class="cp-grid">
+      <view class="cp-field">
+        <text class="cp-label">数量</text>
+        <view class="cp-input-wrap">
+          <input class="cp-input" type="digit" value="{{correction.quantity}}" placeholder="0" bindinput="onCorrectQuantity" />
+          <text class="cp-unit">{{correction.unit || '斤'}}</text>
+        </view>
+      </view>
+      <view class="cp-field">
+        <text class="cp-label">金额</text>
+        <view class="cp-input-wrap">
+          <input class="cp-input" type="digit" value="{{correction.amount}}" placeholder="0" bindinput="onCorrectAmount" />
+          <text class="cp-unit">元</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="cp-respeak {{state === 'respeaking' ? 'on' : ''}}" bindtap="toggleRespeak">
+      <icon name="mic" size="30" color="{{state === 'respeaking' ? '#c93a30' : 'var(--green-700)'}}" />
+      <text>{{state === 'respeaking' ? '正在说…说完点这里' : '重说这一项'}}</text>
+    </view>
+
+    <button class="btn-primary cp-submit" bindtap="submitCorrection" disabled="{{correction.submitting}}">保存并确认</button>
+  </view>
 
   <view class="error-panel" wx:if="{{state === 'error'}}">
     <icon name="bulb" size="40" color="var(--red)" />

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Card, Table, Tag, Button, Space, Select, Modal, Descriptions, message } from 'antd'
-import { ReloadOutlined, DownloadOutlined, DollarOutlined } from '@ant-design/icons'
+import { Card, Table, Tag, Button, Space, Select, Modal, Descriptions, message, Form, Input, InputNumber } from 'antd'
+import { ReloadOutlined, DownloadOutlined, DollarOutlined, PlusOutlined, FileAddOutlined, StopOutlined } from '@ant-design/icons'
 import api from '../api/client'
 import dayjs from 'dayjs'
 import PageHeader from '../components/PageHeader'
@@ -20,6 +20,25 @@ export default function Invoices() {
   const [statusFilter, setStatusFilter] = useState(undefined)
   const [detailVisible, setDetailVisible] = useState(false)
   const [detail, setDetail] = useState(null)
+  const [createVisible, setCreateVisible] = useState(false)
+  const [generateVisible, setGenerateVisible] = useState(false)
+  const [tenants, setTenants] = useState([])
+  const [subscriptions, setSubscriptions] = useState([])
+  const [createForm] = Form.useForm()
+  const [generateForm] = Form.useForm()
+
+  const fetchOptions = useCallback(async () => {
+    try {
+      const [tenantRes, subRes] = await Promise.all([
+        api.get('/tenants', { params: { page: 1, page_size: 100 } }),
+        api.get('/subscriptions', { params: { page: 1, page_size: 100 } }),
+      ])
+      setTenants(tenantRes.items || [])
+      setSubscriptions(subRes.items || [])
+    } catch {
+      /* error handled globally */
+    }
+  }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -37,6 +56,10 @@ export default function Invoices() {
     fetchData()
   }, [fetchData])
 
+  useEffect(() => {
+    fetchOptions()
+  }, [fetchOptions])
+
   const showDetail = async (id) => {
     try {
       const res = await api.get(`/invoices/${id}`)
@@ -53,6 +76,51 @@ export default function Invoices() {
       message.success('已标记为已支付')
       fetchData()
     } catch {
+      /* error handled globally */
+    }
+  }
+
+  const handleVoid = async (id, _reason) => {
+    try {
+      await api.put(`/invoices/${id}`, { status: 'void' })
+      message.success('发票已作废')
+      fetchData()
+    } catch {
+      /* error handled globally */
+    }
+  }
+
+  const handleCreate = async (_reason) => {
+    try {
+      const values = await createForm.validateFields()
+      await api.post('/invoices', {
+        tenant_id: values.tenant_id,
+        subscription_id: values.subscription_id || undefined,
+        amount: values.amount,
+        currency: 'CNY',
+        due_days: values.due_days || 30,
+        notes: values.notes || undefined,
+      })
+      message.success('发票已生成')
+      createForm.resetFields()
+      setCreateVisible(false)
+      fetchData()
+    } catch (err) {
+      if (err?.errorFields) return
+      /* error handled globally */
+    }
+  }
+
+  const handleGenerateFromSubscription = async (_reason) => {
+    try {
+      const values = await generateForm.validateFields()
+      const res = await api.post(`/invoices/generate-from-subscription/${values.subscription_id}`)
+      message.success(res?.message || '续期发票已生成')
+      generateForm.resetFields()
+      setGenerateVisible(false)
+      fetchData()
+    } catch (err) {
+      if (err?.errorFields) return
       /* error handled globally */
     }
   }
@@ -119,6 +187,20 @@ export default function Invoices() {
               </ConfirmWithReason>
             )}
           </PermissionGate>
+          <PermissionGate permission={PERMISSIONS.INVOICE_UPDATE}>
+            {r.status !== 'void' && (
+              <ConfirmWithReason
+                title="作废发票"
+                description={`将发票 ${r.invoice_no} 作废`}
+                impact="作废后不可恢复，将记录到审计日志。"
+                onSubmit={(reason) => handleVoid(r.id, reason)}
+              >
+                <Button size="small" danger icon={<StopOutlined />}>
+                  作废
+                </Button>
+              </ConfirmWithReason>
+            )}
+          </PermissionGate>
         </Space>
       ),
     },
@@ -131,6 +213,14 @@ export default function Invoices() {
         subtitle={`${data.total || 0} 张发票`}
         extra={
           <Space>
+            <PermissionGate permission={PERMISSIONS.INVOICE_CREATE}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
+                手工开票
+              </Button>
+              <Button icon={<FileAddOutlined />} onClick={() => setGenerateVisible(true)}>
+                从订阅生成续期票
+              </Button>
+            </PermissionGate>
             <Select
               allowClear
               placeholder="状态筛选"
@@ -207,6 +297,126 @@ export default function Invoices() {
             {detail.notes && <Descriptions.Item label="备注">{detail.notes}</Descriptions.Item>}
           </Descriptions>
         )}
+      </Modal>
+
+      <Modal
+        title="手工开票"
+        open={createVisible}
+        onCancel={() => {
+          setCreateVisible(false)
+          createForm.resetFields()
+        }}
+        footer={
+          <Space>
+            <Button
+              onClick={() => {
+                setCreateVisible(false)
+                createForm.resetFields()
+              }}
+            >
+              取消
+            </Button>
+            <ConfirmWithReason
+              title="生成手工发票"
+              description="将按表单内容创建一张新的发票"
+              impact="创建后状态为草稿，可后续发送/标记已付；操作会记录审计日志。"
+              onSubmit={handleCreate}
+            >
+              <Button
+                type="primary"
+                onClick={(event) => {
+                  createForm.validateFields().catch(() => event.stopPropagation())
+                }}
+              >
+                生成发票
+              </Button>
+            </ConfirmWithReason>
+          </Space>
+        }
+        width={560}
+      >
+        <Form form={createForm} layout="vertical" initialValues={{ currency: 'CNY', due_days: 30 }}>
+          <Form.Item name="tenant_id" label="租户" rules={[{ required: true, message: '请选择租户' }]}>
+            <Select
+              showSearch
+              placeholder="选择租户"
+              optionFilterProp="label"
+              options={tenants.map((t) => ({ value: t.id, label: `${t.name} (${t.slug})` }))}
+            />
+          </Form.Item>
+          <Form.Item name="subscription_id" label="关联订阅（可选）">
+            <Select
+              allowClear
+              showSearch
+              placeholder="选择订阅"
+              optionFilterProp="label"
+              options={subscriptions.map((s) => ({
+                value: s.id,
+                label: `${s.tenant_name} - ${s.plan_name} (${s.billing_cycle === 'yearly' ? '年付' : '月付'})`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="amount" label="金额" rules={[{ required: true, message: '请输入金额' }]}>
+            <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+          </Form.Item>
+          <Form.Item name="due_days" label="账期（天）" rules={[{ required: true }]}>
+            <InputNumber min={0} max={365} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="notes" label="备注">
+            <Input.TextArea rows={3} maxLength={2000} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="从订阅生成续期票"
+        open={generateVisible}
+        onCancel={() => {
+          setGenerateVisible(false)
+          generateForm.resetFields()
+        }}
+        footer={
+          <Space>
+            <Button
+              onClick={() => {
+                setGenerateVisible(false)
+                generateForm.resetFields()
+              }}
+            >
+              取消
+            </Button>
+            <ConfirmWithReason
+              title="生成续期发票"
+              description="根据所选订阅的当前周期生成下一计费周期发票"
+              impact="可能生成新发票；若该周期已有发票则幂等返回已有发票。"
+              onSubmit={handleGenerateFromSubscription}
+            >
+              <Button
+                type="primary"
+                onClick={(event) => {
+                  generateForm.validateFields().catch(() => event.stopPropagation())
+                }}
+              >
+                生成续期票
+              </Button>
+            </ConfirmWithReason>
+          </Space>
+        }
+        width={520}
+      >
+        <Form form={generateForm} layout="vertical">
+          <Form.Item name="subscription_id" label="订阅" rules={[{ required: true, message: '请选择订阅' }]}>
+            <Select
+              showSearch
+              placeholder="选择订阅"
+              optionFilterProp="label"
+              options={subscriptions.map((s) => ({
+                value: s.id,
+                label: `${s.tenant_name} - ${s.plan_name} (${s.status})`,
+              }))}
+            />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   )
