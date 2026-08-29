@@ -73,3 +73,6 @@ htmlcov/
 
 # Local AI assistant configuration
 .claude/
+
+# 工具运行时缓存（2026-08-17，勿入库）
+.mimosa/
