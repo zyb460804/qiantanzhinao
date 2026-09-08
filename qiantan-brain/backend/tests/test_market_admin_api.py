@@ -72,18 +72,6 @@ class TestMarketAdminRoles:
         assert res.status_code == 200
         assert "market_id" in res.json()["data"]
 
-    async def test_owner_cannot_post_notice(self, client):
-        """owner 角色发通知 → 403（角色门禁先于 body 字段校验）。"""
-        res = await client.post(
-            "/api/v1/market-admin/notices",
-            json={
-                "market_id": str(uuid.uuid4()),
-                "title": "t",
-                "content": "c",
-            },
-        )
-        assert res.status_code == 403
-
     async def test_owner_cannot_register_merchant(self, client):
         """owner 角色注册商户入场 → 403。"""
         res = await client.post(
@@ -120,42 +108,6 @@ class TestMarketAdminRoles:
 
 
 class TestMarketMembership:
-    async def test_market_admin_cannot_post_notice_without_membership(
-        self, client, db_session
-    ):
-        """market_admin 角色但非该市场成员 → 403（_require_market_member）。"""
-        market_id = await _create_market(client, "无成员市场")
-        res = await client.post(
-            "/api/v1/market-admin/notices",
-            json={
-                "market_id": market_id,
-                "title": "通知标题",
-                "content": "通知内容",
-            },
-            headers={"X-Test-Token-Role": "market_admin"},
-        )
-        assert res.status_code == 403
-        assert "不属于此市场" in res.json()["detail"]
-
-    async def test_market_admin_can_post_notice_with_membership(
-        self, client, db_session
-    ):
-        """market_admin 角色且为该市场成员 → 200。"""
-        market_id = await _create_market(client, "有成员市场")
-        await _seed_market_membership(db_session, market_id)
-
-        res = await client.post(
-            "/api/v1/market-admin/notices",
-            json={
-                "market_id": market_id,
-                "title": "停水通知",
-                "content": "明天全天停水",
-            },
-            headers={"X-Test-Token-Role": "market_admin"},
-        )
-        assert res.status_code == 200, res.text
-        assert res.json()["data"]["title"] == "停水通知"
-
     async def test_list_markets_only_returns_member_markets(self, client, db_session):
         """list_markets 不泄露非关联市场（审计 P1-加载通知列表数据泄露）。"""
         # 创建两个市场，只加入其中一个

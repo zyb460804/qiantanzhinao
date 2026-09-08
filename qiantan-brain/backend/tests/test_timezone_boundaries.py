@@ -214,7 +214,12 @@ async def test_twin_business_mirror_cst_day_bucket(client, db_session):
 
 @pytest.mark.asyncio
 async def test_expense_monthly_report_cst_month_boundary(client, db_session):
-    """CST 8/1 00:30 的订单（= UTC 7/31 16:30）计入 8 月月报，不串到 7 月。"""
+    """CST 8/1 00:30 的订单（= UTC 7/31 16:30）计入 8 月月报，不串到 7 月。
+
+    P2-5：月报 revenue 改为库存台账口径（sale - refund）；POS 订单实际也会
+    落库存流水 —— 测试同时种订单与其对应台账流水。
+    """
+    from app.models.inventory import InventoryRecord
     from app.models.pos import SaleOrder
 
     mid = uuid.UUID(TEST_MERCHANT_ID)
@@ -226,6 +231,17 @@ async def test_expense_monthly_report_cst_month_boundary(client, db_session):
                 status="paid",
                 total_amount=Decimal("88"),
                 created_at=datetime(2026, 7, 31, 16, 30),  # = CST 2026-08-01 00:30
+            )
+        )
+        session.add(
+            InventoryRecord(
+                merchant_id=mid,
+                product_id=1,
+                quantity=Decimal("-8"),
+                unit="斤",
+                total_amount=Decimal("88"),
+                event_type="sale",
+                event_time=datetime(2026, 7, 31, 16, 30),
             )
         )
         await session.commit()

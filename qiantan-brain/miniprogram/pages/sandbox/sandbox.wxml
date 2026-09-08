@@ -30,6 +30,13 @@
     <button class="run-button" bindtap="runSimulation" loading="{{loading}}" disabled="{{loading || productsEmpty}}"><text class="run-mark">算</text>{{loading ? '正在推演...' : '开始经营试算'}}</button>
   </view>
 
+  <!-- P0-2 UI 面：试算失败持久错误态（toast 3 秒即逝，老年用户常错过） -->
+  <view class="sim-error" wx:if="{{simError && !loading}}">
+    <text class="sim-error-title">这次试算没有成功</text>
+    <text class="sim-error-desc">网络或服务暂时不可用，参数未丢失，点下方按钮再试一次。</text>
+    <button class="btn-sm btn-secondary" bindtap="runSimulation">再试一次</button>
+  </view>
+
   <view wx:if="{{result && result.single}}">
     <view class="section-head"><text class="section-title">本次结果</text><text class="tag {{result.single.comparison.improvement >= 0 ? 'tag-green' : 'tag-red'}}">{{result.single.comparison.verdict}}</text></view>
     <view class="profit-card">

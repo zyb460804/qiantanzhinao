@@ -586,11 +586,21 @@ async def start_stocktake(
         for product in missing_result.scalars().all():
             products_by_id[product.id] = product
 
+    # P2-2 修复：只为「有账面流水」的品项生成待盘项（账面 0 但有历史流水
+    # 的仍保留——可能漏记）。此前全品类生成（12 项里 11 项从未交易过），
+    # 摊主被迫逐项录 0 才能完成盘点。
+    ledger_product_ids = sorted(pid for pid in book_qty_by_product if pid in products_by_id)
+    if not ledger_product_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="还没有任何库存流水，先记一笔进货再盘点",
+        )
+
     session = StocktakeSession(merchant_id=merchant_id, status="in_progress")
     db.add(session)
     await db.flush()
 
-    for product_id in sorted(products_by_id):
+    for product_id in ledger_product_ids:
         product = products_by_id[product_id]
         db.add(
             StocktakeItem(

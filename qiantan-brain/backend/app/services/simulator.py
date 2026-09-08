@@ -63,6 +63,10 @@ def simulate_what_if(
     unit_price = float(unit_price)
     if avg_historical_price is not None:
         avg_historical_price = float(avg_historical_price)
+    # P0-2 修复：estimated_sales_base 由小程序从 what-if 响应原样带回，
+    # pydantic 解析成 Decimal，与 float sales_mult 相乘会 TypeError → 500。
+    if estimated_sales_base is not None:
+        estimated_sales_base = float(estimated_sales_base)
 
     product_info = _get_product_info(product_name)
 

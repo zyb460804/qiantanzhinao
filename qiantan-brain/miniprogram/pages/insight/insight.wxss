@@ -37,7 +37,7 @@
 }
 .card-value { flex: 0 0 auto; color: var(--muted); font-size: 22rpx; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 14rpx; }
-.mini-tag { padding: 6rpx 14rpx; border-radius: var(--r-sm); font-size: 20rpx; font-weight: 650; }
+.mini-tag { padding: 6rpx 14rpx; border-radius: var(--r-sm); font-size: 22rpx; font-weight: 650; }
 .mini-tag.tomato { color: var(--tomato-ink); background: var(--tomato-soft); }
 .mini-tag.green { color: var(--green-700); background: var(--green-50); }
 .card-desc { display: block; margin-top: 14rpx; color: var(--ink-2); font-size: 23rpx; line-height: 1.55; }
@@ -61,10 +61,10 @@
   color: #fff;
   background: var(--tomato);
   border-radius: var(--r-sm);
-  font-size: 20rpx;
+  font-size: 22rpx;
   font-weight: 750;
 }
-.meta-row { display: flex; flex-wrap: wrap; gap: 8rpx 18rpx; margin-top: 12rpx; color: var(--muted); font-size: 20rpx; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8rpx 18rpx; margin-top: 12rpx; color: var(--muted); font-size: 22rpx; }
 .foot-note {
   display: flex;
   justify-content: space-between;
@@ -73,13 +73,13 @@
   padding-top: 12rpx;
   border-top: 1rpx solid var(--line-soft);
   color: var(--muted);
-  font-size: 20rpx;
+  font-size: 22rpx;
 }
 
 /* ── 进货建议卡片 ── */
 .qty-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10rpx; margin-top: 16rpx; }
 .qty-cell { padding: 12rpx 8rpx; text-align: center; background: var(--paper-2); border-radius: var(--r-md); }
-.qty-label { display: block; color: var(--muted); font-size: 19rpx; }
+.qty-label { display: block; color: var(--muted); font-size: 22rpx; }
 .qty-num {
   display: block;
   margin-top: 6rpx;

@@ -13,13 +13,14 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
 from app.core.security import get_current_merchant, get_merchant_id
-from app.core.timezone import utc_now, utc_today_start
+from app.core.timezone import cst_today, utc_now, utc_today_start
 from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.batch import BatchLifecycle
 from app.models.catalog import ProductAlias, ProductSKU
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
+from app.models.pos import DailySettlement
 from app.models.product import ProductCategory
 from app.models.voice import VoiceLog
 from app.routers.staff import require_permission
@@ -51,6 +52,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/voice", tags=["voice"])
 
+
+async def _check_settlement_locked(db: AsyncSession, merchant_id) -> None:
+    """P1-3 修复：日结锁定口径统一 —— POS 下单/退款在日结 closed 后被拦，
+    语音记账（confirm/edit/void）此前不拦，导致日结快照与后续流水脱节
+    （实测日结 9.5 元 vs 日报 220.5 元）。此守卫与 pos.py 同判定（CST 业务日）。
+    """
+    from sqlalchemy import select as _select
+
+    settlement = await db.scalar(
+        _select(DailySettlement).where(
+            DailySettlement.merchant_id == merchant_id,
+            DailySettlement.date == cst_today(),
+            DailySettlement.status == "closed",
+        )
+    )
+    if settlement:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"日结已关闭({cst_today()})，不允许新增或修改业务数据；"
+                "如需补录请先在 POS 页重新日结"
+            ),
+        )
+
+
 _RULES_DIR = Path(__file__).parent.parent / "rules"
 
 # 修复 C-9：音频上传大小/类型上限（参照 vision.py 的 _MAX_IMAGE_SIZE 模式）。
@@ -76,6 +102,57 @@ def _json_safe(value):
     if isinstance(value, Decimal):
         return float(value)
     return value
+
+
+def _dec(value) -> Decimal | None:
+    """宽松转 Decimal；None/非法值返回 None。"""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _recompute_amounts(merged: dict, prev: dict, corrections_keys: set) -> dict:
+    """P0-1 修复：数量/单价被修正时同步重算金额。
+
+    规则（用户显式修正 total_amount 时尊重用户输入，不重算）：
+      - 事件单价存在（sale→unit_price，purchase→unit_cost）且数量存在：
+        total = 数量 × 单价；
+      - 单价缺失但修正了数量，且旧值可折算隐含单价（旧total/旧数量）：
+        total = 隐含单价 × 新数量；
+      - 只修正了单价且数量存在：total = 数量 × 新单价。
+    同步回写 total_revenue（sale）/ total_cost（purchase）保持口径一致。
+    """
+    if "total_amount" in corrections_keys:
+        return merged
+    etype = merged.get("event_type") or prev.get("event_type")
+    qty = _dec(merged.get("quantity"))
+    if qty is None or qty <= 0:
+        return merged
+    price = _dec(merged.get("unit_price")) if etype == "sale" else _dec(merged.get("unit_cost"))
+    if price is None and ("unit_price" in corrections_keys or "unit_cost" in corrections_keys):
+        # 用户显式清空/未给单价时不猜
+        return merged
+    if price is None:
+        # 修正了数量但无单价：按旧值折算隐含单价
+        if "quantity" not in corrections_keys:
+            return merged
+        prev_qty = _dec(prev.get("quantity"))
+        prev_total = _dec(
+            prev.get("total_amount") or prev.get("total_revenue") or prev.get("total_cost")
+        )
+        if prev_qty is None or prev_qty <= 0 or prev_total is None or prev_total <= 0:
+            return merged
+        price = (prev_total / prev_qty).quantize(Decimal("0.0001"))
+    total = (qty * price).quantize(Decimal("0.01"))
+    merged["total_amount"] = float(total)
+    if etype == "sale":
+        merged["total_revenue"] = float(total)
+    elif etype == "purchase":
+        merged["total_cost"] = float(total)
+    return merged
 
 
 async def _lookup_product(db: AsyncSession, name: str) -> int | None:
@@ -396,10 +473,13 @@ async def get_today_voice_count(
 ):
     """Return the exact number of voice records created today."""
     # created_at 由 server_default now() 存储为 UTC，边界须用 UTC 零点（见 purchase.py 同类修复）。
+    # UI 口径修复：只统计已入账（confirmed）——此前 pending/parsed 的解析残留
+    # 也计数，「今日已记 7」里 4 条其实是失败残条，虚高误导。
     today_start = utc_today_start()
     query = select(func.count(VoiceLog.id)).where(
         VoiceLog.merchant_id == merchant_id,
         VoiceLog.created_at >= today_start,
+        VoiceLog.status == "confirmed",
     )
     result = await db.execute(query)
     return {"code": 0, "data": {"today_count": int(result.scalar() or 0)}}
@@ -434,6 +514,10 @@ async def get_voice_logs(
                 "asr_text": log.asr_text,
                 "parsed_event": log.parsed_event,
                 "status": log.status,
+                # UI 修复：「最近说过」列表直接可绑定的金额（此前只有嵌套 parsed_event）
+                "total_amount": (
+                    (log.parsed_event or {}).get("total_amount") if log.parsed_event else None
+                ),
                 "created_at": log.created_at.isoformat() if log.created_at else None,
             }
             for log in logs
@@ -488,12 +572,15 @@ async def correct_voice(
 
         # P0：parsed_event 是 JSON 列，原地 .update() 不会被 SQLAlchemy 变更追踪，
         # commit 不生成 UPDATE → 用户修正静默丢失。必须赋新 dict + flag_modified。
+        prev_event = dict(log.parsed_event)
         merged = {
-            **dict(log.parsed_event),
+            **prev_event,
             **updates,
             "missing_fields": [],
             "confidence": 1.0,
         }
+        # P0-1 修复：数量/单价被修正时重算金额，防止「100斤200元改成2斤」仍按 200 元入账。
+        merged = _recompute_amounts(merged, prev_event, set(updates.keys()))
         log.parsed_event = merged
         flag_modified(log, "parsed_event")
 
@@ -531,6 +618,8 @@ async def confirm_voice(
         raise HTTPException(status_code=404, detail="Voice log not found")
     if not log.parsed_event:
         raise HTTPException(status_code=400, detail="No parsed event to confirm")
+    # P1-3：日结锁定统一拦截（与 POS 下单同判定）
+    await _check_settlement_locked(db, log.merchant_id)
 
     parsed = log.parsed_event
     if log.status == "confirmed":
@@ -642,6 +731,16 @@ async def confirm_voice(
             unit_cost = (total_amount / book_qty).quantize(Decimal("0.01"))
         if unit_price is not None:
             unit_price = (total_amount / book_qty).quantize(Decimal("0.01"))
+    # P0-1 兜底：parsed_event 的 total_amount 与 数量×单价 明显不一致时
+    # （纠错/历史脏数据），以 数量×单价 为准重算，最多容忍 0.05 元舍入差。
+    _check_price = unit_price if event_type == "sale" else unit_cost
+    if (
+        total_amount is not None
+        and _check_price is not None
+        and book_qty > 0
+        and abs(total_amount - book_qty * _check_price) > Decimal("0.05")
+    ):
+        total_amount = (book_qty * _check_price).quantize(Decimal("0.01"))
     record = InventoryRecord(
         merchant_id=log.merchant_id,
         product_id=product_id,
@@ -727,6 +826,32 @@ async def confirm_voice(
     log.status = "confirmed"
     await db.commit()
 
+    # P2-7：顺带清理本商户 7 天前的 parsed 残留日志（解析失败/未确认的
+    # 垃圾行此前永久堆积）。best-effort：失败不影响记账主流程。
+    try:
+        from datetime import timedelta as _td
+
+        cutoff = utc_now() - _td(days=7)
+        stale = (
+            (
+                await db.execute(
+                    select(VoiceLog).where(
+                        VoiceLog.merchant_id == log.merchant_id,
+                        VoiceLog.status.in_(("pending", "parsed")),
+                        VoiceLog.created_at < cutoff,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for stale_log in stale:
+            await db.delete(stale_log)
+        if stale:
+            await db.commit()
+    except Exception:  # noqa: BLE001 — 清理失败静默跳过
+        logger.warning("清理过期 parsed 语音日志失败", exc_info=True)
+
     return {
         "code": 0,
         "message": "记账成功",
@@ -766,6 +891,9 @@ async def void_voice_record(
         raise HTTPException(status_code=404, detail="语音记录不存在")
     if log.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="语音记录不存在")
+
+    # P1-3：日结锁定统一拦截（与 POS 退款同判定，防日结后被冲正破坏口径）
+    await _check_settlement_locked(db, log.merchant_id)
 
     record, batch_summary = await void_voice_confirmed_record(
         db, log, body.reason, voided_by="voice"
@@ -815,6 +943,8 @@ async def edit_confirmed_record(
         raise HTTPException(status_code=404, detail="语音记录不存在")
     if log.status != "confirmed":
         raise HTTPException(status_code=409, detail="只能修改已确认的记录")
+    # P1-3：日结锁定统一拦截（修改=作废+冲正，与 POS 退款同判定）
+    await _check_settlement_locked(db, log.merchant_id)
 
     # 流水行锁（V2-H1）：撤销/修改与 inventory.py 的 record-void 会在同一条
     # source="voice" 流水上交汇，必须在已持有 log 锁的前提下再锁流水行，
@@ -850,6 +980,21 @@ async def edit_confirmed_record(
     new_unit_cost = body.unit_cost if body.unit_cost is not None else old_record.unit_cost
     new_unit_price = body.unit_price if body.unit_price is not None else old_record.unit_price
     new_total = body.total_amount if body.total_amount is not None else old_record.total_amount
+    # P0-1 同族修复：只改数量/单价而未显式给金额时，重算金额，防止
+    # 「2斤4元改成1斤」冲正记录仍按 4 元入账。
+    if body.total_amount is None:
+        _edit_price = None
+        if event_type == "sale" and new_unit_price is not None:
+            _edit_price = Decimal(str(new_unit_price))
+        elif event_type == "purchase" and new_unit_cost is not None:
+            _edit_price = Decimal(str(new_unit_cost))
+        if _edit_price is not None and new_qty > 0:
+            new_total = (new_qty * _edit_price).quantize(Decimal("0.01"))
+        elif body.quantity is not None and new_qty > 0 and old_record.total_amount:
+            _prev_qty = abs(Decimal(str(old_record.quantity)))
+            if _prev_qty > 0:
+                _implied = Decimal(str(old_record.total_amount)) / _prev_qty
+                new_total = (new_qty * _implied).quantize(Decimal("0.01"))
 
     old_before = {
         "quantity": float(old_record.quantity),

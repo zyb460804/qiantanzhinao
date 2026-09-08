@@ -405,6 +405,31 @@ Page({
     }).catch(function (err) {
       // 修复：app.request 已在层弹后端 detail（如商品未在品类表中找到），此处不再覆盖 toast，
       // 让摊主看到真正失败原因。
+      // P1-1/P1-2 UI 引导：两类高频失败给「下一步动作」，不再让摊主卡死在这条记录上。
+      var detail = err && err.body && (err.body.detail || err.body.message);
+      detail = typeof detail === 'string' ? detail : '';
+      if (detail.indexOf('库存不足') >= 0) {
+        wx.showModal({
+          title: '还没记过这笔货的进货',
+          content: '先记一笔进货（例如「进了土豆20斤40块」），库存有了再卖，账才对得上。现在切换到文字输入吗？',
+          confirmText: '去记进货',
+          success: function (r) {
+            if (!r.confirm) return;
+            self.setData({ mode: 'text', correction: null, parsed: null, parsedEvents: null });
+            var ta = { detail: { value: '进了' } };
+            try { self.onTextInput(ta); } catch (e) {}
+          },
+        });
+      } else if (detail.indexOf('未找到商品') >= 0 || detail.indexOf('请先在商品目录') >= 0) {
+        wx.showModal({
+          title: '这个商品还没建档',
+          content: '去商品目录添加一次（名字+单位即可），以后语音就能直接认出它。现在去添加吗？',
+          confirmText: '去添加',
+          success: function (r) {
+            if (r.confirm) wx.navigateTo({ url: '/pages/catalog/catalog' });
+          },
+        });
+      }
       // 一键全部确认（silent）时失败即停：把错误抛回串行链，剩余笔留给逐条处理。
       if (opts.silent) throw err;
     });
@@ -446,6 +471,10 @@ Page({
         candidates: this._buildProductCandidates(record),
         submitting: false,
       },
+    });
+    // UI 修复：纠错卡渲染在页面底部，不滚动定位会被 TabBar 挡住，用户以为点了没反应。
+    wx.nextTick(function () {
+      wx.pageScrollTo({ selector: '.cp', duration: 250 });
     });
   },
 

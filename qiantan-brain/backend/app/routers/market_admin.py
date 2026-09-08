@@ -15,7 +15,6 @@ from app.models.market import (
     MarketComplaint,
     MarketInspection,
     MarketMerchant,
-    MarketNotice,
 )
 from app.models.merchant import Merchant
 from app.schemas.common import AnyResponse
@@ -362,64 +361,3 @@ async def resolve_complaint(
     c.resolved_at = utc_now()
     await db.commit()
     return {"code": 0, "message": "投诉已处理"}
-
-
-# ═══ 通知 ═══
-
-
-@router.get("/notices", response_model=AnyResponse)
-async def list_notices(
-    market_id: uuid.UUID,
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    # 校验当前商户属于该市场（审计 P0-1）
-    await _require_market_member(db, merchant.id, market_id)
-    rows = (
-        (
-            await db.execute(
-                select(MarketNotice)
-                .where(MarketNotice.market_id == market_id, MarketNotice.is_active.is_(True))
-                .order_by(MarketNotice.created_at.desc())
-                .limit(20)
-            )
-        )
-        .scalars()
-        .all()
-    )  # noqa: E712
-    return {
-        "code": 0,
-        "data": [
-            {
-                "id": str(n.id),
-                "title": n.title,
-                "content": n.content,
-                "notice_type": n.notice_type,
-                "created_at": n.created_at.isoformat() if n.created_at else None,
-            }
-            for n in rows
-        ],
-    }
-
-
-@router.post("/notices", response_model=AnyResponse)
-async def create_notice(
-    body: dict,
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    # 修复（审计 C-3）：角色从 token claim 读取，owner 不在允许列表中。
-    role = getattr(merchant, "_token_role", None) or "owner"
-    if role not in ("market_admin", "tenant_admin", "platform_admin"):
-        raise HTTPException(status_code=403, detail="仅市场/租户管理员可操作")
-    market_id = uuid.UUID(body["market_id"])
-    await _require_market_member(db, merchant.id, market_id)
-    n = MarketNotice(
-        market_id=market_id,
-        title=body["title"],
-        content=body["content"],
-        notice_type=body.get("notice_type", "info"),
-    )
-    db.add(n)
-    await db.commit()
-    return {"code": 0, "data": {"id": str(n.id), "title": n.title}}

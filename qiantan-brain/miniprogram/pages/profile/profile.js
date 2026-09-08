@@ -19,12 +19,13 @@ Page({
     weekTotal: 0, dayChangePct: null, dayChangeDir: '',
 
     // ② 快捷操作
-    voiceLabel: '今天还没记',
     purchasePending: 0,
 
     // 员工身份切换（权限体系）
     staffMode: false,
     currentStaff: null,
+    // 身份切换条显隐：默认按上次检查的缓存渲染（''!==false → 首次视为有），再由 /staff 校正
+    hasStaff: wx.getStorageSync('qt_has_staff') !== false,
     // 快捷操作可见性（老板全开，员工按权限过滤）
     canDashboard: true,
     canPos: true,
@@ -36,32 +37,28 @@ Page({
     // ④ 经营工具（v3.2 收敛）— 常用 6 直达 + 更多工具折叠
     //    原 17 宫格按开发者职能域分组，摊主视角改为「高频直达 + 低频折叠」。
     //    员工管理入口删除（顶栏身份切换已覆盖员工场景）；租户中心整页已下线。
+    // v3.3 入口去重：采购/收银已在上方快捷操作，不再在此重复
     quickTools: [
-      { page: 'purchase', name: '采购', glyph: '购', tone: 'corn' },
       { page: 'stocktake', name: '盘点', glyph: '盘', tone: 'blue' },
-      { page: 'pos', name: '收银', glyph: '收', tone: 'green' },
       { page: 'ops', url: '/pages/ops/ops?tab=waste', name: '报损', glyph: '损', tone: 'corn' },
       { page: 'finance', name: '财务', glyph: '财', tone: 'green' },
       { page: 'catalog', name: '商品目录', glyph: '录', tone: 'blue' },
     ],
+    // v3.3 入口去重：经营镜像(快捷操作)/数据导出(财务tab)/临期清货(库存页场景入口)/设备管理(设备与同步区) 均已有更顺的入口
     moreTools: [
-      { page: 'dashboard', name: '经营镜像', glyph: '镜', tone: 'green' },
       { page: 'report', name: '经营报告', glyph: '报', tone: 'blue' },
       { page: 'sandbox', name: '决策沙盘', glyph: '算', tone: 'corn' },
       { page: 'calendar', name: '经营日历', glyph: '历', tone: 'blue' },
       { page: 'vision', name: '拍照识货', glyph: '识', tone: 'blue' },
       { page: 'supplier', name: '供应商', glyph: '供', tone: 'corn' },
       { page: 'trace', name: '安全追溯', glyph: '溯', tone: 'green' },
-      { page: 'ops', url: '/pages/ops/ops?tab=clearance', name: '临期清货', glyph: '清', tone: 'corn' },
-      { page: 'ops', url: '/pages/ops/ops?tab=export', name: '数据导出', glyph: '出', tone: 'blue' },
-      { page: 'devices', name: '设备管理', glyph: '设', tone: 'blue' },
       { page: 'staff', name: '员工管理', glyph: '员', tone: 'corn' },
-      { page: 'notices', name: '市场通知', glyph: '告', tone: 'green' },
     ],
     moreOpen: false,
 
     // ⑤ 摊位设置入口（详情页：/pages/stall-settings/stall-settings）
     merchantName: '',
+    stallSummary: '',
 
     // ⑦ 关于
     appVersion: '1.0.0',
@@ -70,10 +67,11 @@ Page({
   onShow: function () {
     this.applySkin();
     this._syncStaffMode();
+    this._refreshStaffPresence();
     this._loadMerchantName();
+    this._loadStallSummary();
     this.loadSnapshot();
     this.loadDevices();
-    this.refreshVoiceLabel();
     this.refreshPurchasePending();
   },
 
@@ -88,6 +86,21 @@ Page({
     this.setData({ staffMode: app.isStaffMode(), currentStaff: staff });
     this._applyToolGroups();
     this._applyQuickActions();
+  },
+
+  /** 身份切换条只对有员工的摊位有意义；单人摊主常驻展示反成噪音，故按 /staff 实况显隐 */
+  _refreshStaffPresence: function () {
+    var self = this;
+    if (app.isStaffMode()) {
+      // 员工身份下条子承担“退出”入口，必须显示；且员工 token 拉员工列表会 403，跳过
+      this.setData({ hasStaff: true });
+      return;
+    }
+    app.request({ url: '/staff' }).then(function (list) {
+      var has = (list || []).some(function (s) { return s.is_active; });
+      try { wx.setStorageSync('qt_has_staff', has); } catch (e) {}
+      self.setData({ hasStaff: has });
+    }).catch(function () { /* 拉取失败沿用缓存值，避免闪隐 */ });
   },
 
   /** 按当前身份过滤工具入口：老板全量，员工只保留有权限页面（常用+更多同规则） */
@@ -132,6 +145,7 @@ Page({
   },
 
   onIdentityTap: function () {
+    var self = this;
     if (app.isStaffMode()) {
       // 当前是员工身份 → 确认退出
       wx.showModal({
@@ -141,6 +155,7 @@ Page({
         success: function (res) {
           if (res.confirm) {
             app.exitStaff();
+            self._refreshStaffPresence();
             wx.showToast({ title: '已恢复老板身份', icon: 'success' });
           }
         },
@@ -237,6 +252,7 @@ Page({
       var saleQty = daily ? (Number(daily.sale_qty) || 0) : 0;
       var orderCount = daily ? (Number(daily.order_count) || 0) : 0;
       var txnCount = orderCount > 0 ? orderCount : saleQty;
+      var txnIsQty = orderCount === 0 && saleQty > 0;
       var aov = txnCount > 0 ? (rev / txnCount) : 0;
       var yesterdayRev = daily ? (Number(daily.yesterday_revenue) || 0) : 0;
       var changePct = yesterdayRev > 0 ? ((rev - yesterdayRev) / yesterdayRev * 100) : null;
@@ -252,6 +268,7 @@ Page({
         snapshotLoading: false, snapshotError: false,
         todayRevenue: rev, todayRevenueDisplay: rev.toFixed(2),
         todayOrders: txnCount, todayAov: aov.toFixed(2),
+        txnIsQty: txnIsQty,
         trendLabel: trendLabel,
         dayChangePct: changePct,
         dayChangeDir: changePct === null ? '' : (changePct > 0 ? 'up' : (changePct < 0 ? 'down' : 'flat')),
@@ -265,14 +282,6 @@ Page({
   },
 
   // ── ② 快捷操作 ──────────────────────────────
-  refreshVoiceLabel: function () {
-    var self = this;
-    app.request({ url: '/voice/today-count' }).then(function (res) {
-      var count = (res && res.today_count) || 0;
-      self.setData({ voiceLabel: count > 0 ? '再记一笔' : '今天还没记' });
-    }).catch(function () {});
-  },
-
   refreshPurchasePending: function () {
     var draft = wx.getStorageSync('purchaseDraft') || [];
     this.setData({ purchasePending: draft.length });
@@ -328,6 +337,17 @@ Page({
     this.setData({
       merchantName: app.globalData.merchantName || wx.getStorageSync('merchantName') || '',
     });
+  },
+
+  /** 入口副标题展示当前真实设置值（与 stall-settings 页的键/映射保持一致），替代静态字段罗列 */
+  _loadStallSummary: function () {
+    var DIALECTS = { mandarin: '普通话', sichuan: '四川话', cantonese: '粤语', henan: '河南话', shandong: '山东话' };
+    var HOURS = { morning: '早市', noon: '午市', evening: '晚市', all: '全天' };
+    var city = '';
+    try { city = app.getCity() || ''; } catch (e) {}
+    var dialect = DIALECTS[wx.getStorageSync('voiceDialect')] || '普通话';
+    var hours = HOURS[wx.getStorageSync('businessHours')] || '早市';
+    this.setData({ stallSummary: [city, dialect, hours].filter(Boolean).join(' · ') });
   },
 
   /** 退出登录 — 调用后端 logout 吊销 token + 清理本地状态 */

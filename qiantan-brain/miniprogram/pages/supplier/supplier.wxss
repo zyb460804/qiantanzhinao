@@ -16,7 +16,7 @@
 .stat-num.ok { color: var(--green-700); }
 .stat-num.warn { color: var(--corn-600); }
 .stat-num.bad { color: var(--tomato); }
-.stat-label { display: block; margin-top: 4rpx; color: var(--muted); font-size: 20rpx; }
+.stat-label { display: block; margin-top: 4rpx; color: var(--muted); font-size: 22rpx; }
 .stat-divider { width: 1rpx; height: 64rpx; background: var(--line); }
 
 /* ── 搜索栏 ── */
@@ -98,14 +98,14 @@
 .sup-name { font-size: 30rpx; font-weight: 720; color: var(--ink); max-width: 260rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sup-score-chip {
   padding: 4rpx 14rpx; border-radius: var(--r-pill);
-  font-size: 20rpx; font-weight: 700;
+  font-size: 22rpx; font-weight: 700;
 }
 .sup-score-chip.green { color: var(--green-800); background: var(--green-100); }
 .sup-score-chip.corn { color: var(--corn-ink); background: var(--corn-soft); }
 .sup-score-chip.tomato { color: var(--tomato-ink); background: var(--tomato-soft); }
 .sup-score-chip.muted { color: var(--ink-2); background: var(--paper-2); }
 
-.sup-card-meta { display: flex; gap: 14rpx; margin-top: 6rpx; font-size: 21rpx; color: var(--muted); }
+.sup-card-meta { display: flex; gap: 14rpx; margin-top: 6rpx; font-size: 22rpx; color: var(--muted); }
 .sup-card-meta .muted { color: var(--muted); }
 
 .sup-card-right { display: flex; align-items: center; gap: 12rpx; flex-shrink: 0; }
@@ -138,7 +138,7 @@
   gap: 16rpx 24rpx;
 }
 .detail-item { display: flex; flex-direction: column; gap: 4rpx; }
-.detail-label { font-size: 20rpx; color: var(--muted); }
+.detail-label { font-size: 22rpx; color: var(--muted); }
 .detail-value { font-size: 24rpx; color: var(--ink); font-weight: 600; }
 
 .detail-empty { padding: 24rpx; text-align: center; color: var(--muted); font-size: 22rpx; }
@@ -165,9 +165,9 @@
 .prod-info { display: flex; align-items: center; gap: 14rpx; font-size: 22rpx; }
 .prod-sku { color: var(--ink); font-weight: 600; }
 .prod-price { color: var(--green-800); font-weight: 700; }
-.prod-moq { color: var(--muted); font-size: 20rpx; }
+.prod-moq { color: var(--muted); font-size: 22rpx; }
 .prod-remove {
-  padding: 6rpx 16rpx; color: var(--tomato); font-size: 20rpx;
+  padding: 6rpx 16rpx; color: var(--tomato); font-size: 22rpx;
   background: var(--tomato-soft); border-radius: 99rpx;
 }
 .prod-remove:active { opacity: .7; }
@@ -208,7 +208,7 @@
 }
 .form-input.has-error { border-color: var(--tomato); background: var(--tomato-soft); }
 .form-placeholder { color: var(--muted); }
-.form-error { display: block; margin-top: 6rpx; font-size: 20rpx; color: var(--tomato); }
+.form-error { display: block; margin-top: 6rpx; font-size: 22rpx; color: var(--tomato); }
 
 .form-row-3 { display: flex; gap: 16rpx; }
 .form-row-2 { display: flex; gap: 16rpx; }
@@ -252,7 +252,7 @@
   display: block; font-size: 28rpx; font-weight: 750; color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.compare-sku-unit { display: block; margin-top: 4rpx; font-size: 20rpx; color: var(--muted); }
+.compare-sku-unit { display: block; margin-top: 4rpx; font-size: 22rpx; color: var(--muted); }
 
 .compare-loading { text-align: center; padding: 30rpx 0; color: var(--muted); font-size: 22rpx; }
 .compare-error { padding: 20rpx 0; text-align: center; color: var(--tomato); font-size: 22rpx; }
@@ -260,7 +260,7 @@
 
 .compare-sorts { display: flex; gap: 12rpx; margin-bottom: 16rpx; }
 .sort-chip {
-  font-size: 20rpx; padding: 6rpx 20rpx; border-radius: 999rpx;
+  font-size: 22rpx; padding: 6rpx 20rpx; border-radius: 999rpx;
   background: var(--paper-2); color: var(--muted);
 }
 .sort-chip.on { background: var(--green-600); color: #fff; font-weight: 700; }
@@ -274,15 +274,15 @@
 }
 .rec-badge {
   display: inline-block; background: var(--corn-ink); color: #fff;
-  font-size: 18rpx; padding: 2rpx 12rpx; border-radius: 999rpx; margin-bottom: 8rpx;
+  font-size: 22rpx; padding: 2rpx 12rpx; border-radius: 999rpx; margin-bottom: 8rpx;
 }
 .rec-supplier { display: block; font-size: 26rpx; font-weight: 750; margin-bottom: 4rpx; color: var(--ink); }
 .rec-price { display: block; font-size: 22rpx; color: var(--green-800); font-weight: 700; margin-bottom: 4rpx; }
-.rec-score { display: block; font-size: 20rpx; color: var(--corn-ink); font-weight: 700; margin-bottom: 4rpx; }
-.rec-reason { display: block; font-size: 20rpx; color: var(--muted); margin-bottom: 8rpx; line-height: 1.5; }
+.rec-score { display: block; font-size: 22rpx; color: var(--corn-ink); font-weight: 700; margin-bottom: 4rpx; }
+.rec-reason { display: block; font-size: 22rpx; color: var(--muted); margin-bottom: 8rpx; line-height: 1.5; }
 .rec-factors { display: flex; flex-wrap: wrap; gap: 8rpx; }
 .rec-factor {
-  font-size: 18rpx; background: var(--paper-1); padding: 2rpx 10rpx;
+  font-size: 22rpx; background: var(--paper-1); padding: 2rpx 10rpx;
   border-radius: 999rpx; color: var(--green-700);
 }
 
@@ -299,21 +299,21 @@
   border-radius: 50%; background: var(--paper-1);
 }
 .cmp-best { color: var(--corn-ink); font-size: 24rpx; }
-.cmp-num { font-size: 20rpx; color: var(--muted); font-weight: 700; }
+.cmp-num { font-size: 22rpx; color: var(--muted); font-weight: 700; }
 .cmp-info { flex: 1; min-width: 0; }
 .cmp-name { display: block; font-size: 22rpx; font-weight: 700; margin-bottom: 2rpx; color: var(--ink); }
 .cmp-meta { display: flex; gap: 16rpx; margin-bottom: 4rpx; }
 .cmp-price { font-size: 22rpx; color: var(--green-800); font-weight: 700; }
-.cmp-value { font-size: 18rpx; color: var(--corn-ink); }
+.cmp-value { font-size: 22rpx; color: var(--corn-ink); }
 .cmp-metrics { display: flex; flex-wrap: wrap; gap: 6rpx; }
 .cmp-metric {
-  font-size: 17rpx; padding: 2rpx 8rpx; border-radius: 999rpx;
+  font-size: 22rpx; padding: 2rpx 8rpx; border-radius: 999rpx;
   background: var(--paper-1); color: var(--muted);
 }
 .cmp-metric.good { color: var(--green-700); background: var(--green-50); }
 .cmp-metric.ok { color: var(--corn-ink); }
 .cmp-metric.warn { color: var(--tomato); }
 .cmp-best-tag {
-  flex: 0 0 auto; font-size: 17rpx; background: var(--corn-ink);
+  flex: 0 0 auto; font-size: 22rpx; background: var(--corn-ink);
   color: #fff; padding: 2rpx 10rpx; border-radius: 999rpx;
 }

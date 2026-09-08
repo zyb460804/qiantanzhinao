@@ -7,10 +7,8 @@
   DELETE /item/{id}               取消采购项
   POST   /{id}/acceptance         记录到货验收
   POST   /{id}/acceptance/confirm 确认验收 → 批次入库+库存+应付
-  POST   /{id}/cancel             取消采购清单
   POST   /supplier-payment        向供应商付款
   POST   /items/{id}/return       退货给供应商
-  GET    /supplier/{id}/statement 供应商对账单
 """
 
 import hashlib
@@ -44,7 +42,6 @@ from app.schemas.purchase import (
 )
 from app.services.accounts_service import (
     get_supplier_balance,
-    get_supplier_statement,
     record_supplier_payable_from_purchase,
     record_supplier_payment,
 )
@@ -1022,27 +1019,6 @@ async def pay_supplier(
 
 
 # ---------------------------------------------------------------------------
-# 供应商对账单
-# ---------------------------------------------------------------------------
-
-
-@router.get("/supplier/{supplier_id}/statement", response_model=AnyResponse)
-async def supplier_statement(
-    supplier_id: uuid.UUID,
-    limit: int = 50,
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get supplier statement (ledger of all transactions)."""
-    supplier = await db.get(Supplier, supplier_id)
-    if not supplier or supplier.merchant_id != merchant.id:
-        raise HTTPException(status_code=404, detail="供应商不存在")
-
-    statement = await get_supplier_statement(db, merchant.id, supplier_id, limit=limit)
-    return {"code": 0, "data": statement}
-
-
-# ---------------------------------------------------------------------------
 # 采购退货
 # ---------------------------------------------------------------------------
 
@@ -1211,38 +1187,6 @@ async def return_purchase_item(
             "new_item_status": item.status,
         },
     }
-
-
-# ---------------------------------------------------------------------------
-# 取消采购单
-# ---------------------------------------------------------------------------
-
-
-@router.post("/{list_id}/cancel", response_model=AnyResponse)
-async def cancel_purchase_list(
-    list_id: uuid.UUID,
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    query = select(PurchaseList).where(PurchaseList.id == list_id)
-    result = await db.execute(query)
-    plist = result.scalar_one_or_none()
-    if plist is None or plist.merchant_id != merchant.id:
-        raise HTTPException(status_code=404, detail="采购清单不存在")
-    if plist.status in ("stored", "completed"):
-        raise HTTPException(status_code=400, detail="已入库的清单不能取消")
-
-    plist.status = "cancelled"
-    items_query = select(PurchaseItem).where(
-        PurchaseItem.list_id == list_id,
-        PurchaseItem.status == "pending",
-    )
-    items_result = await db.execute(items_query)
-    for item in items_result.scalars().all():
-        item.status = "cancelled"
-
-    await db.commit()
-    return {"code": 0, "message": "采购清单已取消"}
 
 
 # ---------------------------------------------------------------------------

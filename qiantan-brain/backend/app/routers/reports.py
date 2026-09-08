@@ -141,6 +141,9 @@ async def daily_report(
     today_records = today_result.scalars().all()
 
     revenue = sum(float(r.total_amount or 0) for r in today_records if r.event_type == "sale")
+    # P2-5 口径统一：退款（event_type='refund'）从营收中扣除 —— 与 POS 日结
+    # total_sales（订单 total - refunded）一致；此前日报不扣退款，两页数字打架。
+    revenue -= sum(float(r.total_amount or 0) for r in today_records if r.event_type == "refund")
     cost = sum(float(r.total_amount or 0) for r in today_records if r.event_type == "purchase")
     estimated_cogs = await _estimate_cogs(db, merchant_id, today_records)
     estimated_gross_profit = revenue - estimated_cogs

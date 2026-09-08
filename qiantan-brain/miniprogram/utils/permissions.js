@@ -35,7 +35,6 @@ var PAGE_PERMISSIONS = {
   // 团队与设置
   staff: ['manage_staff'],
   devices: null, // 未映射到明确权限，保留通用入口
-  notices: null, // 未映射到明确权限，保留通用入口
 };
 
 function can(page, permissions) {
@@ -52,5 +51,4 @@ function can(page, permissions) {
 
 module.exports = {
   can: can,
-  PAGE_PERMISSIONS: PAGE_PERMISSIONS,
 };

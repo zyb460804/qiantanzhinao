@@ -295,12 +295,25 @@ async def list_waste(
         .scalars()
         .all()
     )
+    # 解析商品名：product_id 指向 product_categories（向后兼容，与 /inventory/current 一致）
+    product_ids = {r.product_id for r in rows if r.product_id is not None}
+    product_names = {}
+    if product_ids:
+        cat_rows = (
+            (await db.execute(select(ProductCategory).where(ProductCategory.id.in_(product_ids))))
+            .scalars()
+            .all()
+        )
+        product_names = {c.id: c.name for c in cat_rows}
     return {
         "code": 0,
         "data": [
             {
                 "record_id": str(r.id),
                 "product_id": r.product_id,
+                "product_name": product_names.get(r.product_id, f"商品{r.product_id}")
+                if r.product_id is not None
+                else None,
                 "quantity": float(r.quantity),
                 "unit": r.unit,
                 "unit_cost": float(r.unit_cost) if r.unit_cost else None,

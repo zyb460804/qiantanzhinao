@@ -12,6 +12,10 @@ from app.schemas.common import ApiResponse, DecimalNum
 
 
 PaymentMethod = Literal["cash", "wechat", "alipay", "card", "credit"]
+# 订单级支付方式多接受 "combined"：组合支付时 payments 数组优先，此字段仅作
+# 客户端语义标识（sale_orders 无 payment_method 列，支付方式由 payments
+# 流水逐笔承载；此前第三方传 "combined" 会被 422 直接拒绝）。
+OrderPaymentMethod = Literal["cash", "wechat", "alipay", "card", "credit", "combined"]
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +40,7 @@ class CreateSaleOrderItem(BaseModel):
 
 class CreateSaleOrderRequest(BaseModel):
     items: list[CreateSaleOrderItem] = Field(min_length=1, max_length=100)
-    payment_method: PaymentMethod = "cash"  # 保留兼容：单一支付方式
+    payment_method: OrderPaymentMethod = "cash"  # 保留兼容：单一支付方式
     payments: list[PaymentItem] | None = Field(
         default=None, max_length=10
     )  # 新：组合支付（优先于 payment_method）
@@ -53,6 +57,9 @@ class CreateSaleOrderRequest(BaseModel):
         if has_credit or self.payment_method == "credit":
             if not (self.customer_name or "").strip():
                 raise ValueError("赊账订单必须填写客户名称")
+        # "combined" 只是语义标识：必须携带 payments 明细，否则无从落支付流水
+        if self.payment_method == "combined" and not payments:
+            raise ValueError("组合支付必须提供 payments 明细")
         return self
 
 
@@ -117,11 +124,21 @@ class HoldOrderRequest(BaseModel):
 
 
 class ResumeHeldOrderRequest(BaseModel):
-    payment_method: PaymentMethod = "cash"
+    payment_method: OrderPaymentMethod = "cash"
     payments: list[PaymentItem] | None = Field(default=None, max_length=10)
     customer_name: str | None = Field(default=None, max_length=100)
     discount_amount: DecimalNum | None = Field(default=None, ge=0)
     note: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_resume_payments(self):
+        payments = self.payments or []
+        if any(p.method == "credit" for p in payments) or self.payment_method == "credit":
+            if not (self.customer_name or "").strip():
+                raise ValueError("赊账订单必须填写客户名称")
+        if self.payment_method == "combined" and not payments:
+            raise ValueError("组合支付必须提供 payments 明细")
+        return self
 
 
 class HeldOrderSummary(BaseModel):

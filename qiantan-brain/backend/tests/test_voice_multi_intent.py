@@ -143,11 +143,12 @@ class TestMultiIntentLogPerEvent:
         assert len(rows) == 2
         assert all(row["status"] == "parsed" for row in rows)
 
-        # today-count 语义：每笔事件是一条真实语音记录，计数 +2
+        # today-count 语义（UI 口径修复后）：只统计已入账记录 ——
+        # 2 笔均待确认时计数为 0，确认其一后计数为 1
         count = await client.get(
             "/api/v1/voice/today-count", params={"merchant_id": TEST_MERCHANT_ID}
         )
-        assert count.json()["data"]["today_count"] == 2
+        assert count.json()["data"]["today_count"] == 0
 
         assert (
             await client.post("/api/v1/voice/confirm", json={"voice_log_id": purchase_log})
@@ -163,6 +164,10 @@ class TestMultiIntentLogPerEvent:
         }
         assert statuses[purchase_log] == "confirmed"
         assert statuses[sale_log] == "parsed"
+        count2 = await client.get(
+            "/api/v1/voice/today-count", params={"merchant_id": TEST_MERCHANT_ID}
+        )
+        assert count2.json()["data"]["today_count"] == 1
 
     async def test_correct_targets_own_event_only(self, client):
         """correct 只改自己那条 log 的 parsed_event，不串到另一笔。"""

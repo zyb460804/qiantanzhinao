@@ -19,18 +19,17 @@
 .demo-toggle { display: flex; align-items: center; justify-content: space-between; margin-top: 18rpx; padding: 22rpx 28rpx; background: var(--paper); border-radius: var(--radius-md); box-shadow: var(--shadow); }
 .demo-toggle-info { flex: 1; }
 .demo-toggle-label { display: block; font-size: 27rpx; font-weight: 700; color: var(--ink); }
-.demo-toggle-desc { display: block; margin-top: 4rpx; font-size: 21rpx; color: var(--muted); }
+.demo-toggle-desc { display: block; margin-top: 4rpx; font-size: 22rpx; color: var(--muted); }
 .demo-switch { transform: scale(.82); }
 
 /* ── 空状态 ────────────────────────────────────────── */
 .empty-card { display: flex; flex-direction: column; align-items: center; padding: 70rpx 30rpx; text-align: center; }
-.empty-circle { width: 120rpx; height: 120rpx; margin-bottom: 24rpx; border: 6rpx dashed var(--line); border-radius: 50%; background: var(--green-50); }
 .empty-title { display: block; font-size: 29rpx; font-weight: 700; color: var(--ink-2); }
 .empty-desc { display: block; margin-top: 8rpx; font-size: 24rpx; color: var(--muted); }
 
 /* ── 图片预览 ──────────────────────────────────────── */
 .preview-card { padding: 16rpx; }
-.preview-wrap { position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden; background: #eef1ef; }
+.preview-wrap { position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden; background: var(--paper-2); }
 .preview-image { width: 100%; height: 420rpx; display: block; }
 .preview-overlay { position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(18,34,29,.55); }
 .loading-spinner { width: 56rpx; height: 56rpx; border: 5rpx solid rgba(255,255,255,.25); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
@@ -69,7 +68,7 @@
 .candidate-item:active { background: var(--green-50); }
 .candidate-info { flex: 1; }
 .candidate-name { display: block; font-size: 28rpx; font-weight: 600; color: var(--ink); }
-.candidate-id { display: block; margin-top: 4rpx; font-size: 21rpx; color: var(--muted); font-family: monospace; }
+.candidate-id { display: block; margin-top: 4rpx; font-size: 22rpx; color: var(--muted); font-family: monospace; }
 
 /* ── 手动选择入口 ──────────────────────────────────── */
 .manual-link { display: flex; justify-content: center; padding: 20rpx; }
@@ -113,6 +112,6 @@
 .picker-item:active { background: var(--green-50); }
 .picker-item-info { flex: 1; }
 .picker-item-name { display: block; font-size: 29rpx; font-weight: 600; color: var(--ink); }
-.picker-item-meta { display: block; margin-top: 4rpx; font-size: 21rpx; color: var(--muted); }
+.picker-item-meta { display: block; margin-top: 4rpx; font-size: 22rpx; color: var(--muted); }
 .picker-item-arrow { font-size: 32rpx; color: var(--muted); }
 .mascot-empty { display: flex; justify-content: center; align-items: center; margin: 0 auto var(--s-2); }

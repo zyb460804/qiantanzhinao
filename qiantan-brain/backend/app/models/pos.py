@@ -150,6 +150,9 @@ class DailySettlement(Base):
     # 差异 = 销售总额 - 实收总额（赊账单独列）
     diff_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     status: Mapped[str] = mapped_column(sa.String(20), default="open")  # open / closed
+    # P2-6 修复：关闭时的完整统计快照（order_count/refund_amount/estimated_cogs 等）。
+    # 此前这些字段只在实时统计里有，closed 回显丢字段（order_count=None）。
+    snapshot: Mapped[dict | None] = mapped_column(sa.JSON)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime, server_default=sa.func.now(), nullable=False
     )

@@ -130,6 +130,20 @@ async def test_stocktake_complete_duplicate_burst_single_adjustment(client, db_s
     在途的双 complete 无法在本 harness 安全复现（见模块 docstring），属
     testcontainers 真 PG 的后续项。
     """
+    # P2-2：盘点只为有账面流水的品项生成待盘项 —— 先给商品1入账
+    async with db_session() as session:
+        session.add(
+            InventoryRecord(
+                merchant_id=MID,
+                product_id=1,
+                quantity=Decimal("10"),
+                unit="斤",
+                total_amount=Decimal("20"),
+                event_type="purchase",
+                event_time=datetime.now(),
+            )
+        )
+        await session.commit()
     start = (
         await client.post(
             "/api/v1/inventory/stocktake/start", json={"merchant_id": TEST_MERCHANT_ID}
@@ -166,7 +180,8 @@ async def test_stocktake_complete_duplicate_burst_single_adjustment(client, db_s
         db_session, select(StocktakeSession).where(StocktakeSession.id == uuid.UUID(sid))
     )
     assert sessions[0].status == "completed"
-    assert float(sessions[0].total_variance) == 5.0
+    # 账面 10（前置入账），实盘 5 → 差异 -5
+    assert float(sessions[0].total_variance) == -5.0
 
 
 async def test_purchase_legacy_confirm_duplicate_burst_single_entry(client, db_session):

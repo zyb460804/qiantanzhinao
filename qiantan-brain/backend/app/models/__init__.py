@@ -36,7 +36,6 @@ from app.models.market import (
     MarketComplaint,
     MarketInspection,
     MarketMerchant,
-    MarketNotice,
 )
 from app.models.media import MediaFile
 from app.models.merchant import Merchant
@@ -119,7 +118,6 @@ __all__ = [
     "MarketMerchant",
     "MarketInspection",
     "MarketComplaint",
-    "MarketNotice",
     # 媒体
     "MediaFile",
     # 支付对账

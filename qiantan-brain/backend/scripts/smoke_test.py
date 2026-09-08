@@ -36,10 +36,8 @@ from app.models.ai_action import AIAction
 from app.models.batch import BatchLifecycle
 from app.models.catalog import Supplier
 from app.models.expense import Expense, Invoice
-from app.models.inventory import CurrentInventory, InventoryRecord
-from app.models.merchant import Merchant
+from app.models.inventory import CurrentInventory
 from app.models.pos import DailySettlement, Payment, Reconciliation, SaleOrder, SaleOrderItem
-from app.models.product import ProductCategory
 from app.models.purchase import PurchaseItem, PurchaseList
 from app.models.recommendation import Recommendation
 from app.models.staff import StaffMember

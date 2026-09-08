@@ -19,6 +19,7 @@ Page({
     // 运行状态
     loading: false,
     result: null,
+    simError: false, // P0-2 UI 面：试算失败展示持久错误态（toast 易逝，用户会反复点击）
 
     // ECharts
     chartInstance: null,
@@ -138,7 +139,7 @@ Page({
     if (!isFinite(unitCost) || unitCost <= 0) { wx.showToast({ title: '请输入有效进货单价', icon: 'none' }); return; }
     if (!isFinite(unitPrice) || unitPrice <= 0) { wx.showToast({ title: '请输入有效计划售价', icon: 'none' }); return; }
 
-    this.setData({ loading: true, result: null });
+    this.setData({ loading: true, result: null, simError: false });
 
     // Step 1: 使用已验证的商品 ID，绝不回退到其他商品。
 
@@ -200,8 +201,8 @@ Page({
       wx.nextTick(function () { self.renderChart(); });
     }).catch(function (err) {
       console.error('Simulation error:', err);
-      self.setData({ loading: false });
-      wx.showToast({ title: (err && err.body && err.body.detail) || '模拟失败，请检查参数', icon: 'none' });
+      self.setData({ loading: false, simError: true });
+      wx.showToast({ title: (err && err.body && err.body.detail) || '试算失败，请稍后再试', icon: 'none' });
     });
   },
 

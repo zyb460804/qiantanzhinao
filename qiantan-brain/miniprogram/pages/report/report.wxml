@@ -62,7 +62,7 @@
       </view>
 
       <view class="kpi kpi-amber">
-        <view class="kpi-top"><icon name="cart" size="sm" color="var(--corn-deep, #8f5a00)"></icon><text class="kpi-label">采购成本</text></view>
+        <view class="kpi-top"><icon name="cart" size="sm" color="var(--corn-ink)"></icon><text class="kpi-label">采购成本</text></view>
         <text class="kpi-value">{{metrics.costDisplay}}</text>
         <view class="kpi-sub" wx:if="{{activeTab === 'daily' && dailyData}}">销量 {{dailyData.sale_qty}} 件</view>
       </view>

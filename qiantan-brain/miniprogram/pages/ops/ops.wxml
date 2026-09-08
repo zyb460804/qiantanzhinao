@@ -20,7 +20,7 @@
     <view class="section-head"><text class="section-title">记录报损</text><text class="link" bindtap="openWasteForm">+ 记录</text></view>
     <view class="cat-list" wx:if="{{wasteRecords.length}}">
       <view wx:for="{{wasteRecords}}" wx:key="record_id" class="cat-item">
-        <view class="cat-main"><text class="cat-name">{{item.product_name || '商品' + item.product_id}}</text><text class="cat-meta">{{item.notes}}</text></view>
+        <view class="cat-main"><text class="cat-name">{{item.product_name || '商品' + item.product_id}}</text><text class="cat-meta">{{item.notes || '未填备注'}}</text></view>
         <text class="cat-amount warn">-{{item.quantity}}{{item.unit}}</text>
       </view>
     </view>

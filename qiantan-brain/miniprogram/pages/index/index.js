@@ -49,6 +49,7 @@ Page({
     }
 
     this.loadWeather();
+    this._loadYdayTrend();
   },
 
   onReady: function () {
@@ -75,6 +76,36 @@ Page({
     this.setData({ showSkeleton: true, staleData: false });
     this._fetchRemote(true, function () { wx.stopPullDownRefresh(); });
     this.loadWeather();
+    this._loadYdayTrend();
+  },
+
+  /* ── 较昨日趋势（昨日营收来自 /reports/daily，与"我的"页同源）── */
+
+  _loadYdayTrend: function () {
+    var self = this;
+    app.request({ url: '/reports/daily' }).then(function (d) {
+      self._ydayRevenue = Number(d && d.yesterday_revenue) || 0;
+      self._renderYdayTrend();
+    }).catch(function () { /* 趋势缺失不影响首屏其余内容 */ });
+  },
+
+  /** 今日数字每次刷新后重算趋势；昨日无数据时不展示 */
+  _renderYdayTrend: function () {
+    var yday = this._ydayRevenue || 0;
+    var today = Number(this.data.todayRevenue) || 0;
+    var patch;
+    if (yday > 0) {
+      var pct = Math.round((today - yday) / yday * 100);
+      patch = {
+        ydayDir: pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat'),
+        ydayText: (pct > 0 ? '+' : '') + pct + '%',
+      };
+    } else if (today > 0) {
+      patch = { ydayDir: 'flat', ydayText: '昨日无账' };
+    } else {
+      patch = { ydayDir: '', ydayText: '' };
+    }
+    this.setData(patch);
   },
 
   applySkin: function (skin) {
@@ -220,7 +251,10 @@ Page({
       recentRecords: recent, todayTasks: tasks,
     });
 
-    this.setData(patch, function () { self._updateRiskLevel(); });
+    this.setData(patch, function () {
+      self._updateRiskLevel();
+      self._renderYdayTrend();
+    });
   },
 
   /** 从缓存快速恢复页面内容 */
@@ -238,7 +272,10 @@ Page({
       lowStockCount: cached.lowStockCount || 0,
       recentRecords: cached.recentRecords || [],
       todayTasks: cached.todayTasks || [],
-    }, function () { self._updateRiskLevel(); });
+    }, function () {
+      self._updateRiskLevel();
+      self._renderYdayTrend();
+    });
   },
 
   _updateRiskLevel: function () {

@@ -64,6 +64,10 @@
       </view>
 
       <view class="stocktake-list">
+        <!-- 空盘点单提示：恢复的会话可能没有商品，避免用户对空单盘点 -->
+        <view class="empty-state surface" wx:if="{{stocktakeItems.length === 0}}">
+          <text>当前盘点单没有商品，点上方「开始盘点」按最新库存重新生成一张</text>
+        </view>
         <view wx:for="{{stocktakeItems}}" wx:key="product_id" class="stocktake-card {{item.submitted ? 'submitted' : ''}}">
 
           <!-- 商品头部 -->

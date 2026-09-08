@@ -24,25 +24,25 @@
     <block wx:if="{{!loadError}}">
     <view class="page-hero home-hero">
       <view class="hero-topline">
-        <view><text class="eyebrow">今日经营台</text><text class="hero-title">{{greeting}}，{{merchantName}}</text></view>
+        <text class="eyebrow home-eyebrow">{{greeting}}，{{merchantName}} · 今日经营</text>
         <view class="skin-seg">
           <view class="skin-opt {{skin==='morning'?'on':''}}" data-skin="morning" bindtap="onSkinChange">早市</view>
           <view class="skin-opt {{skin==='noon'?'on':''}}" data-skin="noon" bindtap="onSkinChange">午市</view>
           <view class="skin-opt {{skin==='evening'?'on':''}}" data-skin="evening" bindtap="onSkinChange">晚市</view>
         </view>
       </view>
-      <text class="hero-desc">先处理待办，再记流水、看库存和安排采购。</text>
-      <view class="hero-profit home-profit-simple">
-        <view class="hero-profit-main">
-          <text class="hero-profit-label">今日毛利</text>
-          <text class="hero-profit-value">¥{{todayProfit}}</text>
-          <text class="profit-note">收入 ¥{{todayRevenue}} · 成本 ¥{{todayCost}}</text>
+      <view class="home-amount-row">
+        <view class="home-amount-col">
+          <text class="home-amount">¥{{todayProfit}}</text>
+          <view class="home-trend {{ydayDir}}" wx:if="{{ydayText}}">较昨日 {{ydayText}}</view>
         </view>
         <view class="weather-pill home-weather" wx:if="{{weather}}">
           <icon name="leaf" size="sm" color="var(--corn)" />
           <text class="weather-temp">{{weather.temp_high}}°</text><text>{{weather.weather_type}}</text>
         </view>
       </view>
+      <text class="home-amount-label">今日毛利 · 收入 ¥{{todayRevenue}} · 今日进货 ¥{{todayCost}}</text>
+      <text class="home-amount-note">毛利按已售商品成本估算，与当日进货金额分开算</text>
     </view>
 
     <view class="section-head"><text class="section-title">今日待办</text><text class="section-caption">只展示基于当前数据的提醒</text></view>

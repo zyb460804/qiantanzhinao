@@ -76,7 +76,9 @@ class StaffMember(Base):
     phone: Mapped[str | None] = mapped_column(sa.String(20))
     role: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="cashier")
     is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
-    pin_code: Mapped[str | None] = mapped_column(sa.String(10))  # 简易PIN, 非生产密码方案
+    # P1-4 修复：PIN 以 bcrypt 哈希存储（$2b$… 60 字符）。旧明文由登录时
+    # 透明升级（_verify_pin 命中 legacy 明文后即时重哈希落库）。
+    pin_code: Mapped[str | None] = mapped_column(sa.String(128))
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime, server_default=sa.func.now(), nullable=False
     )

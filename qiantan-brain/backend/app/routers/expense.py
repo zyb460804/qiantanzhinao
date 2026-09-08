@@ -17,8 +17,8 @@ from app.core.timezone import cst_month_bounds_utc
 from app.database import get_db
 from app.models.accounts import SupplierPayable
 from app.models.expense import Expense, Invoice
+from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
-from app.models.pos import SaleOrder
 from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 
@@ -100,6 +100,9 @@ async def create_expense(
         expense_date = date.fromisoformat(body.get("expense_date", ""))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="费用日期格式必须为YYYY-MM-DD") from exc
+    # P2-3 修复：费用日期不允许晚于今天（此前 2030-01-01 也能入账，污染月报）。
+    if expense_date > date.today():
+        raise HTTPException(status_code=422, detail="费用日期不能晚于今天")
     e = Expense(
         merchant_id=merchant.id,
         category=category,
@@ -152,28 +155,30 @@ async def monthly_report(
     # 业务月切——把 CST 月初 00:00 换算成 naive UTC 再比较，否则 CST 月初 0-8 点
     # 的订单会串到上个月。Expense.expense_date 是 Date 列，无需换算。
     month_start, month_end = cst_month_bounds_utc(y, m)
-    excluded_statuses = ("cancelled", "held")
-    gross_row = (
+    # P2-5 口径统一：月报 revenue 改从库存台账聚合（sale - refund，未作废）。
+    # 此前按 SaleOrder 聚合，语音记账的销售不在订单表里 → 月报收入恒低于
+    # 日报（实测日报 220.5 vs 月报 7.0）。台账同时覆盖语音与 POS，且天然
+    # 排除挂单/取消（未产生库存流水）。CST 月界同前。
+    ledger_rows = (
         await db.execute(
-            select(func.coalesce(func.sum(SaleOrder.total_amount), Decimal("0"))).where(
-                SaleOrder.merchant_id == merchant.id,
-                SaleOrder.status.not_in(excluded_statuses),
-                SaleOrder.created_at >= month_start,
-                SaleOrder.created_at < month_end,
+            select(
+                InventoryRecord.event_type,
+                func.coalesce(func.sum(InventoryRecord.total_amount), Decimal("0")),
             )
-        )
-    ).scalar() or Decimal("0")
-    refund_row = (
-        await db.execute(
-            select(func.coalesce(func.sum(SaleOrder.refunded_amount), Decimal("0"))).where(
-                SaleOrder.merchant_id == merchant.id,
-                SaleOrder.status.not_in(excluded_statuses),
-                SaleOrder.created_at >= month_start,
-                SaleOrder.created_at < month_end,
+            .where(
+                InventoryRecord.merchant_id == merchant.id,
+                InventoryRecord.is_voided == False,  # noqa: E712
+                InventoryRecord.event_type.in_(("sale", "refund")),
+                InventoryRecord.event_time >= month_start,
+                InventoryRecord.event_time < month_end,
             )
+            .group_by(InventoryRecord.event_type)
         )
-    ).scalar() or Decimal("0")
-    revenue_row = gross_row - refund_row
+    ).all()
+    ledger_by_type = {row[0]: row[1] for row in ledger_rows}
+    revenue_row = (ledger_by_type.get("sale", Decimal("0"))) - (
+        ledger_by_type.get("refund", Decimal("0"))
+    )
 
     # Purchase cost
     purchase_row = (

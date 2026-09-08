@@ -4,7 +4,7 @@
     <view class="rc-compact"><text class="rc-mini-mark">{{record.event_type === 'purchase' ? '进' : record.event_type === 'sale' ? '售' : record.event_type === 'waste' ? '损' : '记'}}</text><text class="rc-product">{{record.product}}</text><text class="rc-qty">{{record.quantity}}{{record.unit || '斤'}}</text><text class="rc-amount" wx:if="{{record.total_amount}}">¥{{record.total_amount}}</text></view>
   </block>
   <block wx:else>
-    <view class="rc-head"><view><text class="rc-eyebrow">STRUCTURED RECORD</text><text class="rc-title">请核对这笔账</text></view><text class="rc-confidence {{record.confidence >= 0.8 ? 'good' : ''}}">{{fmt.percent(record.confidence)}}% 准确</text></view>
+    <view class="rc-head"><view><text class="rc-title">请核对这笔账</text></view><text class="rc-confidence {{record.confidence >= 0.8 ? 'good' : ''}}">{{fmt.percent(record.confidence)}}% 准确</text></view>
     <view class="rc-summary"><view class="summary-mark">{{record.event_type === 'purchase' ? '进' : record.event_type === 'sale' ? '售' : record.event_type === 'waste' ? '损' : '记'}}</view><view><text class="summary-title">{{record.product || '待补充商品'}}</text><text class="summary-type">{{record.event_type === 'purchase' ? '采购进货' : record.event_type === 'sale' ? '销售出货' : record.event_type === 'waste' ? '损耗报废' : '经营记录'}}</text></view><text class="summary-amount" wx:if="{{record.total_amount}}">¥{{record.total_amount}}</text></view>
     <view class="rc-fields">
       <view class="rc-row" wx:if="{{record.quantity}}"><text>数量</text><text class="rc-val">{{record.quantity}} {{record.unit || '斤'}}</text></view>

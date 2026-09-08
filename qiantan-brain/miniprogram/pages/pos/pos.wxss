@@ -3,7 +3,7 @@
 .pos-top { display:flex; align-items:center; justify-content:space-between; }
 .pos-label,.pos-sub { display:block; color:rgba(255,255,255,.78); font-size:24rpx; }
 .pos-amount { display:block; margin-top:8rpx; color:#fff; font-family:var(--font-num); font-size:62rpx; font-weight:800; letter-spacing:-2rpx; line-height:1; font-variant-numeric:tabular-nums; }
-.status-strip { display:flex; justify-content:space-between; margin:20rpx 0; padding:20rpx 24rpx; color:#8f5a00; background:#fff1d6; border-radius:18rpx; font-size:24rpx; }
+.status-strip { display:flex; justify-content:space-between; margin:20rpx 0; padding:20rpx 24rpx; color:var(--corn-ink); background:var(--corn-soft); border-radius:18rpx; font-size:24rpx; }
 .link { color:var(--green-800); font-weight:700; }
 .product-scroll { width:100%; white-space:nowrap; }
 .product-row { display:inline-flex; gap:18rpx; padding:6rpx 4rpx 16rpx; }
@@ -12,7 +12,7 @@
 .product-name { overflow:hidden; color:var(--ink); font-size:29rpx; font-weight:750; text-overflow:ellipsis; }
 .product-stock { margin-top:10rpx; color:var(--muted); font-size:22rpx; }
 .product-price { margin-top:auto; padding-top:18rpx; color:var(--green-800); font-family:var(--font-num); font-size:28rpx; font-weight:800; }
-.estimate { position:absolute; top:14rpx; right:12rpx; padding:4rpx 8rpx; color:#8a5a00; background:#fff1d6; border-radius:9rpx; font-size:17rpx; }
+.estimate { position:absolute; top:14rpx; right:12rpx; padding:4rpx 8rpx; color:var(--corn-ink); background:var(--corn-soft); border-radius:9rpx; font-size:17rpx; }
 .cart { overflow:hidden; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
 .cart-item { display:flex; align-items:center; gap:18rpx; padding:22rpx; border-bottom:1rpx solid var(--line); }
 .cart-main { flex:1; min-width:0; }
@@ -45,9 +45,9 @@
 /* 操作按钮行 */
 .action-row { display:flex; gap:14rpx; margin-top:24rpx; }
 .hold-btn { flex:0 0 160rpx; color:var(--green-800); background:var(--green-50); border:2rpx solid var(--green-200); border-radius:22rpx; font-size:26rpx; font-weight:750; }
-.hold-btn[disabled] { color:var(--muted); background:#e8ecea; border-color:#e8ecea; }
-.checkout { flex:1; color:#fff; background:var(--corn); border-radius:22rpx; font-size:30rpx; font-weight:800; box-shadow:0 12rpx 26rpx rgba(243,168,59,.3); }
-.checkout[disabled] { color:var(--muted); background:#e8ecea; box-shadow:none; }
+.hold-btn[disabled] { color:var(--muted); background:var(--paper-3); border-color:var(--paper-3); }
+.checkout { flex:1; color:#fff; background:var(--corn); border-radius:22rpx; font-size:30rpx; font-weight:800; box-shadow:0 12rpx 26rpx rgba(200, 144, 42,.3); }
+.checkout[disabled] { color:var(--muted); background:var(--paper-3); box-shadow:none; }
 
 /* 挂单列表 */
 .held-head { margin-top:28rpx; }
@@ -68,7 +68,7 @@
 .settlement-title { display:block; color:var(--ink); font-size:28rpx; font-weight:800; }
 .settlement-grid { display:grid; grid-template-columns:1fr 1fr; gap:12rpx; margin-top:18rpx; color:var(--muted); font-size:23rpx; }
 .diff { display:block; margin-top:18rpx; font-weight:800; }
-.diff.ok { color:var(--green-700); }.diff.warn { color:#c93a30; }
+.diff.ok { color:var(--green-700); }.diff.warn { color:var(--tomato); }
 .settlement-extra { display:block; margin-top:12rpx; color:var(--green-800); font-size:22rpx; font-weight:700; }
 
 /* 订单列表 */
@@ -79,7 +79,7 @@
 .rec-title { color:var(--ink); font-size:24rpx; font-weight:700; }.rec-time { overflow:hidden; max-width:420rpx; margin-top:4rpx; color:var(--muted); font-size:19rpx; text-overflow:ellipsis; white-space:nowrap; }
 .rec-amount { text-align:right; color:var(--ink); font-family:var(--font-num); font-size:25rpx; font-weight:800; }
 .rec-status { margin-top:4rpx; text-align:right; color:var(--green-700); font-size:19rpx; }
-.rec-status.refunded { color:#c93a30; }
+.rec-status.refunded { color:var(--tomato); }
 .empty-state { padding:38rpx; text-align:center; color:var(--muted); background:var(--paper); border:2rpx dashed var(--line); border-radius:22rpx; font-size:24rpx; }
 
 /* 退款弹窗 */
@@ -97,21 +97,21 @@
 .toggle-knob { width:48rpx; height:48rpx; border-radius:50%; background:#fff; box-shadow:0 2rpx 6rpx rgba(0,0,0,.15); }
 .refund-actions { display:flex; gap:16rpx; margin-top:32rpx; }
 .refund-cancel { flex:1; color:var(--muted); background:var(--paper); border:2rpx solid var(--line); border-radius:20rpx; font-size:26rpx; font-weight:700; }
-.refund-confirm { flex:2; color:#fff; background:#c93a30; border-radius:20rpx; font-size:26rpx; font-weight:800; }
+.refund-confirm { flex:2; color:#fff; background:var(--tomato); border-radius:20rpx; font-size:26rpx; font-weight:800; }
 .refund-confirm[disabled] { opacity:.5; }
 
 /* 部分退款：商品列表 */
 .refund-item-list { margin-top: 16rpx; max-height: 400rpx; overflow-y: auto; }
 .refund-item-row { display: flex; align-items: center; gap: 12rpx; padding: 12rpx 0; border-bottom: 1rpx solid var(--line-soft); }
 .refund-item-name { flex: 1; min-width: 0; color: var(--ink); font-size: 24rpx; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.refund-item-qty { flex: 0 0 auto; color: var(--muted); font-size: 21rpx; }
+.refund-item-qty { flex: 0 0 auto; color: var(--muted); font-size: 22rpx; }
 .refund-item-input { flex: 0 0 100rpx; width: 100rpx; height: 60rpx; text-align: center; border: 2rpx solid var(--line); border-radius: 12rpx; font-size: 24rpx; font-weight: 700; color: var(--green-800); }
 
 /* 部分退款：商品列表 */
 .refund-item-list { margin-top: 12rpx; max-height: 500rpx; overflow-y: auto; }
 .refund-item-row { display: flex; align-items: center; gap: 14rpx; padding: 14rpx 0; border-bottom: 1rpx solid var(--line-soft); }
 .refund-item-name { flex: 1; min-width: 0; color: var(--ink); font-size: 24rpx; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.refund-item-qty { flex: 0 0 auto; color: var(--muted); font-size: 21rpx; }
+.refund-item-qty { flex: 0 0 auto; color: var(--muted); font-size: 22rpx; }
 .refund-item-input { flex: 0 0 auto; width: 120rpx; text-align: center; padding: 10rpx 16rpx; background: var(--paper-2); border: 2rpx solid var(--line); border-radius: 12rpx; font-size: 24rpx; font-weight: 700; color: var(--corn); }
 .refund-loading { padding: 18rpx 0; text-align: center; color: var(--muted); font-size: 22rpx; }
 
@@ -120,10 +120,10 @@
 .pos-hero { margin-bottom: 18rpx; }
 .pos-flow { display: flex; align-items: center; margin: 16rpx 0 26rpx; padding: 18rpx 14rpx; background: var(--paper); border: 1.5rpx solid var(--ring); border-radius: 22rpx; box-shadow: var(--shadow-sm); }
 .flow-cell { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 4rpx; color: var(--muted); }
-.flow-no { display: flex; align-items: center; justify-content: center; width: 36rpx; height: 36rpx; color: var(--muted); background: var(--paper-2); border-radius: 50%; font-size: 19rpx; font-weight: 800; }
+.flow-no { display: flex; align-items: center; justify-content: center; width: 36rpx; height: 36rpx; color: var(--muted); background: var(--paper-2); border-radius: 50%; font-size: 22rpx; font-weight: 800; }
 .flow-cell.active .flow-no { color: #fff; background: var(--green-700); }
-.flow-label { color: var(--ink-2); font-size: 21rpx; font-weight: 750; }
-.flow-value { font-size: 18rpx; }
+.flow-label { color: var(--ink-2); font-size: 22rpx; font-weight: 750; }
+.flow-value { font-size: 22rpx; }
 .flow-cell.active .flow-value { color: var(--green-700); }
 .flow-line { width: 34rpx; height: 2rpx; background: var(--line); }
 .product-card { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }

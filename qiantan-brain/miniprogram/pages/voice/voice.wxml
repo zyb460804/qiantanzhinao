@@ -93,7 +93,6 @@
   <view class="cp" wx:if="{{correction}}">
     <view class="cp-head">
       <view>
-        <text class="cp-eyebrow">CORRECTION</text>
         <text class="cp-title">改一改这笔账</text>
       </view>
       <text class="cp-close" bindtap="closeCorrection">收起</text>
@@ -125,7 +124,7 @@
     </view>
 
     <view class="cp-respeak {{state === 'respeaking' ? 'on' : ''}}" bindtap="toggleRespeak">
-      <icon name="mic" size="30" color="{{state === 'respeaking' ? '#c93a30' : 'var(--green-700)'}}" />
+      <icon name="mic" size="30" color="{{state === 'respeaking' ? 'var(--tomato)' : 'var(--green-700)'}}" />
       <text>{{state === 'respeaking' ? '正在说…说完点这里' : '重说这一项'}}</text>
     </view>
 
@@ -148,8 +147,11 @@
   <view class="section-head" wx:if="{{recentLogs.length > 0}}"><text class="section-title">最近说过</text><text class="section-caption">可撤销已记账</text></view>
   <view class="recent-list" wx:if="{{recentLogs.length > 0}}">
     <view wx:for="{{recentLogs}}" wx:key="id" class="recent-item">
-      <text class="recent-index">0{{index + 1}}</text>
-      <text class="recent-text">{{item.asr_text}}</text>
+      <text class="recent-index">{{index + 1}}</text>
+      <view class="recent-main">
+        <text class="recent-text">{{item.asr_text}}</text>
+        <text class="recent-amount" wx:if="{{item.status === 'confirmed' && item.total_amount}}">¥{{item.total_amount}}</text>
+      </view>
       <view class="recent-status">
         <text class="recent-tag {{item.status === 'confirmed' ? 'tag-green' : item.status === 'voided' ? 'tag-red' : 'tag-amber'}}">{{item.status === 'confirmed' ? '已记账' : item.status === 'voided' ? '已撤销' : '待确认'}}</text>
         <text class="void-btn" wx:if="{{item.status === 'confirmed'}}" bindtap="voidRecord" data-id="{{item.id}}">撤销</text>

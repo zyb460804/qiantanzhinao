@@ -22,19 +22,18 @@
     "pages/doc/doc",
     "pages/supplier/supplier",
     "pages/staff/staff",
-    "pages/notices/notices",
     "pages/stall-settings/stall-settings"
   ],
   "window": {
     "navigationBarBackgroundColor": "#FFFFFF",
     "navigationBarTitleText": "千摊智脑",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#F4F6F5",
+    "backgroundColor": "#F5F6F5",
     "backgroundTextStyle": "dark"
   },
   "tabBar": {
-    "color": "#98A29D",
-    "selectedColor": "#00A06A",
+    "color": "#8C9590",
+    "selectedColor": "#2A6B3C",
     "backgroundColor": "#FFFFFF",
     "borderStyle": "white",
     "list": [

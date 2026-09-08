@@ -541,6 +541,11 @@ Page({
   completeStocktake: function () {
     var self = this;
     if (this.data.completing) return;
+    // 空盘点单（如恢复了一个没有商品的历史会话）不允许直接完成，避免提交空单
+    if (!this.data.stocktakeItems.length) {
+      wx.showToast({ title: '当前盘点单没有商品，请点「开始盘点」重新生成', icon: 'none' });
+      return;
+    }
     if (this.data.progressCount < this.data.stocktakeItems.length) {
       wx.showToast({ title: '还有商品未盘点', icon: 'none' });
       return;

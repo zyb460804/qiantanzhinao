@@ -5,6 +5,7 @@ Covers the P1 gaps identified in the project quality audit (§6, §5.7).
 
 from __future__ import annotations
 
+import json
 import uuid
 from decimal import Decimal
 
@@ -688,8 +689,12 @@ async def test_resume_credit_requires_customer_name(client, db_session):
         },
     )
 
-    assert response.status_code == 400
-    assert "客户" in response.json()["detail"]
+    # P2-4：赊账缺客户名的校验上移到 schema validator → 422（此前 handler 400）
+    assert response.status_code == 422
+    body = response.json()
+    detail = body.get("detail")
+    msg = detail if isinstance(detail, str) else json.dumps(detail, ensure_ascii=False)
+    assert "客户" in msg
 
 
 @pytest.mark.asyncio

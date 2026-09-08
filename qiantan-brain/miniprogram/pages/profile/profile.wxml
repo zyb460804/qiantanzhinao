@@ -17,16 +17,16 @@
         <text class="snapshot-label muted" wx:else>今天还没有记录，去记一笔吧 →</text>
       </view>
       <view class="snapshot-stats" wx:if="{{todayOrders > 0}}">
-        <view class="sstat"><text class="sstat-num">{{todayOrders}} 笔</text><text class="sstat-label">交易笔数</text></view>
-        <view class="sstat"><text class="sstat-num">¥{{todayAov}}</text><text class="sstat-label">客单价</text></view>
+        <view class="sstat"><text class="sstat-num">{{todayOrders}}{{txnIsQty ? ' 斤' : ' 笔'}}</text><text class="sstat-label">{{txnIsQty ? '今日销量' : '交易笔数'}}</text></view>
+        <view class="sstat" wx:if="{{!txnIsQty}}"><text class="sstat-num">¥{{todayAov}}</text><text class="sstat-label">客单价</text></view>
         <view class="sstat"><text class="sstat-num {{dayChangeDir}}">{{trendLabel}}</text><text class="sstat-label">经营趋势</text></view>
       </view>
       <view class="snapshot-week" wx:if="{{weekTotal > 0}}" bindtap="goDashboard">本周累计 ¥{{weekTotal}} →</view>
     </block>
   </view>
 
-  <!-- 员工身份切换（权限体系） -->
-  <view class="identity-bar {{staffMode ? 'is-staff' : ''}}" bindtap="onIdentityTap">
+  <!-- 员工身份切换（权限体系）：无员工的单人摊主不展示，避免占住快照下方黄金位 -->
+  <view class="identity-bar {{staffMode ? 'is-staff' : ''}}" wx:if="{{staffMode || hasStaff}}" bindtap="onIdentityTap">
     <view class="identity-info">
       <text class="identity-role">{{staffMode ? (currentStaff.name + ' · ' + currentStaff.roleLabel) : ((merchantName || '老板') + ' · 全部权限')}}</text>
       <text class="identity-hint">{{staffMode ? '当前为员工身份，点击退出恢复老板' : '点击切换为员工身份（按角色限权）'}}</text>
@@ -34,10 +34,9 @@
     <text class="identity-action">{{staffMode ? '退出' : '切换 ›'}}</text>
   </view>
 
-  <!-- ② 快捷操作 -->
+  <!-- ② 快捷操作（v3.3 去重：语音记账走底部 tab，不再重复放卡） -->
   <view class="section-head"><text class="section-title">快捷操作</text></view>
   <view class="quick-grid">
-    <view class="quick-card" data-page="voice" bindtap="goQuick"><icon name="mic" size="44" color="#fff"/><text class="quick-title">语音记账</text><text class="quick-desc">{{voiceLabel}}</text></view>
     <view class="quick-card" wx:if="{{canDashboard}}" data-page="dashboard" bindtap="goQuick"><icon name="mirror" size="44" color="var(--green-800)"/><text class="quick-title">经营镜像</text><text class="quick-desc">今日全貌</text></view>
     <view class="quick-card" wx:if="{{canPos}}" data-page="pos" bindtap="goQuick"><icon name="cart" size="44" color="var(--green-800)"/><text class="quick-title">收银开单</text><text class="quick-desc">快速开单</text></view>
   </view>
@@ -95,23 +94,23 @@
     </view>
   </view>
 
-  <!-- ⑤ 摊位设置（跳转独立页面） -->
+  <!-- ⑤ 摊位设置（跳转独立页面；副标题展示当前真实设置值） -->
   <view class="section-head"><text class="section-title">摊位设置</text></view>
   <view class="setting-entry" bindtap="goStallSettings">
     <view class="setting-entry-body">
       <text class="setting-entry-title">{{merchantName || '未设置摊位名称'}}</text>
-      <text class="setting-entry-desc">名称 · 城市 · 方言 · 营业时段 · 建议偏好 · 皮肤主题</text>
+      <text class="setting-entry-desc">{{stallSummary || '设置名称 · 城市 · 方言 · 营业时段'}}</text>
     </view>
     <text class="setting-entry-arrow">›</text>
   </view>
 
-  <!-- ⑥ 帮助与反馈 -->
+  <!-- ⑥ 帮助与反馈（低频区：一行四项紧凑排布，去掉大卡与宣传语） -->
   <view class="section-head"><text class="section-title">帮助与反馈</text></view>
   <view class="help-grid">
-    <view class="help-card" bindtap="showGuide"><icon name="book" size="36" color="var(--green-800)"/><text class="help-title">操作指南</text><text class="help-desc">快速上手千摊</text></view>
-    <view class="help-card" bindtap="showFAQ"><icon name="help" size="36" color="var(--blue)"/><text class="help-title">常见问题</text><text class="help-desc">常见疑问解答</text></view>
-    <view class="help-card" bindtap="showFeedback"><icon name="edit" size="36" color="var(--corn)"/><text class="help-title">意见反馈</text><text class="help-desc">帮我们更好</text></view>
-    <view class="help-card" bindtap="contactService"><icon name="chat" size="36" color="var(--green-800)"/><text class="help-title">联系客服</text><text class="help-desc">人工在线协助</text></view>
+    <view class="help-item" bindtap="showGuide"><icon name="book" size="sm" color="var(--green-800)"/><text class="help-title">操作指南</text></view>
+    <view class="help-item" bindtap="showFAQ"><icon name="help" size="sm" color="var(--blue)"/><text class="help-title">常见问题</text></view>
+    <view class="help-item" bindtap="showFeedback"><icon name="edit" size="sm" color="var(--corn)"/><text class="help-title">意见反馈</text></view>
+    <view class="help-item" bindtap="contactService"><icon name="chat" size="sm" color="var(--green-800)"/><text class="help-title">联系客服</text></view>
   </view>
 
   <!-- ⑦ 关于 -->

@@ -11,7 +11,6 @@ without executing the data-migration INSERTs.
 """
 
 import asyncio
-import hashlib
 import os
 import sys
 import uuid

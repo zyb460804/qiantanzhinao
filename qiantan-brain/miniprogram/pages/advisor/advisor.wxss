@@ -4,7 +4,7 @@
  *   - 列表类（push / advice / ai-action / ai-history）改为条目式：
  *     透明背景 + 无阴影 + 无圆角，用 1rpx border-bottom 分隔，
  *     像账本/收银小票的条目紧贴。
- *   - 容器类（hero / sandbox-banner / sim-result）保留卡片语义。
+ *   - 容器类（hero / sandbox-banner）保留卡片语义。
  *   - 语义左竖线保留（warn=麦金 / green=墨绿 / failed=朱砂）。
  * ============================================================= */
 
@@ -34,7 +34,7 @@
   font-size: 30rpx; font-weight: 760;
   font-variant-numeric: tabular-nums;
 }
-.env-label { margin-top: 3rpx; color: rgba(255, 255, 255, 0.58); font-size: 19rpx; }
+.env-label { margin-top: 3rpx; color: rgba(255, 255, 255, 0.58); font-size: 22rpx; }
 .env-strip.muted .env-num { color: rgba(255, 255, 255, 0.50); }
 .env-strip.muted .env-label { color: rgba(255, 255, 255, 0.40); }
 
@@ -61,7 +61,6 @@
 }
 .push-card:last-child { border-bottom: 0; }
 .push-card:active { background: var(--paper-2); }
-.push-card.done { background: var(--green-50); }
 
 /* push-dot：账本条目前的语义圆点（替代原彩色图标方块） */
 .push-dot {
@@ -81,11 +80,6 @@
   color: var(--green-700); background: transparent;
   font-size: 22rpx; font-weight: 700;
 }
-.push-done {
-  flex: 0 0 auto; padding: 0;
-  color: var(--green-700); background: transparent;
-  font-size: 22rpx; font-weight: 700;
-}
 
 /* ---------- 小智开口说（保留便签风） ---------- */
 .mascot-says {
@@ -99,8 +93,6 @@
   flex: 1; color: var(--ink);
   font-size: 27rpx; line-height: 1.5; font-weight: 640;
 }
-.caret { display: none; }
-@keyframes blink { 50% { opacity: 0; } }
 
 /* =============================================================
  * 建议条目 · 直接印在账本上（无外层容器，条目紧贴）
@@ -130,7 +122,7 @@
 .confidence {
   flex: 0 0 auto; padding: 4rpx 10rpx;
   color: var(--corn-ink); background: var(--corn-soft);
-  border-radius: 4rpx; font-size: 19rpx;     /* 直角小印章感 */
+  border-radius: 4rpx; font-size: 22rpx;     /* 直角小印章感 */
 }
 .confidence.high { color: var(--green-700); background: var(--green-100); }
 .advice-suggestion {
@@ -145,7 +137,7 @@
 }
 .box-label {
   display: block; margin-bottom: 8rpx;
-  color: var(--muted); font-size: 20rpx; font-weight: 700; letter-spacing: 2rpx;
+  color: var(--muted); font-size: 22rpx; font-weight: 700; letter-spacing: 2rpx;
 }
 .basis-line {
   display: flex; justify-content: space-between; gap: 18rpx;
@@ -170,12 +162,12 @@
   display: flex; align-items: center; justify-content: center;
   width: 28rpx; height: 28rpx;
   color: #fff; background: var(--corn);
-  border-radius: 50%; font-size: 18rpx; font-weight: 800;
+  border-radius: 50%; font-size: 22rpx; font-weight: 800;
 }
 
 /* 反馈按钮（去 emoji · 纯文字胶囊） */
 .advice-feedback { display: flex; align-items: center; gap: 12rpx; margin-top: 18rpx; }
-.fb-label { font-size: 21rpx; color: var(--muted); }
+.fb-label { font-size: 22rpx; color: var(--muted); }
 .fb-btn {
   padding: 8rpx 18rpx; font-size: 22rpx; font-weight: 600;
   color: var(--ink-2); background: transparent;
@@ -215,7 +207,7 @@
 .ai-action-badge {
   flex: 0 0 auto; padding: 4rpx 12rpx;
   color: #fff; background: var(--green-700);
-  border-radius: 4rpx; font-size: 19rpx; font-weight: 700;
+  border-radius: 4rpx; font-size: 22rpx; font-weight: 700;
 }
 .ai-action-card.warn .ai-action-badge { background: var(--corn); }
 .ai-action-card.info .ai-action-badge { background: var(--green-500); }
@@ -257,19 +249,19 @@
 .ai-history-badge {
   flex: 0 0 auto; padding: 3rpx 10rpx;
   color: var(--green-700); background: var(--green-50);
-  border-radius: 4rpx; font-size: 19rpx; font-weight: 700;
+  border-radius: 4rpx; font-size: 22rpx; font-weight: 700;
 }
 .ai-history-title {
   flex: 1; min-width: 0;
   color: var(--ink); font-size: 24rpx; font-weight: 650;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ai-history-status { flex: 0 0 auto; font-size: 20rpx; font-weight: 700; }
+.ai-history-status { flex: 0 0 auto; font-size: 22rpx; font-weight: 700; }
 .ai-history-status.executed { color: var(--green-700); }
 .ai-history-status.rejected { color: var(--muted); }
 .ai-history-status.failed { color: var(--corn); }
-.ai-history-result { display: block; margin-top: 6rpx; color: var(--muted); font-size: 21rpx; }
-.ai-history-time { display: block; margin-top: 2rpx; color: var(--muted); font-size: 19rpx; opacity: 0.7; }
+.ai-history-result { display: block; margin-top: 6rpx; color: var(--muted); font-size: 22rpx; }
+.ai-history-time { display: block; margin-top: 2rpx; color: var(--muted); font-size: 22rpx; opacity: 0.7; }
 
 /* 加入采购按钮 */
 .purchase-cta { margin: 28rpx 0 8rpx; }
@@ -286,36 +278,5 @@
 .sandbox-copy { flex: 1; }
 .sandbox-title, .sandbox-desc { display: block; }
 .sandbox-title { font-size: 27rpx; font-weight: 730; }
-.sandbox-desc { margin-top: 3rpx; color: rgba(255, 255, 255, 0.62); font-size: 20rpx; }
+.sandbox-desc { margin-top: 3rpx; color: rgba(255, 255, 255, 0.62); font-size: 22rpx; }
 .sandbox-arrow { color: #e8f5ed; font-size: 23rpx; font-weight: 700; }
-
-/* ---------- 试算结果（保留卡片） ---------- */
-.sim-area { margin-top: 18rpx; }
-.sim-result { padding: 28rpx; background: var(--paper); border-radius: var(--r-lg); box-shadow: var(--shadow); }
-.result-head { display: flex; align-items: center; justify-content: space-between; }
-.result-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 2rpx;
-  margin-top: 22rpx; overflow: hidden;
-  background: var(--line); border: 1rpx solid var(--line);
-  border-radius: var(--r-md);
-}
-.result-grid > view { padding: 22rpx; background: var(--paper); }
-.result-num, .result-label { display: block; }
-.result-num {
-  font-family: var(--font-num); font-size: 31rpx; font-weight: 760;
-  font-variant-numeric: tabular-nums;
-}
-.result-label { margin-top: 3rpx; color: var(--muted); font-size: 20rpx; }
-.result-rec {
-  display: block; margin-top: 20rpx; padding: 18rpx;
-  color: var(--green-700); background: var(--green-50);
-  border-radius: var(--r-sm); font-size: 23rpx;
-}
-
-/* ---------- 骨架屏 ---------- */
-.loading-card { padding: 28rpx 0; background: transparent; }
-.loading-line { height: 22rpx; width: 68%; margin: 16rpx 0; background: var(--paper-3); border-radius: var(--r-pill); }
-.loading-line.wide { width: 90%; height: 34rpx; }
-.loading-line.short { width: 42%; }
-
-.reduce-motion .caret { animation: none !important; }

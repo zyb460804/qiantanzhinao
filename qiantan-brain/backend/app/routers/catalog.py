@@ -32,6 +32,19 @@ from app.services.supplier_scoring import calculate_supplier_score
 
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
 
+# P2-9：新商户单位字典为空时的内置常用单位兜底（只读引导，unit_id 为空表示未建档）。
+BUILT_IN_UNITS = (
+    ("斤", "斤"),
+    ("公斤", "公斤"),
+    ("克", "克"),
+    ("份", "份"),
+    ("箱", "箱"),
+    ("袋", "袋"),
+    ("个", "个"),
+    ("根", "根"),
+    ("把", "把"),
+)
+
 
 def _d(v) -> Decimal:
     if v is None:
@@ -123,15 +136,24 @@ async def create_sku(
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="商品名称不能为空")
+    # P2-1 修复：名称长度上限（此前 200 字名称可直接落库撑爆列表/卡片）。
+    if len(name) > 50:
+        raise HTTPException(status_code=422, detail="商品名称不能超过 50 个字")
+    # P1-5 修复：售价上下限（此前 -1 与 1e13 均落库成功）。
+    sale_price = body.get("default_sale_price")
+    if sale_price is not None and sale_price != "":
+        sale_price = Decimal(str(sale_price))
+        if not (Decimal("0") <= sale_price <= Decimal("1000000")):
+            raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
+    else:
+        sale_price = None
     sku = ProductSKU(
         merchant_id=merchant.id,
         name=name,
         category_group=body.get("category_group"),
         canonical_unit=body.get("canonical_unit", "斤"),
         shelf_life_hours=body.get("shelf_life_hours", 72),
-        default_sale_price=Decimal(str(body["default_sale_price"]))
-        if body.get("default_sale_price")
-        else None,
+        default_sale_price=sale_price,
     )
     db.add(sku)
     try:
@@ -162,13 +184,22 @@ async def update_sku(
     for field in ("name", "category_group", "canonical_unit"):
         if field in body:
             setattr(sku, field, body[field])
+    # P2-1：更新路径同样限制名称长度
+    if sku.name and len(sku.name) > 50:
+        raise HTTPException(status_code=422, detail="商品名称不能超过 50 个字")
     if "shelf_life_hours" in body:
         sku.shelf_life_hours = int(body["shelf_life_hours"])
     if "default_sale_price" in body:
         old_price = sku.default_sale_price
-        new_price = Decimal(str(body["default_sale_price"]))
+        raw_price = body["default_sale_price"]
+        new_price = None
+        if raw_price is not None and raw_price != "":
+            new_price = Decimal(str(raw_price))
+            # P1-5：更新路径（含 POS 改价）同样拒绝越界售价
+            if not (Decimal("0") <= new_price <= Decimal("1000000")):
+                raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
         sku.default_sale_price = new_price
-        if old_price and old_price != new_price:
+        if old_price and new_price is not None and old_price != new_price:
             db.add(
                 PriceHistory(
                     merchant_id=merchant.id,
@@ -362,6 +393,21 @@ async def list_units(
         .scalars()
         .all()
     )
+    if not units:
+        # P2-9 修复：空字典时返回内置常用单位，单位选择不再面对空列表。
+        return {
+            "code": 0,
+            "data": [
+                {
+                    "unit_id": None,
+                    "code": code,
+                    "name": name,
+                    "kind": "built_in",
+                    "is_base": code == "斤",
+                }
+                for code, name in BUILT_IN_UNITS
+            ],
+        }
     return {
         "code": 0,
         "data": [

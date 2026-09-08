@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ApiResponse, DecimalNum
 
@@ -29,9 +29,10 @@ class DailyAdviceResponse(BaseModel):
 
 
 class ScenarioInput(BaseModel):
-    purchase_qty: DecimalNum
-    unit_cost: DecimalNum
-    unit_price: DecimalNum
+    # P2-8 修复：进货量/成本/售价必须为正，拒绝负数与 0（此前 -10 也能算出垃圾结果）。
+    purchase_qty: DecimalNum = Field(..., gt=0, le=1_000_000)
+    unit_cost: DecimalNum = Field(..., gt=0, le=100_000_000)
+    unit_price: DecimalNum = Field(..., gt=0, le=100_000_000)
     product_name: str | None = None
     estimated_sales_base: DecimalNum | None = None
     avg_historical_price: DecimalNum | None = None

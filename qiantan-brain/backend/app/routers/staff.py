@@ -7,8 +7,10 @@
 """
 
 import hmac
+import re
 import uuid
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +28,28 @@ from app.schemas.common import AnyResponse
 
 
 router = APIRouter(prefix="/api/v1/staff", tags=["staff"])
+
+# P1-4：PIN 格式约束（服务端强制；前端原有 4-6 位只是客户端校验）
+_PIN_PATTERN = re.compile(r"^\d{4,6}$")
+
+
+def _hash_pin(pin: str) -> str:
+    """PIN → bcrypt 哈希。"""
+    return bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+
+
+def _is_hashed(stored: str | None) -> bool:
+    return bool(stored) and stored.startswith("$2")  # bcrypt 前缀
+
+
+def _normalize_and_validate_pin(pin: str | None) -> str | None:
+    """入参校验：None/'' → None（清空）；否则必须 4-6 位数字，返回哈希。"""
+    if pin is None or pin == "":
+        return None
+    pin = str(pin).strip()
+    if not _PIN_PATTERN.fullmatch(pin):
+        raise HTTPException(status_code=422, detail="PIN 必须是 4-6 位数字")
+    return _hash_pin(pin)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -190,7 +214,22 @@ async def staff_login(
     if staff.role == "owner":
         raise HTTPException(status_code=403, detail="owner 角色不允许员工登录")
     # 常量时间比较（H2）：避免时序侧信道泄露正确 PIN 的前缀
-    if not staff.pin_code or not hmac.compare_digest(staff.pin_code, str(pin_code)):
+    # P1-4：存量兼容 —— 哈希行走 bcrypt 校验；旧明文行走 compare_digest，
+    # 命中后即时透明升级为 bcrypt 哈希落库（无需管理员介入迁移）。
+    submitted = str(pin_code)
+    pin_ok = False
+    if staff.pin_code:
+        if _is_hashed(staff.pin_code):
+            try:
+                pin_ok = bcrypt.checkpw(submitted.encode("utf-8"), staff.pin_code.encode("ascii"))
+            except ValueError:
+                pin_ok = False
+        else:
+            pin_ok = hmac.compare_digest(staff.pin_code, submitted)
+            if pin_ok:
+                staff.pin_code = _hash_pin(submitted)
+                await db.commit()
+    if not pin_ok:
         await record_failed_attempt(request, rl_key)
         raise HTTPException(status_code=401, detail="PIN 码错误")
     # 登录成功，清除该限流 key 的失败记录
@@ -265,7 +304,8 @@ async def create_staff(
         name=name,
         phone=body.get("phone"),
         role=role,
-        pin_code=body.get("pin_code"),
+        # P1-4：服务端校验 4-6 位数字并 bcrypt 哈希落库（不再明文）
+        pin_code=_normalize_and_validate_pin(body.get("pin_code")),
     )
     db.add(s)
     await db.commit()
@@ -298,7 +338,11 @@ async def update_staff(
             value = body[f]
             if value == "" and f != "pin_code":
                 continue
-            setattr(s, f, value if value != "" else None)
+            if f == "pin_code":
+                # P1-4：更新 PIN 同样走服务端校验 + bcrypt 哈希
+                setattr(s, f, _normalize_and_validate_pin(value))
+            else:
+                setattr(s, f, value)
     if "role" in body:
         if body["role"] not in ROLE_PERMISSIONS:
             raise HTTPException(status_code=400, detail="无效角色")

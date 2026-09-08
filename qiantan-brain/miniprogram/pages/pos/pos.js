@@ -370,7 +370,8 @@ Page({
 
     var order = {
       client_id: offlineSync.uuidv4(), created_at: new Date().toISOString(), status: 'pending', retries: 0,
-      payment_method: this.data.multiPay ? 'cash' : this.data.paymentMethod,
+      // P2-4：组合支付语义标识改为 'combined'（后端已支持；支付明细仍逐笔记 payments）
+      payment_method: this.data.multiPay ? 'combined' : this.data.paymentMethod,
       customer_name: customerName,
       discount_amount: this.data.discountAmount, gross: this.data.grossAmount, payable: payable,
       items: this.data.cart.map(function (item) { return { product_id: item.product_id, sku_id: item.sku_id || null, quantity: item.quantity, unit: item.unit, unit_price: item.unit_price }; })
@@ -581,7 +582,7 @@ Page({
 
     function submit() {
       self.setData({ submitting: true });
-      var data = { payments: payments };
+      var data = { payment_method: 'combined', payments: payments };
       if (customerName) data.customer_name = customerName;
       app.request({ url: '/pos/orders/' + orderId + '/resume', method: 'POST', data: data }).then(function () {
         self.setData({ submitting: false });
@@ -716,11 +717,30 @@ Page({
   _doCloseDay: function () {
     var self = this;
     var today = cstToday();
-    // P1：明确告知「日结后当天无法再开新订单」这一副作用，避免晚高峰前误点。
+    // P1-3 闭环：已日结时按钮语义是「重新日结」= 先重开（解除录入锁定，可补录），
+    // 补完再点一次按钮走正常日结（快照重算覆盖）。
     var alreadyClosed = this.data.settlement && this.data.settlement.status === 'closed';
+    if (alreadyClosed) {
+      wx.showModal({
+        title: '重开今日日结',
+        content: '重开后今天可以继续记账/开单，补完后请再点「确认今日日结」重新出账。现在重开吗？',
+        success: function (r) {
+          if (!r.confirm) return;
+          self.setData({ submitting: true });
+          app.request({ url: '/pos/daily-settlement/' + today + '/reopen', method: 'POST' }).then(function () {
+            self.setData({ settlement: null, submitting: false });
+            wx.showToast({ title: '已重开，补完再日结', icon: 'none' });
+          }).catch(function (err) {
+            self.setData({ submitting: false });
+            wx.showToast({ title: (err && err.body && err.body.detail) || '重开失败', icon: 'none' });
+          });
+        }
+      });
+      return;
+    }
     wx.showModal({
-      title: alreadyClosed ? '重新日结（覆盖）' : '确认日结',
-      content: '将按销售、各渠道实收、采购付款、赊账余额生成对账结果。\n注意：日结关闭后，当天将无法再开新订单、退款或挂单取回（如需恢复请联系管理员）。',
+      title: '确认日结',
+      content: '将按销售、各渠道实收、采购付款、赊账余额生成对账结果。\n注意：日结关闭后，当天将无法再开新订单、退款或挂单取回；如需补录，可点「重开今日日结」。',
       success: function (r) {
         if (!r.confirm) return;
         self.setData({ submitting: true });

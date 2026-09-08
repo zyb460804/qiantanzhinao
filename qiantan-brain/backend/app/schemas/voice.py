@@ -107,6 +107,8 @@ class VoiceLogItem(BaseModel):
     asr_text: str | None = None
     parsed_event: dict | None = None
     status: str
+    # 便捷金额（自 parsed_event 提取），供「最近说过」列表直接展示
+    total_amount: float | None = None
     created_at: str | None = None
 
 

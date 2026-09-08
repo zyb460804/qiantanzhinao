@@ -1787,6 +1787,9 @@ async def close_daily_settlement(
         "diff_amount",
     ):
         setattr(settlement, field, numbers.get(field, Decimal("0")))
+    # P2-6：完整统计快照落库（order_count/refund_amount/estimated_cogs 等），
+    # closed 回显不再依赖列集合（此前 order_count 回显为 None）。
+    settlement.snapshot = {k: float(v) if isinstance(v, Decimal) else v for k, v in numbers.items()}
     settlement.status = "closed"
     settlement.closed_at = utc_now()
 
@@ -1830,6 +1833,51 @@ async def close_daily_settlement(
     }
 
 
+@router.post("/daily-settlement/{settle_date}/reopen", response_model=AnyResponse)
+async def reopen_daily_settlement(
+    settle_date: date,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("daily_settle")),
+):
+    """重开当日日结（P1-3 闭环配套）：closed → open，解除业务录入锁定。
+
+    场景：摊主傍晚日结后晚上又卖了单 → 语音/POS 被「日结已关闭」拦截。
+    点「重新日结」先走本端点重开，补录账目后再正式 close（快照重算覆盖）。
+    幂等：本就是 open 时直接返回成功。
+    """
+    if settle_date > cst_today():
+        raise HTTPException(status_code=400, detail="不可重开未来日期的日结")
+    settlement = await db.scalar(
+        select(DailySettlement).where(
+            DailySettlement.merchant_id == merchant.id,
+            DailySettlement.date == settle_date,
+        )
+    )
+    if settlement is None:
+        raise HTTPException(status_code=404, detail="该日尚未日结，无需重开")
+    if settlement.status == "closed":
+        settlement.status = "open"
+        settlement.closed_at = None
+        settlement.snapshot = None
+        db.add(
+            AuditLog(
+                merchant_id=merchant.id,
+                action="daily_settlement_reopen",
+                target_table="daily_settlements",
+                target_id=str(settlement.id),
+                reason=f"重开日结 {settle_date}（补录后需重新日结）",
+                operator="merchant",
+            )
+        )
+        await db.commit()
+    return {
+        "code": 0,
+        "message": f"日结已重开（{settle_date}），补录完成后请重新日结",
+        "data": {"date": settle_date.isoformat(), "status": "open"},
+    }
+
+
 @router.get("/daily-settlement/{settle_date}", response_model=AnyResponse)
 async def get_daily_settlement(
     settle_date: date,
@@ -1856,18 +1904,22 @@ async def get_daily_settlement(
                 "status": "open",
             },
         }
+    # P2-6：优先回显关闭时的完整快照；旧行（snapshot 为 NULL）回退到列值。
+    data = {
+        "date": settlement.date.isoformat(),
+        "total_sales": float(settlement.total_sales),
+        "total_payments": float(settlement.total_payments),
+        "cash_amount": float(settlement.cash_amount),
+        "wechat_amount": float(settlement.wechat_amount),
+        "alipay_amount": float(settlement.alipay_amount),
+        "card_amount": float(settlement.card_amount),
+        "credit_amount": float(settlement.credit_amount),
+        "diff_amount": float(settlement.diff_amount),
+        "status": settlement.status,
+    }
+    if settlement.snapshot:
+        data.update(settlement.snapshot)
     return {
         "code": 0,
-        "data": {
-            "date": settlement.date.isoformat(),
-            "total_sales": float(settlement.total_sales),
-            "total_payments": float(settlement.total_payments),
-            "cash_amount": float(settlement.cash_amount),
-            "wechat_amount": float(settlement.wechat_amount),
-            "alipay_amount": float(settlement.alipay_amount),
-            "card_amount": float(settlement.card_amount),
-            "credit_amount": float(settlement.credit_amount),
-            "diff_amount": float(settlement.diff_amount),
-            "status": settlement.status,
-        },
+        "data": data,
     }

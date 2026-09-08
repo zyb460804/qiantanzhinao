@@ -86,7 +86,7 @@ class TestSimulateWhatIf:
         assert "recommendation" in comp
 
     async def test_zero_purchase_no_crash(self, client):
-        """Zero purchase quantity should not crash the simulation."""
+        """P2-8：进货量 ≤0 直接 422 校验拒绝（不再算出垃圾结果，也不 500）。"""
         resp = await client.post(
             "/api/v1/simulate/what-if",
             json={
@@ -100,10 +100,21 @@ class TestSimulateWhatIf:
             },
         )
 
-        assert resp.status_code == 200
-        output = resp.json()["data"]["output"]
-        assert output["estimated_sales"] == 0
-        assert output["net_profit"] == 0
+        assert resp.status_code == 422
+
+        negative = await client.post(
+            "/api/v1/simulate/what-if",
+            json={
+                "merchant_id": TEST_MERCHANT_ID,
+                "product_id": 1,
+                "scenario": {
+                    "purchase_qty": -10,
+                    "unit_cost": 0.3,
+                    "unit_price": 1.5,
+                },
+            },
+        )
+        assert negative.status_code == 422
 
     async def test_monotonicity_more_purchase_more_waste(self, client):
         """Buying more → waste rate should not decrease (monotonicity check)."""

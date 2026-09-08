@@ -366,7 +366,21 @@ class TestStocktakeAnchorLocks:
     已结束（completed/cancelled）的会话不再接受提交/取消。
     """
 
-    async def _start_and_complete(self, client):
+    async def _start_and_complete(self, client, db_session):
+        # P2-2：盘点只为有账面流水的品项生成待盘项 —— 先给商品1入账
+        async with db_session() as session:
+            session.add(
+                InventoryRecord(
+                    merchant_id=uuid.UUID(TEST_MERCHANT_ID),
+                    product_id=1,
+                    quantity=Decimal("10"),
+                    unit="斤",
+                    total_amount=Decimal("20"),
+                    event_type="purchase",
+                    event_time=datetime.now(),
+                )
+            )
+            await session.commit()
         start = (await client.post("/api/v1/inventory/stocktake/start", json={})).json()["data"]
         session_id = start["session_id"]
         for item in start["items"]:
@@ -382,7 +396,7 @@ class TestStocktakeAnchorLocks:
         return session_id
 
     async def test_submit_after_complete_rejected(self, client, db_session):
-        session_id = await self._start_and_complete(client)
+        session_id = await self._start_and_complete(client, db_session)
 
         resp = await client.post(
             f"/api/v1/inventory/stocktake/{session_id}/submit",
@@ -392,7 +406,7 @@ class TestStocktakeAnchorLocks:
         assert "已结束" in resp.json()["detail"]
 
     async def test_submit_batch_after_complete_rejected(self, client, db_session):
-        session_id = await self._start_and_complete(client)
+        session_id = await self._start_and_complete(client, db_session)
 
         resp = await client.post(
             f"/api/v1/inventory/stocktake/{session_id}/submit-batch",
@@ -403,7 +417,7 @@ class TestStocktakeAnchorLocks:
 
     async def test_cancel_after_complete_keeps_completed(self, client, db_session):
         """completed 不会被 cancel 覆写为 cancelled（锚点锁 + 状态守卫）。"""
-        session_id = await self._start_and_complete(client)
+        session_id = await self._start_and_complete(client, db_session)
 
         resp = await client.post(f"/api/v1/inventory/stocktake/{session_id}/cancel")
         assert resp.status_code == 400

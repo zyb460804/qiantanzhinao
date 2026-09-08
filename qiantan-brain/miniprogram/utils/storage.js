@@ -48,46 +48,6 @@ function getMerchantId() {
 }
 
 /**
- * Set merchant ID.
- * @param {string} id
- */
-function setMerchantId(id) {
-  wx.setStorageSync(STORAGE_KEYS.MERCHANT_ID, id);
-}
-
-/**
- * Get stored merchant name.
- * @returns {string}
- */
-function getMerchantName() {
-  return wx.getStorageSync(STORAGE_KEYS.MERCHANT_NAME) || '老板';
-}
-
-/**
- * Set merchant name.
- * @param {string} name
- */
-function setMerchantName(name) {
-  wx.setStorageSync(STORAGE_KEYS.MERCHANT_NAME, name);
-}
-
-/**
- * Get risk profile preference.
- * @returns {string} 'conservative' | 'neutral' | 'aggressive'
- */
-function getRiskProfile() {
-  return wx.getStorageSync(STORAGE_KEYS.RISK_PROFILE) || 'neutral';
-}
-
-/**
- * Set risk profile.
- * @param {string} profile
- */
-function setRiskProfile(profile) {
-  wx.setStorageSync(STORAGE_KEYS.RISK_PROFILE, profile);
-}
-
-/**
  * Get voice dialect setting.
  * @returns {string}
  */
@@ -135,9 +95,7 @@ function setSkuNames(names) {
 
 module.exports = {
   KEYS: STORAGE_KEYS,
-  getMerchantId, setMerchantId,
-  getMerchantName, setMerchantName,
-  getRiskProfile, setRiskProfile,
+  getMerchantId,
   getVoiceDialect, setVoiceDialect,
   getSkuNames, setSkuNames, isSkuCacheStale,
 };
