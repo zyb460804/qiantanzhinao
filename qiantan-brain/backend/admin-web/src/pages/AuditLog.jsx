@@ -19,6 +19,9 @@ const actionColors = {
   manual_record_usage: 'red',
   export: 'gold',
   generate_invoice: 'cyan',
+  create_admin: 'green',
+  update_admin: 'orange',
+  permission_check: 'geekblue',
 }
 const actionLabels = {
   login: '登录',
@@ -32,6 +35,17 @@ const actionLabels = {
   manual_record_usage: '人工记账',
   export: '导出',
   generate_invoice: '生成账单',
+  create_admin: '创建管理员',
+  update_admin: '更新管理员',
+}
+
+/** permission_check.* 为前缀动作（如 permission_check.export.data），统一渲染为「权限校验」。 */
+function describeAction(action) {
+  if (actionLabels[action]) return { label: actionLabels[action], color: actionColors[action] || 'default' }
+  if (action?.startsWith('permission_check.')) {
+    return { label: `权限校验 (${action.slice('permission_check.'.length)})`, color: actionColors.permission_check }
+  }
+  return { label: action, color: 'default' }
 }
 
 export default function AuditLog() {
@@ -82,7 +96,10 @@ export default function AuditLog() {
       dataIndex: 'action',
       key: 'action',
       width: 110,
-      render: (a) => <Tag color={actionColors[a] || 'default'}>{actionLabels[a] || a}</Tag>,
+      render: (a) => {
+        const { label, color } = describeAction(a)
+        return <Tag color={color}>{label}</Tag>
+      },
     },
     {
       title: '资源类型',

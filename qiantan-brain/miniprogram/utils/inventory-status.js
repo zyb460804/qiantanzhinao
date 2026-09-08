@@ -85,8 +85,7 @@ function statusHint(status) {
 }
 
 module.exports = {
-  DEFAULT_LOW_STOCK_THRESHOLD: DEFAULT_LOW_STOCK_THRESHOLD,
-  // 向后兼容别名（测试与历史调用方仍使用 LOW_STOCK_THRESHOLD）。
+  // 向后兼容别名（单测仍使用 LOW_STOCK_THRESHOLD）。
   LOW_STOCK_THRESHOLD: DEFAULT_LOW_STOCK_THRESHOLD,
   resolveQty: resolveQty,
   resolveThreshold: resolveThreshold,

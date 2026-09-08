@@ -13,10 +13,10 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.timezone import local_days_ago, local_now
+from app.core.timezone import cst_date_of_utc_naive, cst_days_ago_bounds_utc, cst_today
 from app.models.environment import EnvironmentRecord
 from app.models.inventory import InventoryRecord
 
@@ -31,8 +31,14 @@ async def _get_daily_sales_history(
     sku_id: uuid.UUID | None = None,
     days: int = 90,
 ) -> list[dict]:
-    """Get daily sales history for a product/SKU, filled with zeros for missing days."""
-    start = local_days_ago(days)
+    """Get daily sales history for a product/SKU, filled with zeros for missing days.
+
+    按日聚合拉到 Python 侧按 CST 业务日重算（审计 C4 / 方言陷阱）：
+    SQL 的 func.date(event_time) 在 SQLite/PG 下都只能得到 UTC 日期键
+    （SQLite 的 date(col,'+8 hours') 修饰符 PG 不支持），CST 00:00-08:00 的
+    销售会被记到前一天，污染移动平均与 Prophet 训练序列。单 SKU 数据量小。
+    """
+    start = cst_days_ago_bounds_utc(days)[0]
 
     filters = [
         InventoryRecord.merchant_id == merchant_id,
@@ -46,26 +52,22 @@ async def _get_daily_sales_history(
     else:
         filters.append(InventoryRecord.sku_id.is_(None))
 
-    query = (
-        select(
-            func.date(InventoryRecord.event_time).label("d"),
-            func.sum(func.abs(InventoryRecord.quantity)).label("qty"),
+    rows = (
+        await db.execute(
+            select(InventoryRecord.event_time, InventoryRecord.quantity).where(*filters)
         )
-        .where(*filters)
-        .group_by(func.date(InventoryRecord.event_time))
-        .order_by(func.date(InventoryRecord.event_time))
-    )
-    result = await db.execute(query)
-    rows = result.all()
+    ).all()
 
-    # Build date->qty map
-    sales_map = {str(row.d): float(row.qty or 0) for row in rows}
+    # Build CST-date -> qty map
+    sales_map: dict[str, float] = {}
+    for event_time, quantity in rows:
+        d_str = cst_date_of_utc_naive(event_time).isoformat()
+        sales_map[d_str] = sales_map.get(d_str, 0.0) + abs(float(quantity or 0))
 
     # Fill missing dates with 0
     history = []
     for i in range(days):
-        d = (local_now() - timedelta(days=days - 1 - i)).date()
-        d_str = str(d)
+        d_str = (cst_today() - timedelta(days=days - 1 - i)).isoformat()
         history.append(
             {
                 "date": d_str,
@@ -78,7 +80,8 @@ async def _get_daily_sales_history(
 
 async def _get_env_factors(db: AsyncSession, merchant_id: uuid.UUID) -> dict:
     """Get today's environment factors for prediction adjustment."""
-    today = local_now().date()
+    # EnvironmentRecord.date 是业务日（CST），取业务「今天」而非服务器本地日期
+    today = cst_today()
     env_query = select(EnvironmentRecord).where(EnvironmentRecord.date == today)
     env_result = await db.execute(env_query)
     env = env_result.scalar_one_or_none()

@@ -12,13 +12,14 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.idempotency import short_idem_key
 from app.core.security import get_current_merchant
-from app.core.timezone import utc_now
+from app.core.timezone import cst_day_bounds_utc, utc_now
 from app.database import get_db
 from app.models.accounts import CustomerCreditProfile, CustomerReceivable
 from app.models.audit import AuditLog
@@ -28,15 +29,64 @@ from app.models.merchant import Merchant
 from app.models.pos import SaleOrder
 from app.models.product import ProductCategory
 from app.routers.staff import require_permission
-from app.schemas.common import AnyResponse
+from app.schemas.common import AnyResponse, DecimalNum
 from app.services.accounts_service import get_customer_balance, record_customer_receivable
-from app.services.batch import consume_batches_fifo
+from app.services.batch import consume_batches_fifo_costed
 
 
 class ClearancePromotionRequest(BaseModel):
     promotion_price: Decimal = Field(gt=0)
     start_at: datetime | None = None
     end_at: datetime | None = None
+
+
+class WasteRecordRequest(BaseModel):
+    """报损请求 schema — 协议错误（非数字/缺字段/非法 UUID）→ 422。
+
+    quantity 不加 gt=0：负数/零是业务语义错误，走路由显式校验返回
+    400 中文报错（保持既有 API 契约），而非 Pydantic 的 422。
+    """
+
+    product_id: int
+    sku_id: uuid.UUID | None = None
+    quantity: DecimalNum
+    unit: str | None = Field(default=None, max_length=20)
+    reason: str = "其他"
+    notes: str | None = Field(default=None, max_length=500)
+    photos: str | None = Field(default=None, max_length=2000)
+    idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+class CustomerRepayRequest(BaseModel):
+    """客户回款请求 schema — 非数字金额/缺字段 → 422；负数/零金额 → 路由 400。"""
+
+    customer_name: str = Field(max_length=50)
+    amount: DecimalNum
+    note: str | None = Field(default=None, max_length=500)
+    idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+class CreditProfileUpsertRequest(BaseModel):
+    """信用档案 upsert 请求 schema。
+
+    负额度/负账期是业务语义错误 → 路由显式 400 中文报错（不用 ge=0，
+    那会变成 422，破坏既有契约）。更新路径用 model_fields_set 区分
+    「未传字段」与「显式传 false/null」，保持原 body:dict 部分更新语义。
+    """
+
+    customer_name: str = Field(max_length=50)
+    credit_limit: DecimalNum | None = None
+    default_credit_days: int | None = None
+    is_blocked: bool = False
+    block_reason: str | None = Field(default=None, max_length=200)
+    notes: str | None = None
+
+
+class CreditCheckRequest(BaseModel):
+    """赊账信用检查请求 schema — 非数字金额/缺字段 → 422。"""
+
+    customer_name: str = Field(max_length=50)
+    amount: DecimalNum
 
 
 def _naive_utc(value: datetime | None) -> datetime | None:
@@ -78,9 +128,32 @@ async def list_waste_reasons():
     return {"code": 0, "data": WASTE_REASONS}
 
 
+async def _find_inventory_by_idempotency_key(
+    db: AsyncSession, merchant_id: uuid.UUID, key: str
+) -> InventoryRecord | None:
+    """按幂等键回查库存流水（唯一约束 uq_inventory_idempotency_per_merchant）。"""
+    return (
+        await db.execute(
+            select(InventoryRecord).where(
+                InventoryRecord.merchant_id == merchant_id,
+                InventoryRecord.idempotency_key == key,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def _waste_idempotent_replay(record: InventoryRecord) -> dict:
+    """幂等键命中已存在流水：返回原记录语义（200），不重复扣库存、不重复审计。"""
+    return {
+        "code": 0,
+        "message": "重复报损请求：幂等键已存在，已返回原报损记录（未重复扣库存）",
+        "data": {"record_id": str(record.id), "consumed": float(abs(record.quantity))},
+    }
+
+
 @router.post("/waste", response_model=AnyResponse)
 async def record_waste(
-    body: dict,
+    body: WasteRecordRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
     _perm=Depends(require_permission("record_waste")),
@@ -89,12 +162,18 @@ async def record_waste(
 
     Body: {product_id, sku_id?, quantity, unit, reason, notes?, photos?}
     """
-    product_id = body["product_id"]
-    sku_id = uuid.UUID(body["sku_id"]) if body.get("sku_id") else None
-    quantity = Decimal(str(body["quantity"]))
-    reason = body.get("reason", "其他")
-    notes = body.get("notes", "")
-    photos = body.get("photos", "")
+    product_id = body.product_id
+    sku_id = body.sku_id
+    quantity = body.quantity
+    reason = body.reason
+    notes = body.notes or ""
+    photos = body.photos or ""
+    # 自动幂等键：short_idem_key 压缩到 64 字符列宽内（V1-M4——原拼接
+    # "waste:{uuid36}:{pid}:{ts}" 达 66 字符，PG 直接拒写 INSERT）。
+    # 微秒级时戳保证同秒多次报损不互撞（秒级会吞掉同秒第二笔报损）。
+    idempotency_key = body.idempotency_key or short_idem_key(
+        "waste", merchant.id, product_id, int(utc_now().timestamp() * 1_000_000)
+    )
 
     if photos:
         notes = f"{notes} [照片: {photos}]" if notes else f"[照片: {photos}]"
@@ -104,30 +183,51 @@ async def record_waste(
     if reason not in WASTE_REASONS:
         raise HTTPException(status_code=400, detail=f"无效报损原因: {reason}")
 
+    # 幂等预检：客户端重试同 idempotency_key 时直接返回原记录，
+    # 避免二次 FIFO 扣库存。并发竞态由唯一约束 + 下方 commit 捕获兜底。
+    if body.idempotency_key:
+        existing = await _find_inventory_by_idempotency_key(db, merchant.id, body.idempotency_key)
+        if existing is not None:
+            if existing.event_type != "waste":
+                raise HTTPException(status_code=409, detail="幂等键已被其他库存流水占用，请更换")
+            return _waste_idempotent_replay(existing)
+
     product = await db.get(ProductCategory, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="商品不存在")
 
-    # FIFO consume for waste
-    consumed = await consume_batches_fifo(db, merchant.id, product_id, quantity, sku_id=sku_id)
+    # FIFO consume for waste（成本化：V1-M3——原 consume_batches_fifo 丢弃
+    # total_cost，报损流水 unit_cost/total_amount 恒空，报损分析与导出的
+    # waste_cost 恒 0。语义与 POS 销售路径一致：全部被消费批次均有成本时
+    # 记加权均价与实际 FIFO 成本，任一批次缺成本则置 None（不猜成本））。
+    consumption = await consume_batches_fifo_costed(
+        db, merchant.id, product_id, quantity, sku_id=sku_id
+    )
+    consumed = consumption["quantity"]
     if consumed < quantity:
         raise HTTPException(
             status_code=409,
             detail=f"库存不足，报损需要{float(quantity)}{product.unit}，可用{float(consumed)}{product.unit}",
         )
+    unit_cost = (
+        (consumption["total_cost"] / consumed).quantize(Decimal("0.01"))
+        if consumed > 0 and consumption["missing_cost_quantity"] == 0
+        else None
+    )
 
     record = InventoryRecord(
         merchant_id=merchant.id,
         product_id=product_id,
         sku_id=sku_id,
         quantity=-quantity,
-        unit=body.get("unit", product.unit),
+        unit=body.unit or product.unit,
+        unit_cost=unit_cost,
+        total_amount=consumption["total_cost"] if unit_cost is not None else None,
         event_type="waste",
         event_time=utc_now(),
         source="manual",
         notes=f"{reason}: {notes}" if notes else reason,
-        idempotency_key=body.get("idempotency_key")
-        or f"waste:{merchant.id}:{product_id}:{utc_now().timestamp()}",
+        idempotency_key=idempotency_key,
     )
     db.add(record)
 
@@ -148,7 +248,20 @@ async def record_waste(
         )
     )
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # 并发重复提交同幂等键：唯一约束拦截（扣库存随事务一并回滚），
+        # 回查原记录幂等返回，而不是向客户端抛 500。
+        await db.rollback()
+        existing = await _find_inventory_by_idempotency_key(db, merchant.id, idempotency_key)
+        if existing is not None:
+            if existing.event_type != "waste":
+                raise HTTPException(
+                    status_code=409, detail="幂等键已被其他库存流水占用，请更换"
+                ) from exc
+            return _waste_idempotent_replay(existing)
+        raise
     return {
         "code": 0,
         "message": f"已记录{reason} {float(quantity)}{product.unit}",
@@ -182,12 +295,25 @@ async def list_waste(
         .scalars()
         .all()
     )
+    # 解析商品名：product_id 指向 product_categories（向后兼容，与 /inventory/current 一致）
+    product_ids = {r.product_id for r in rows if r.product_id is not None}
+    product_names = {}
+    if product_ids:
+        cat_rows = (
+            (await db.execute(select(ProductCategory).where(ProductCategory.id.in_(product_ids))))
+            .scalars()
+            .all()
+        )
+        product_names = {c.id: c.name for c in cat_rows}
     return {
         "code": 0,
         "data": [
             {
                 "record_id": str(r.id),
                 "product_id": r.product_id,
+                "product_name": product_names.get(r.product_id, f"商品{r.product_id}")
+                if r.product_id is not None
+                else None,
                 "quantity": float(r.quantity),
                 "unit": r.unit,
                 "unit_cost": float(r.unit_cost) if r.unit_cost else None,
@@ -377,6 +503,7 @@ async def set_clearance_promotion(
     body: ClearancePromotionRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("change_price")),
 ):
     """Set a temporary promotion on one batch without changing SKU base price."""
     result = await db.execute(
@@ -513,7 +640,48 @@ async def customer_ledger(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get detailed ledger for a specific customer."""
+    """Get detailed ledger for a specific customer.
+
+    总额/余额对该客户的全部流水全量聚合（与 get_customer_balance 同口径），
+    items 明细只保留最近 limit 条——不能对分页截断后的子集求和，否则流水
+    超过 limit 后余额失真，与 /accounts/customer-balance 各说各话。
+    """
+    totals = (
+        await db.execute(
+            select(
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                CustomerReceivable.direction == "charge",
+                                CustomerReceivable.amount,
+                            ),
+                            else_=Decimal("0"),
+                        )
+                    ),
+                    Decimal("0"),
+                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                CustomerReceivable.direction == "repay",
+                                CustomerReceivable.amount,
+                            ),
+                            else_=Decimal("0"),
+                        )
+                    ),
+                    Decimal("0"),
+                ),
+            ).where(
+                CustomerReceivable.merchant_id == merchant.id,
+                CustomerReceivable.customer_name == customer_name,
+            )
+        )
+    ).one()
+    total_charge = Decimal(str(totals[0] or 0))
+    total_repay = Decimal(str(totals[1] or 0))
+
     rows = (
         (
             await db.execute(
@@ -530,14 +698,8 @@ async def customer_ledger(
         .all()
     )
 
-    total_charge = Decimal("0")
-    total_repay = Decimal("0")
     items = []
     for r in rows:
-        if r.direction == "charge":
-            total_charge += r.amount
-        else:
-            total_repay += r.amount
         items.append(
             {
                 "id": str(r.id),
@@ -563,17 +725,74 @@ async def customer_ledger(
 
 @router.post("/customers/repay", response_model=AnyResponse)
 async def customer_repay(
-    body: dict,
+    body: CustomerRepayRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("credit_sale")),
 ):
-    """Record a customer repayment."""
-    customer_name = (body.get("customer_name") or "").strip()
-    amount = Decimal(str(body.get("amount", 0)))
+    """Record a customer repayment.
+
+    并发与幂等（V2-H2，模式对齐供应商付款 accounts_service.record_supplier_payment）：
+
+    - PG：``pg_advisory_xact_lock(hashtext('customer-repay:{merchant}:{name}'))``
+      事务级串行化同商户同客户的并发回款——余额读与 amount<=balance 校验
+      必须在锁内进行，否则两笔并发回款都读到同一余额、双双通过校验，
+      余额被扣成负数。SQLite 单写者语义天然串行，跳过。
+    - 幂等预检在锁后：并发同键回款串行化后，先到者先落库，后到者预检即
+      命中重放（原实现预检缺位 + 键可为 NULL，网络重试会重复扣余额）。
+    - 无客户端键时服务端生成非空确定性压缩键（short_idem_key）：NULL 不
+      参与唯一约束比较，裸 NULL 无法兜底并发窗口。
+    - commit 撞 (merchant_id, idempotency_key) 唯一约束（真正重叠的并发
+      窗口）→ 回滚回查重放，不向客户端抛 500。
+    """
+    customer_name = (body.customer_name or "").strip()
     if not customer_name:
         raise HTTPException(status_code=400, detail="客户名称不能为空")
+    amount = body.amount.quantize(Decimal("0.01"))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="回款金额必须大于0")
+
+    idempotency_key = body.idempotency_key or short_idem_key(
+        "customer-repay", merchant.id, customer_name, int(utc_now().timestamp() * 1_000_000)
+    )
+
+    def _replay_response(new_balance: Decimal) -> dict:
+        return {
+            "code": 0,
+            "message": "重复回款请求：幂等键已存在，已返回原回款结果（未重复扣减欠款）",
+            "data": {"customer_name": customer_name, "new_balance": float(new_balance)},
+        }
+
+    async def _find_by_key(key: str) -> CustomerReceivable | None:
+        return (
+            await db.execute(
+                select(CustomerReceivable).where(
+                    CustomerReceivable.merchant_id == merchant.id,
+                    CustomerReceivable.idempotency_key == key,
+                )
+            )
+        ).scalar_one_or_none()
+
+    # PG 事务级 advisory lock：串行化同商户同客户的并发回款（TOCTOU 防线）。
+    _dialect = getattr(db.bind.dialect, "name", "") if db.bind is not None else ""
+    if _dialect == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"customer-repay:{merchant.id}:{customer_name}"},
+        )
+
+    # 幂等预检（锁后）：同键重试直接重放，不二次扣减余额。
+    if body.idempotency_key:
+        existing = await _find_by_key(body.idempotency_key)
+        if existing is not None:
+            if existing.direction != "repay":
+                raise HTTPException(status_code=409, detail="幂等键已被其他客户流水占用，请更换")
+            if existing.customer_name != customer_name or existing.amount != amount:
+                raise HTTPException(status_code=409, detail="幂等键已用于另一笔回款")
+            new_balance = await get_customer_balance(db, merchant.id, customer_name)
+            return _replay_response(new_balance)
+
+    # 余额校验（锁内重读：并发回款在锁上排队，后到者读到先到者提交后的余额）。
     current_balance = await get_customer_balance(db, merchant.id, customer_name)
     if current_balance <= 0:
         raise HTTPException(status_code=400, detail="该客户当前没有欠款")
@@ -588,10 +807,26 @@ async def customer_repay(
         customer_name=customer_name,
         amount=amount,
         direction="repay",
-        note=body.get("note", "手动回款"),
-        idempotency_key=body.get("idempotency_key"),
+        note=body.note or "手动回款",
+        idempotency_key=idempotency_key,
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # 重叠并发窗口兜底：同键第二笔回款撞唯一约束（扣减随事务回滚），
+        # 回查重放而不是向客户端抛 500。
+        await db.rollback()
+        existing = await _find_by_key(idempotency_key)
+        if existing is not None:
+            if existing.direction != "repay":
+                raise HTTPException(
+                    status_code=409, detail="幂等键已被其他客户流水占用，请更换"
+                ) from exc
+            if existing.customer_name != customer_name or existing.amount != amount:
+                raise HTTPException(status_code=409, detail="幂等键已用于另一笔回款") from exc
+            new_balance = await get_customer_balance(db, merchant.id, customer_name)
+            return _replay_response(new_balance)
+        raise
     new_balance = await get_customer_balance(db, merchant.id, customer_name)
     return {
         "code": 0,
@@ -652,17 +887,24 @@ async def get_customer_credit_profile(
 
 @router.post("/customers/credit-profile", response_model=AnyResponse)
 async def upsert_customer_credit_profile(
-    body: dict,
+    body: CreditProfileUpsertRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("credit_sale")),
 ):
     """Create or update a customer credit profile (§4.8).
 
     Body: {customer_name, credit_limit?, default_credit_days?, is_blocked?, block_reason?, notes?}
     """
-    customer_name = (body.get("customer_name") or "").strip()
+    customer_name = (body.customer_name or "").strip()
     if not customer_name:
         raise HTTPException(status_code=400, detail="客户名称不能为空")
+
+    # 业务校验：负额度/负账期直接拒绝（负账期会让所有欠款永远「未逾期」）。
+    if body.credit_limit is not None and body.credit_limit < 0:
+        raise HTTPException(status_code=400, detail="信用额度不能为负数")
+    if body.default_credit_days is not None and body.default_credit_days < 0:
+        raise HTTPException(status_code=400, detail="默认账期天数不能为负数")
 
     profile = (
         await db.execute(
@@ -673,34 +915,33 @@ async def upsert_customer_credit_profile(
         )
     ).scalar_one_or_none()
 
+    # model_fields_set = 请求里显式出现的字段，等价于原 body:dict 的
+    # `if "x" in body` 部分更新语义：未传的字段保持原值不动。
+    fields = body.model_fields_set
     if profile:
         # Update existing
-        if "credit_limit" in body:
-            profile.credit_limit = (
-                Decimal(str(body["credit_limit"])) if body["credit_limit"] is not None else None
-            )
-        if "default_credit_days" in body:
-            profile.default_credit_days = body["default_credit_days"]
-        if "is_blocked" in body:
-            profile.is_blocked = body["is_blocked"]
-            if body["is_blocked"]:
-                profile.block_reason = body.get("block_reason", "手动停赊")
+        if "credit_limit" in fields:
+            profile.credit_limit = body.credit_limit
+        if "default_credit_days" in fields:
+            profile.default_credit_days = body.default_credit_days
+        if "is_blocked" in fields:
+            profile.is_blocked = body.is_blocked
+            if body.is_blocked:
+                profile.block_reason = body.block_reason or "手动停赊"
             else:
                 profile.block_reason = None
-        if "notes" in body:
-            profile.notes = body["notes"]
+        if "notes" in fields:
+            profile.notes = body.notes
         action = "updated"
     else:
         profile = CustomerCreditProfile(
             merchant_id=merchant.id,
             customer_name=customer_name,
-            credit_limit=(
-                Decimal(str(body["credit_limit"])) if body.get("credit_limit") is not None else None
-            ),
-            default_credit_days=body.get("default_credit_days"),
-            is_blocked=body.get("is_blocked", False),
-            block_reason=body.get("block_reason") if body.get("is_blocked") else None,
-            notes=body.get("notes"),
+            credit_limit=body.credit_limit,
+            default_credit_days=body.default_credit_days,
+            is_blocked=body.is_blocked,
+            block_reason=body.block_reason if body.is_blocked else None,
+            notes=body.notes,
         )
         db.add(profile)
         action = "created"
@@ -730,7 +971,7 @@ async def upsert_customer_credit_profile(
 
 @router.post("/customers/check-credit", response_model=AnyResponse)
 async def check_customer_credit(
-    body: dict,
+    body: CreditCheckRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -739,8 +980,8 @@ async def check_customer_credit(
     Body: {customer_name, amount}
     Returns: {allowed, reason, current_balance, credit_limit, remaining_credit}
     """
-    customer_name = (body.get("customer_name") or "").strip()
-    amount = Decimal(str(body.get("amount", 0)))
+    customer_name = (body.customer_name or "").strip()
+    amount = body.amount
     if not customer_name:
         raise HTTPException(status_code=400, detail="客户名称不能为空")
 
@@ -757,6 +998,22 @@ async def check_customer_credit(
         )
     ).scalar_one_or_none()
 
+    credit_limit = float(profile.credit_limit) if profile and profile.credit_limit else None
+
+    # 负/零金额无业务意义：显式拒绝。否则 remaining_credit 会随负金额反向
+    # 增加，信用校验被绕过（allowed 恒真），任何负数金额都能「赊」。
+    if amount <= 0:
+        return {
+            "code": 0,
+            "data": {
+                "allowed": False,
+                "reason": "金额必须大于0",
+                "current_balance": float(balance),
+                "credit_limit": credit_limit,
+                "remaining_credit": 0,
+            },
+        }
+
     # Check block
     if profile and profile.is_blocked:
         return {
@@ -765,7 +1022,7 @@ async def check_customer_credit(
                 "allowed": False,
                 "reason": profile.block_reason or "该客户已被停赊",
                 "current_balance": float(balance),
-                "credit_limit": float(profile.credit_limit) if profile.credit_limit else None,
+                "credit_limit": credit_limit,
                 "remaining_credit": 0,
             },
         }
@@ -795,9 +1052,7 @@ async def check_customer_credit(
             "allowed": True,
             "reason": None,
             "current_balance": float(balance),
-            "credit_limit": float(profile.credit_limit)
-            if profile and profile.credit_limit
-            else None,
+            "credit_limit": credit_limit,
             "remaining_credit": remaining_credit,
         },
     }
@@ -808,14 +1063,78 @@ async def check_customer_credit(
 # ═══════════════════════════════════════════════════════════
 
 
+def _sanitize_csv_cell(v) -> str:
+    """净化 CSV 单元格防公式注入：= / + / - / @ / \\t / \\r 前缀加单引号。
+
+    CWE-1236：Excel/WPS 打开 CSV 时会执行以 =/+/-/@ 开头的公式，
+    恶意 customer_name 如 =CMD(...) 可借此执行命令。
+    在写入前对危险前缀加单引号转义，读取时由 Excel 自动忽略。
+
+    负数（- 后紧跟数字或小数点）是合法业务数据，不转义。
+    """
+    s = str(v) if v is not None else ""
+    if not s:
+        return s
+    # 负数（-50.0 / -.5）是合法数值，不转义
+    if s[0] == "-" and len(s) > 1 and (s[1].isdigit() or s[1] == "."):
+        return s
+    if s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
+
+
 def _rows_to_csv(headers: list[str], rows: list[list]) -> str:
-    """生成 UTF-8 BOM CSV 字符串，供前端直接写文件分享。"""
+    """生成 UTF-8 BOM CSV 字符串，供前端直接写文件分享。
+
+    安全：每个单元格均经 _sanitize_csv_cell 净化，防 CSV 公式注入。
+    """
     output = io.StringIO()
     w = csv.writer(output)
     w.writerow(headers)
     for row in rows:
-        w.writerow(row)
+        w.writerow([_sanitize_csv_cell(c) for c in row])
     return "﻿" + output.getvalue()
+
+
+async def _aggregate_current_inventory_for_export(db: AsyncSession, merchant_id: uuid.UUID) -> list:
+    """当前库存实时聚合（供 /ops/export/inventory）。
+
+    口径来源：GET /inventory/current（app/routers/inventory.py
+    get_current_inventory）——SUM(quantity) GROUP BY product_id、排除
+    is_voided、加权均价 = Σ(成本×入库量)/Σ(入库量)，仅有出库的商品均价记 0。
+    本地复制实现（inventory.py 的查询内联在路由函数里且含促销价等 UI 字段，
+    导出只需 商品/当前库存/平均成本 三列），两处口径需同步维护。
+    """
+    agg_query = (
+        select(
+            InventoryRecord.product_id,
+            func.coalesce(func.sum(InventoryRecord.quantity), 0).label("qty"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            InventoryRecord.quantity > 0,
+                            InventoryRecord.unit_cost * InventoryRecord.quantity,
+                        ),
+                        else_=0,
+                    )
+                )
+                / func.nullif(
+                    func.sum(
+                        case((InventoryRecord.quantity > 0, InventoryRecord.quantity), else_=0)
+                    ),
+                    0,
+                ),
+                0,
+            ).label("avg_cost"),
+        )
+        .where(
+            InventoryRecord.merchant_id == merchant_id,
+            InventoryRecord.is_voided == False,  # noqa: E712
+        )
+        .group_by(InventoryRecord.product_id)
+    )
+    return (await db.execute(agg_query)).all()
 
 
 @router.get("/export/sales")
@@ -830,11 +1149,14 @@ async def export_sales(
     P0 修复：原返回 StreamingResponse CSV，前端 app.request 期待 {code:0} JSON
     信封，CSV 字符串落入 business_error 分支永远失败。改为 JSON 信封后前端
     可直接读 data.csv 落盘分享。
-    """
-    from datetime import time as dt_time
 
-    day_start = datetime.combine(start_date, dt_time.min)
-    day_end = datetime.combine(end_date, dt_time.max)
+    口径修复：start/end_date 是摊主在 CST 日历上选的日期，created_at 落库为
+    naive UTC —— 必须经 cst_day_bounds_utc 换算成 CST 业务日区间再比较
+    （原 naive UTC 拼接会把 CST 0-8 点的订单漏出导出窗口，与全仓 CST 日界
+    约定冲突，见 app/core/timezone.py 模块注释 / 审计 C4）。
+    """
+    day_start = cst_day_bounds_utc(start_date)[0]
+    day_end = cst_day_bounds_utc(end_date)[1]
 
     orders = (
         (
@@ -843,7 +1165,7 @@ async def export_sales(
                 .where(
                     SaleOrder.merchant_id == merchant.id,
                     SaleOrder.created_at >= day_start,
-                    SaleOrder.created_at <= day_end,
+                    SaleOrder.created_at < day_end,
                 )
                 .order_by(SaleOrder.created_at.asc())
             )
@@ -880,18 +1202,14 @@ async def export_inventory(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Export current inventory as CSV."""
-    from app.models.inventory import CurrentInventory
+    """Export current inventory as CSV.
 
-    rows = (
-        (
-            await db.execute(
-                select(CurrentInventory).where(CurrentInventory.merchant_id == merchant.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    修复（V6 导出口径）：原读 CurrentInventory 快照表 —— 该表生产路径零写入
+    （仅 scripts/seed_data 写过），导出永远是空表/陈旧数据，与
+    GET /inventory/current 的实时聚合互相矛盾。现改为与其同口径的
+    InventoryRecord 实时聚合（见 _aggregate_current_inventory_for_export）。
+    """
+    rows = await _aggregate_current_inventory_for_export(db, merchant.id)
 
     product_ids = {r.product_id for r in rows}
     product_names = {}
@@ -907,7 +1225,7 @@ async def export_inventory(
     inv_rows = [
         {
             "商品": product_names.get(r.product_id, f"商品{r.product_id}"),
-            "当前库存": float(r.current_qty),
+            "当前库存": float(r.qty),
             "平均成本": float(r.avg_cost) if r.avg_cost else "",
         }
         for r in rows
@@ -929,11 +1247,15 @@ async def export_waste(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Export waste records as CSV."""
-    from datetime import time as dt_time
+    """Export waste records as CSV.
 
-    day_start = datetime.combine(start_date, dt_time.min)
-    day_end = datetime.combine(end_date, dt_time.max)
+    口径修复（与 /export/sales 同病同治）：
+    ① 日期参数按 CST 业务日换算（event_time 为 naive UTC）；
+    ② 排除 is_voided —— 已撤销的报损流水批次已回滚（rollback_batch_on_void），
+      仍导出会给摊主双重报损假象；全仓报表口径均排除作废记录。
+    """
+    day_start = cst_day_bounds_utc(start_date)[0]
+    day_end = cst_day_bounds_utc(end_date)[1]
 
     rows = (
         (
@@ -942,8 +1264,9 @@ async def export_waste(
                 .where(
                     InventoryRecord.merchant_id == merchant.id,
                     InventoryRecord.event_type == "waste",
+                    InventoryRecord.is_voided == False,  # noqa: E712
                     InventoryRecord.event_time >= day_start,
-                    InventoryRecord.event_time <= day_end,
+                    InventoryRecord.event_time < day_end,
                 )
                 .order_by(InventoryRecord.event_time.asc())
             )
@@ -989,29 +1312,39 @@ async def export_accounts(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Export supplier and customer balances as CSV."""
+    """Export supplier and customer balances as JSON envelope {code:0, data:{rows, csv, filename}}.
+
+    与 /export/sales 等保持一致：前端 app.request 期待 {code:0} JSON 信封，
+    原始 CSV 流会让小程序端 JSON.parse 失败（parse_error）。
+    """
     from app.services.accounts_service import list_customer_balances, list_supplier_balances
 
     sup_rows = await list_supplier_balances(db, merchant.id)
     cust_rows = await list_customer_balances(db, merchant.id)
 
-    output = io.StringIO()
-    w = csv.writer(output)
+    rows = [
+        {
+            "类型": "供应商应付",
+            "往来对象": r.get("name", r.get("supplier_id")),
+            "当前欠款": float(r["balance"]),
+        }
+        for r in sup_rows
+    ]
+    rows += [
+        {
+            "类型": "客户应收",
+            "往来对象": r["customer_name"],
+            "当前欠款": float(r["balance"]),
+        }
+        for r in cust_rows
+    ]
 
-    w.writerow(["=== 供应商应付 ==="])
-    w.writerow(["供应商", "当前欠款"])
-    for r in sup_rows:
-        w.writerow([r.get("name", r.get("supplier_id")), r["balance"]])
-
-    w.writerow([])
-    w.writerow(["=== 客户应收 ==="])
-    w.writerow(["客户", "当前欠款"])
-    for r in cust_rows:
-        w.writerow([r["customer_name"], r["balance"]])
-
-    output.seek(0)
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=accounts.csv"},
-    )
+    headers = ["类型", "往来对象", "当前欠款"]
+    return {
+        "code": 0,
+        "data": {
+            "rows": rows,
+            "csv": _rows_to_csv(headers, [[r[h] for h in headers] for r in rows]),
+            "filename": "accounts.csv",
+        },
+    }

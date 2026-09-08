@@ -34,8 +34,17 @@ var fixed = function (val, digits) {
   return parts[0] + '.' + decimals;
 };
 
+/** ISO 时间截取日期部分: "2026-09-08T15:14:46" → "2026-09-08"（无 T 则原样） */
+var datePart = function (val) {
+  if (val == undefined || val == null || val == '') return '';
+  var s = '' + val;
+  var t = s.indexOf('T');
+  return t > 0 ? s.slice(0, t) : s;
+};
+
 module.exports = {
   percent: percent,
   join: join,
   fixed: fixed,
+  datePart: datePart,
 };

@@ -28,13 +28,11 @@ from app.models.purchase import PurchaseItem, PurchaseList
 from scripts.seed_data.common import (
     CREDIT_CUSTOMERS,
     MERCHANTS,
-    PRODUCTS_BY_ID,
     date_ago,
     days_ago,
     make_rng,
     money,
     products_for,
-    qty,
     sku_uuid,
     supplier_id_for,
 )
@@ -63,8 +61,14 @@ async def seed_purchase_lists(db) -> None:
 
             created = days_ago(20 - idx * 3, hour=7)
             confirmed = created + timedelta(hours=2) if status != "draft" else None
-            purchased = confirmed + timedelta(hours=4) if status not in ("draft", "confirmed") else None
-            accepted = purchased + timedelta(hours=12) if status in ("partial_arrival", "accepted", "stored", "completed", "returned") else None
+            purchased = (
+                confirmed + timedelta(hours=4) if status not in ("draft", "confirmed") else None
+            )
+            accepted = (
+                purchased + timedelta(hours=12)
+                if status in ("partial_arrival", "accepted", "stored", "completed", "returned")
+                else None
+            )
             stored = accepted + timedelta(hours=4) if status in ("stored", "completed") else None
             completed = stored + timedelta(hours=8) if status == "completed" else None
 
@@ -84,7 +88,9 @@ async def seed_purchase_lists(db) -> None:
 
             # 实际成本（部分到货有差异）
             if status in ("completed", "stored"):
-                total_act = (total_est * Decimal(str(rng.uniform(0.95, 1.05)))).quantize(Decimal("0.01"))
+                total_act = (total_est * Decimal(str(rng.uniform(0.95, 1.05)))).quantize(
+                    Decimal("0.01")
+                )
                 payment_status = rng.choice(["paid", "partial", "credit"])
                 if payment_status == "paid":
                     paid_amount = total_act
@@ -132,17 +138,24 @@ async def seed_purchase_lists(db) -> None:
                     shortage = (rec_qty - actual_qty).quantize(Decimal("0.01"))
                     item_status = "purchased"
                 elif status in ("stored", "completed"):
-                    actual_qty = (rec_qty * Decimal(str(rng.uniform(0.92, 1.0)))).quantize(Decimal("0.01"))
+                    actual_qty = (rec_qty * Decimal(str(rng.uniform(0.92, 1.0)))).quantize(
+                        Decimal("0.01")
+                    )
                     arrival = actual_qty
-                    shortage = (rec_qty - actual_qty).quantize(Decimal("0.01")) if actual_qty < rec_qty else None
+                    shortage = (
+                        (rec_qty - actual_qty).quantize(Decimal("0.01"))
+                        if actual_qty < rec_qty
+                        else None
+                    )
                     damaged = Decimal(str(rng.randint(0, 2))) if rng.random() < 0.3 else None
-                    accepted_qty = (actual_qty - (damaged or Decimal("0"))).quantize(Decimal("0.01"))
+                    accepted_qty = (actual_qty - (damaged or Decimal("0"))).quantize(
+                        Decimal("0.01")
+                    )
                     quality_ok = True
                     item_status = "purchased"
                 elif status == "returned":
                     actual_qty = rec_qty
                     arrival = rec_qty
-                    rejected_qty = rec_qty
                     accepted_qty = Decimal("0")
                     quality_ok = False
                     item_status = "returned"

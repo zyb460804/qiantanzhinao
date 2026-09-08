@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Col, Progress, Row, Select, Space, Switch, Tag, Typography } from 'antd'
+import { Button, Card, Col, Progress, Row, Select, Space, Switch, Tabs, Tag, Typography } from 'antd'
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -12,7 +12,10 @@ import {
   WarningOutlined,
 } from '@ant-design/icons'
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { useSearchParams } from 'react-router-dom'
 import api from '../api/client'
+import DeadLettersPanel from '../components/DeadLettersPanel'
+import DevicesPanel from '../components/DevicesPanel'
 import EmptyState, { ErrorState } from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
 
@@ -31,6 +34,8 @@ const checkStatus = {
   critical: { text: '异常', color: 'red' },
 }
 
+const TAB_KEYS = ['overview', 'devices', 'dead-letters']
+
 function MonitorMetric({ title, value, hint, icon, tone }) {
   return (
     <div className={`monitor-metric monitor-metric--${tone}`}>
@@ -44,7 +49,7 @@ function MonitorMetric({ title, value, hint, icon, tone }) {
   )
 }
 
-export default function Monitoring() {
+function OverviewTab() {
   const [range, setRange] = useState(1)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [data, setData] = useState(null)
@@ -74,12 +79,7 @@ export default function Monitoring() {
   }, [autoRefresh, fetchData])
 
   if (error && !data) {
-    return (
-      <div>
-        <PageHeader title="运维监控" subtitle="平台健康与故障监测" />
-        <ErrorState message={error} onRetry={fetchData} />
-      </div>
-    )
+    return <ErrorState message={error} onRetry={fetchData} />
   }
 
   const status = statusConfig[data?.status] || statusConfig.warning
@@ -107,31 +107,25 @@ export default function Monitoring() {
     : []
 
   return (
-    <div className="monitoring-page">
-      <PageHeader
-        title="运维监控"
-        subtitle="平台健康、设备心跳与任务运行状态"
-        extra={
-          <Space wrap>
-            <Select
-              aria-label="监控时间范围"
-              value={range}
-              onChange={setRange}
-              options={[
-                { value: 1, label: '近 24 小时' },
-                { value: 7, label: '近 7 天' },
-                { value: 30, label: '近 30 天' },
-              ]}
-            />
-            <span className="auto-refresh-control">
-              自动刷新 <Switch size="small" checked={autoRefresh} onChange={setAutoRefresh} />
-            </span>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchData}>
-              刷新
-            </Button>
-          </Space>
-        }
-      />
+    <div>
+      <Space wrap style={{ marginBottom: 16 }}>
+        <Select
+          aria-label="监控时间范围"
+          value={range}
+          onChange={setRange}
+          options={[
+            { value: 1, label: '近 24 小时' },
+            { value: 7, label: '近 7 天' },
+            { value: 30, label: '近 30 天' },
+          ]}
+        />
+        <span className="auto-refresh-control">
+          自动刷新 <Switch size="small" checked={autoRefresh} onChange={setAutoRefresh} />
+        </span>
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchData}>
+          刷新
+        </Button>
+      </Space>
 
       <Card className="monitor-overview">
         <div className="monitor-health">
@@ -249,6 +243,31 @@ export default function Monitoring() {
           </Card>
         </Col>
       </Row>
+    </div>
+  )
+}
+
+export default function Monitoring() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const activeTab = TAB_KEYS.includes(tabParam) ? tabParam : 'overview'
+
+  const handleTabChange = (key) => {
+    setSearchParams(key === 'overview' ? {} : { tab: key }, { replace: true })
+  }
+
+  return (
+    <div className="monitoring-page">
+      <PageHeader title="运维监控" subtitle="平台健康、设备心跳、死信队列与任务运行状态" />
+      <Tabs
+        activeKey={activeTab}
+        onChange={handleTabChange}
+        items={[
+          { key: 'overview', label: '平台总览', children: <OverviewTab /> },
+          { key: 'devices', label: '设备监控', children: <DevicesPanel /> },
+          { key: 'dead-letters', label: '死信队列', children: <DeadLettersPanel /> },
+        ]}
+      />
     </div>
   )
 }

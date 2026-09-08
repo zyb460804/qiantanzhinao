@@ -90,13 +90,13 @@ async def login(
     限流：5 分钟内最多 5 次失败尝试，超限锁定 15 分钟。
     """
     # 限流检查
-    check_rate_limit(request, req.email)
+    await check_rate_limit(request, req.email)
 
     result = await db.execute(select(PlatformAdmin).where(PlatformAdmin.email == req.email))
     admin = result.scalar_one_or_none()
 
     if admin is None or not verify_password(req.password, admin.password_hash):
-        record_failed_attempt(request, req.email)
+        await record_failed_attempt(request, req.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误",
@@ -108,7 +108,7 @@ async def login(
         )
 
     # 登录成功，清除失败记录
-    clear_attempts(request, req.email)
+    await clear_attempts(request, req.email)
 
     admin.last_login_at = datetime.now(UTC)
 

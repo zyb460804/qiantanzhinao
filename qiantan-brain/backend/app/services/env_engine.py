@@ -5,11 +5,22 @@ Quantifies external factors (temperature, rain, holiday, weekend) on sales.
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 
 _RULES_DIR = Path(__file__).parent.parent / "rules"
+
+
+def _load_holiday_table() -> dict[str, str]:
+    """Load the Chinese statutory holiday date table.
+
+    Imported lazily from weather.py so env_engine stays decoupled at import time
+    and any test-time stubbing of ``app.services.weather._HOLIDAYS`` is picked up.
+    """
+    from app.services.weather import _HOLIDAYS
+
+    return _HOLIDAYS
 
 
 @dataclass
@@ -89,16 +100,67 @@ def get_rainfall_coefficient(rain_prob: float | None, config: dict) -> float:
     return 1.00
 
 
+def _is_spring_festival_name(name: str) -> bool:
+    """春节 streak includes 除夕 (New Year's Eve) and 春节 days."""
+    return "春节" in name or "除夕" in name
+
+
 def get_holiday_coefficient(
     is_holiday: bool, holiday_name: str | None, date_val: date, config: dict
 ) -> float:
-    """Calculate holiday adjustment coefficient."""
+    """Calculate holiday adjustment coefficient based on ``date_val`` position.
+
+    Coefficient selection uses ``date_val`` against the statutory holiday table:
+      - 3 days before 春节/除夕 → ``spring_festival_3d_before`` (pre-holiday rush)
+      - First day of any holiday streak → ``holiday_eve``
+      - Middle of a holiday streak → ``national_holiday``
+      - 1 day after 春节 → ``spring_festival_1d_after``
+      - 1 day after other holidays → ``post_holiday``
+      - Otherwise → 1.00
+
+    Falls back to name-based selection when ``date_val`` is not in the holiday
+    table but the caller still reports ``is_holiday=True`` (keeps the function
+    robust for callers that pass inconsistent mock inputs).
+    """
     holidays = config.get("holidays", {})
+    hol = _load_holiday_table()
+    date_str = date_val.strftime("%Y-%m-%d")
+
+    # 1) date_val is itself a holiday → first day vs mid-streak
+    if date_str in hol:
+        prev_str = (date_val - timedelta(days=1)).strftime("%Y-%m-%d")
+        is_first_day = prev_str not in hol
+        if is_first_day:
+            return holidays.get("holiday_eve", {}).get("coefficient", 1.10)
+        return holidays.get("national_holiday", {}).get("coefficient", 1.20)
+
+    # 2) date_val is the day after a holiday ends
+    prev_str = (date_val - timedelta(days=1)).strftime("%Y-%m-%d")
+    if prev_str in hol:
+        prev_name = hol[prev_str]
+        if _is_spring_festival_name(prev_name):
+            return holidays.get("spring_festival_1d_after", {}).get("coefficient", 0.60)
+        return holidays.get("post_holiday", {}).get("coefficient", 0.80)
+
+    # 3) date_val is within 3 days before 春节/除夕 streak starts
+    for days_ahead in range(1, 4):
+        future_str = (date_val + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+        if future_str in hol and _is_spring_festival_name(hol[future_str]):
+            # Ensure this really is a run-up day: the day before the future
+            # 春节/除夕 date should not itself already be a holiday.
+            if (
+                days_ahead == 1
+                or (date_val + timedelta(days=days_ahead - 1)).strftime("%Y-%m-%d") not in hol
+            ):
+                return holidays.get("spring_festival_3d_before", {}).get("coefficient", 1.35)
+
+    # 4) Fallback for inconsistent mock inputs: caller says is_holiday but the
+    #    date isn't in the statutory table. Preserve legacy behaviour.
     if is_holiday and holiday_name:
-        # Check for specific holidays
-        if "春节" in holiday_name:
+        if _is_spring_festival_name(holiday_name):
             return holidays.get("spring_festival_3d_before", {}).get("coefficient", 1.35)
         return holidays.get("national_holiday", {}).get("coefficient", 1.20)
+
     return 1.00
 
 

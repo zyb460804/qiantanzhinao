@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 
 from sqlalchemy import func, select
 
@@ -26,7 +25,6 @@ from scripts.seed_data.common import (
 
 async def seed_invoices(db) -> dict[str, uuid.UUID]:
     """发票归档（每摊 4 张），返回 invoice_number → id 映射。"""
-    rng = make_rng()
     existing = await db.execute(select(func.count()).select_from(Invoice))
     if int(existing.scalar_one()) > 0:
         print("  [=] 发票已存在，跳过")
@@ -37,10 +35,38 @@ async def seed_invoices(db) -> dict[str, uuid.UUID]:
     for profile in MERCHANTS:
         merchant_id = profile.merchant_id
         inv_defs = [
-            ("SH2026050001", "上海农产品批发中心", money("3500.00"), money("175.00"), date_ago(75), "摊位租金-5月"),
-            ("SH2026060001", "上海农产品批发中心", money("3500.00"), money("175.00"), date_ago(45), "摊位租金-6月"),
-            ("PDD2026060002", "国网上海电力", money("280.00"), money("0.00"), date_ago(40), "电费-6月"),
-            ("PDD2026070001", "国网上海电力", money("315.00"), money("0.00"), date_ago(10), "电费-7月"),
+            (
+                "SH2026050001",
+                "上海农产品批发中心",
+                money("3500.00"),
+                money("175.00"),
+                date_ago(75),
+                "摊位租金-5月",
+            ),
+            (
+                "SH2026060001",
+                "上海农产品批发中心",
+                money("3500.00"),
+                money("175.00"),
+                date_ago(45),
+                "摊位租金-6月",
+            ),
+            (
+                "PDD2026060002",
+                "国网上海电力",
+                money("280.00"),
+                money("0.00"),
+                date_ago(40),
+                "电费-6月",
+            ),
+            (
+                "PDD2026070001",
+                "国网上海电力",
+                money("315.00"),
+                money("0.00"),
+                date_ago(10),
+                "电费-7月",
+            ),
         ]
         for inv_no, supplier, amount, tax, inv_date, note in inv_defs:
             inv_id = uuid.uuid5(uuid.NAMESPACE_URL, f"invoice-{merchant_id}-{inv_no}")

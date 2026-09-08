@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, DecimalNum
 
 
 class DailyReportData(BaseModel):
     date: str
-    revenue: float
-    cost: float
-    estimated_gross_profit: float | None = None
-    cash_balance: float | None = None
-    purchase_cost: float | None = None
-    estimated_cogs: float | None = None
-    waste_amount: float
+    revenue: DecimalNum
+    cost: DecimalNum
+    estimated_gross_profit: DecimalNum | None = None
+    cash_balance: DecimalNum | None = None
+    purchase_cost: DecimalNum | None = None
+    estimated_cogs: DecimalNum | None = None
+    waste_amount: DecimalNum
     order_count: int
     top_products: list[dict]
     slow_moving: list[dict]
@@ -27,12 +27,12 @@ class DailyReportData(BaseModel):
 class WeeklyReportData(BaseModel):
     week_start: str
     week_end: str
-    revenue: float
-    cost: float
-    week_gross_profit: float | None = None
-    week_purchase_cost: float | None = None
-    week_estimated_cogs: float | None = None
-    waste_amount: float
+    revenue: DecimalNum
+    cost: DecimalNum
+    week_gross_profit: DecimalNum | None = None
+    week_purchase_cost: DecimalNum | None = None
+    week_estimated_cogs: DecimalNum | None = None
+    waste_amount: DecimalNum
     daily_trend: list[dict]
     top_products: list[dict]
     waste_ranking: list[dict]
@@ -44,18 +44,18 @@ class WeeklyReportData(BaseModel):
 
 class TrendPoint(BaseModel):
     date: str
-    revenue: float
-    cost: float
-    estimated_gross_profit: float | None = None
+    revenue: DecimalNum
+    cost: DecimalNum
+    estimated_gross_profit: DecimalNum | None = None
     order_count: int
 
 
 class ProductRankingItem(BaseModel):
     product_id: int
     product_name: str
-    total_revenue: float | None = None
-    total_qty: float | None = None
-    waste_qty: float | None = None
+    total_revenue: DecimalNum | None = None
+    total_qty: DecimalNum | None = None
+    waste_qty: DecimalNum | None = None
     rank: int
 
 

@@ -23,6 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Windows 中文控制台默认 GBK 代码页无法输出 ✓/🎉 等字符（UnicodeEncodeError），
+# 统一重配 stdout 为 UTF-8，保证 `python -m scripts.smoke_test` 可直接运行。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from sqlalchemy import func, select
 
 from app.database import async_session, init_db
@@ -31,10 +36,8 @@ from app.models.ai_action import AIAction
 from app.models.batch import BatchLifecycle
 from app.models.catalog import Supplier
 from app.models.expense import Expense, Invoice
-from app.models.inventory import CurrentInventory, InventoryRecord
-from app.models.merchant import Merchant
+from app.models.inventory import CurrentInventory
 from app.models.pos import DailySettlement, Payment, Reconciliation, SaleOrder, SaleOrderItem
-from app.models.product import ProductCategory
 from app.models.purchase import PurchaseItem, PurchaseList
 from app.models.recommendation import Recommendation
 from app.models.staff import StaffMember

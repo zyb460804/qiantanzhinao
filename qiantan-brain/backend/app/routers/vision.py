@@ -11,6 +11,7 @@ AND ``app_env == "production"``, a missing model returns **HTTP 503**
 instead of silently returning empty placeholder results.
 """
 
+import asyncio
 import json
 import logging
 import random
@@ -58,40 +59,51 @@ _MAX_IMAGE_SIZE = 10 * 1024 * 1024
 
 _vision_service: "OnnxVisionModelService | None" = None
 _vision_service_initialized: bool = False
+_vision_service_lock = asyncio.Lock()
 
 
-def _get_vision_service() -> "OnnxVisionModelService | None":
+async def _get_vision_service() -> "OnnxVisionModelService | None":
     """Return the module-level vision model singleton, initialised on first call.
 
     Returns ``None`` when ``VISION_MODEL_PATH`` is empty (model not configured)
     so the router can distinguish "not configured" from "configured but failed".
+
+    Concurrency (H5): double-checked locking guarantees the service is
+    constructed exactly once even when several requests race on the first
+    call, and the (blocking) ONNX session load runs in a worker thread via
+    ``asyncio.to_thread`` so the event loop stays responsive during startup.
     """
     global _vision_service, _vision_service_initialized  # noqa: PLW0603
 
     if _vision_service_initialized:
         return _vision_service
 
-    _vision_service_initialized = True
+    async with _vision_service_lock:
+        if _vision_service_initialized:
+            return _vision_service
 
-    from app.services.vision_model_onnx import OnnxVisionModelService
+        from app.services.vision_model_onnx import OnnxVisionModelService
 
-    model_path = settings.vision_model_path
-    if not model_path:
-        logger.info("VISION_MODEL_PATH not set — vision model disabled")
-        _vision_service = None
-        return None
+        model_path = settings.vision_model_path
+        if not model_path:
+            logger.info("VISION_MODEL_PATH not set — vision model disabled")
+            _vision_service = None
+            _vision_service_initialized = True
+            return None
 
-    _vision_service = OnnxVisionModelService(
-        model_path=model_path,
-        device=settings.vision_model_device,
-        confidence_threshold=settings.vision_confidence_threshold,
-    )
-    logger.info(
-        "Vision model initialised: available=%s version=%s",
-        _vision_service.is_available,
-        _vision_service.model_version,
-    )
-    return _vision_service
+        _vision_service = await asyncio.to_thread(
+            OnnxVisionModelService,
+            model_path=model_path,
+            device=settings.vision_model_device,
+            confidence_threshold=settings.vision_confidence_threshold,
+        )
+        _vision_service_initialized = True
+        logger.info(
+            "Vision model initialised: available=%s version=%s",
+            _vision_service.is_available,
+            _vision_service.model_version,
+        )
+        return _vision_service
 
 
 class DemoDetection(TypedDict):
@@ -130,8 +142,11 @@ def _load_categories() -> list[dict]:
 
 
 @router.get("/categories", response_model=VisionCategoriesResponse)
-async def get_categories(db: AsyncSession = Depends(get_db)):
-    """Get list of supported product categories."""
+async def get_categories(
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get list of supported product categories (requires authentication)."""
     query = select(ProductCategory).where(ProductCategory.is_active == True)  # noqa: E712
     result = await db.execute(query)
     categories = result.scalars().all()
@@ -243,7 +258,7 @@ async def recognize_product(
             }
 
     # --- Mode 3: Real model inference (P0-3) -------------------------
-    vision_svc = _get_vision_service()
+    vision_svc = await _get_vision_service()
 
     # 3a — Model is available → use it
     if vision_svc is not None and vision_svc.is_available:

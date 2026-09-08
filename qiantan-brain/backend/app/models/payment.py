@@ -30,7 +30,7 @@ class PaymentChannel(Base):
     fee_rate: Mapped[Decimal] = mapped_column(sa.Numeric(6, 4), default=Decimal("0.006"))  # 0.6%
     is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
     __table_args__ = (
@@ -61,7 +61,7 @@ class ReconciliationTask(Base):
     fee_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     note: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
     __table_args__ = (
@@ -76,7 +76,7 @@ class ReconciliationDifference(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, sa.ForeignKey("reconciliation_tasks.id"), nullable=False
+        sa.Uuid, sa.ForeignKey("reconciliation_tasks.id", ondelete="CASCADE"), nullable=False
     )
     merchant_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, sa.ForeignKey("merchants.id"), nullable=False
@@ -93,7 +93,7 @@ class ReconciliationDifference(Base):
     status: Mapped[str] = mapped_column(sa.String(20), default="open")  # open/resolved/ignored
     resolution: Mapped[str | None] = mapped_column(sa.String(200))
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
 
@@ -104,7 +104,10 @@ class ChannelBillImport(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, sa.ForeignKey("reconciliation_tasks.id"), nullable=False, index=True
+        sa.Uuid,
+        sa.ForeignKey("reconciliation_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     merchant_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, sa.ForeignKey("merchants.id"), nullable=False, index=True
@@ -138,10 +141,16 @@ class ChannelBillEntry(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     import_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, sa.ForeignKey("channel_bill_imports.id"), nullable=False, index=True
+        sa.Uuid,
+        sa.ForeignKey("channel_bill_imports.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     task_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, sa.ForeignKey("reconciliation_tasks.id"), nullable=False, index=True
+        sa.Uuid,
+        sa.ForeignKey("reconciliation_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     merchant_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, sa.ForeignKey("merchants.id"), nullable=False, index=True

@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.core.device_auth import _seen_nonces, generate_api_key
 from app.models.device import Device
+from app.models.edge_event import EdgeEvent
 from app.models.merchant import Merchant
 from app.models.saas import ApiKey, Tenant
 
@@ -256,3 +257,74 @@ async def test_device_ingest_rejects_missing_scope(auth_client, db_session):
     )
 
     assert response.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════════
+# event_id 幂等去重按商户隔离（审计 M-5）：去重键 (merchant_id, event_id)
+# ═══════════════════════════════════════════════════════════════════
+
+
+async def test_same_event_id_across_merchants_is_not_duplicate(client, db_session):
+    """商户 B 上报商户 A 已用的 event_id → 不是 duplicate，正常入库。"""
+    merchant_b = "00000000-0000-0000-0000-000000000002"
+    event_id = str(uuid.uuid4())
+
+    first = await client.post(
+        "/api/v1/edge/ingest",
+        json={"event_id": event_id, "detections": ["tomato"], "weight_g": 100},
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["data"]["duplicate"] is False
+
+    second = await client.post(
+        "/api/v1/edge/ingest",
+        json={"event_id": event_id, "detections": ["potato"], "weight_g": 200},
+        headers={"X-Test-Merchant-Id": merchant_b},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["data"]["duplicate"] is False
+    assert second.json()["data"]["detection_count"] == 1
+
+    async with db_session() as session:
+        rows = (
+            (
+                await session.execute(select(EdgeEvent).where(EdgeEvent.event_id == event_id))
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        assert {str(r.merchant_id) for r in rows} == {
+            "00000000-0000-0000-0000-000000000001",
+            merchant_b,
+        }
+
+
+async def test_same_merchant_duplicate_event_id_is_idempotent(client, db_session):
+    """同一商户重复上报同一 event_id → duplicate=True，库中仍只有一行。"""
+    event_id = str(uuid.uuid4())
+    payload = {"event_id": event_id, "detections": ["tomato"], "weight_g": 100}
+
+    first = await client.post("/api/v1/edge/ingest", json=payload)
+    assert first.status_code == 200
+    assert first.json()["data"]["duplicate"] is False
+
+    retry = await client.post("/api/v1/edge/ingest", json=payload)
+    assert retry.status_code == 200
+    assert retry.json()["data"]["duplicate"] is True
+    assert retry.json()["data"]["event_id"] == event_id
+
+    async with db_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(EdgeEvent).where(
+                        EdgeEvent.merchant_id == uuid.UUID("00000000-0000-0000-0000-000000000001"),
+                        EdgeEvent.event_id == event_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1

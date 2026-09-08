@@ -8,7 +8,7 @@
 .sg-swatches { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .sg-swatch { display: flex; flex-direction: column; align-items: center; gap: 8rpx; width: 120rpx; }
 .sg-swatch-color { width: 88rpx; height: 88rpx; border-radius: var(--r-md); box-shadow: var(--shadow-sm); }
-.sg-swatch-name { font-size: 18rpx; color: var(--ink-2); }
+.sg-swatch-name { font-size: 22rpx; color: var(--ink-2); }
 
 /* 字体 */
 .sg-type-row { display: flex; align-items: baseline; gap: var(--s-3); padding: 14rpx 0; border-bottom: 1rpx solid var(--line-soft); }
@@ -30,7 +30,7 @@
 /* 图标网格 */
 .sg-icon-grid { display: flex; flex-wrap: wrap; gap: var(--s-3); }
 .sg-icon-cell { display: flex; flex-direction: column; align-items: center; gap: 10rpx; width: 110rpx; }
-.sg-icon-name { font-size: 18rpx; color: var(--muted); }
+.sg-icon-name { font-size: 22rpx; color: var(--muted); }
 
 /* 小智 */
 .sg-mascot-row { display: flex; justify-content: space-around; align-items: flex-end; gap: var(--s-3); padding: var(--s-3) 0; }

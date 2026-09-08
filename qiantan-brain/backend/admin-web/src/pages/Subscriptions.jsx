@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Card, Table, Tag, Button, Space, Select, message, Modal, Descriptions } from 'antd'
-import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons'
+import { Card, Table, Tag, Button, Space, Select, message, Modal, Descriptions, Form } from 'antd'
+import { ReloadOutlined, DownloadOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons'
 import api from '../api/client'
 import dayjs from 'dayjs'
 import PageHeader from '../components/PageHeader'
@@ -19,6 +19,30 @@ export default function Subscriptions() {
   const [statusFilter, setStatusFilter] = useState(undefined)
   const [detailVisible, setDetailVisible] = useState(false)
   const [detail, setDetail] = useState(null)
+  const [createVisible, setCreateVisible] = useState(false)
+  const [upgradeTarget, setUpgradeTarget] = useState(null)
+  const [tenants, setTenants] = useState([])
+  const [plans, setPlans] = useState([])
+  const [createForm] = Form.useForm()
+  const [upgradeForm] = Form.useForm()
+
+  const fetchTenants = useCallback(async () => {
+    try {
+      const res = await api.get('/tenants', { params: { page: 1, page_size: 100 } })
+      setTenants(res.items || [])
+    } catch {
+      /* error handled globally */
+    }
+  }, [])
+
+  const fetchPlans = useCallback(async () => {
+    try {
+      const res = await api.get('/plans')
+      setPlans(res || [])
+    } catch {
+      /* error handled globally */
+    }
+  }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -36,6 +60,21 @@ export default function Subscriptions() {
     fetchData()
   }, [fetchData])
 
+  useEffect(() => {
+    fetchTenants()
+    fetchPlans()
+  }, [fetchTenants, fetchPlans])
+
+  useEffect(() => {
+    if (upgradeTarget) {
+      upgradeForm.setFieldsValue({
+        plan_id: upgradeTarget.plan_id,
+        billing_cycle: upgradeTarget.billing_cycle,
+        auto_renew: upgradeTarget.auto_renew,
+      })
+    }
+  }, [upgradeTarget, upgradeForm])
+
   const handleCancel = async (id, reason) => {
     await api.post(`/subscriptions/${id}/cancel`, { reason })
     message.success('订阅已取消')
@@ -46,6 +85,44 @@ export default function Subscriptions() {
     await api.post(`/subscriptions/${id}/activate`)
     message.success('订阅已激活')
     fetchData()
+  }
+
+  const handleCreate = async () => {
+    try {
+      const values = await createForm.validateFields()
+      await api.post('/subscriptions', {
+        tenant_id: values.tenant_id,
+        plan_id: values.plan_id,
+        billing_cycle: values.billing_cycle,
+        auto_renew: values.auto_renew ?? true,
+      })
+      message.success('订阅创建成功')
+      createForm.resetFields()
+      setCreateVisible(false)
+      fetchData()
+    } catch (err) {
+      if (err?.errorFields) return
+      /* error handled globally */
+    }
+  }
+
+  const handleUpgrade = async () => {
+    if (!upgradeTarget) return
+    try {
+      const values = await upgradeForm.validateFields()
+      await api.put(`/subscriptions/${upgradeTarget.id}`, {
+        plan_id: values.plan_id,
+        billing_cycle: values.billing_cycle,
+        auto_renew: values.auto_renew,
+      })
+      message.success('订阅套餐已更新')
+      setUpgradeTarget(null)
+      upgradeForm.resetFields()
+      fetchData()
+    } catch (err) {
+      if (err?.errorFields) return
+      /* error handled globally */
+    }
   }
 
   const showDetail = async (id) => {
@@ -114,6 +191,11 @@ export default function Subscriptions() {
               </Button>
             )}
             {r.status !== 'canceled' && r.status !== 'expired' && (
+              <Button size="small" icon={<SwapOutlined />} onClick={() => setUpgradeTarget(r)}>
+                换套餐
+              </Button>
+            )}
+            {r.status !== 'canceled' && r.status !== 'expired' && (
               <ConfirmWithReason
                 title="取消订阅"
                 description={`取消租户「${r.tenant_name}」的「${r.plan_name}」订阅`}
@@ -138,6 +220,11 @@ export default function Subscriptions() {
         subtitle={`${data.total || 0} 条订阅记录`}
         extra={
           <Space>
+            <PermissionGate permission={PERMISSIONS.SUBSCRIPTION_CREATE}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
+                新建订阅
+              </Button>
+            </PermissionGate>
             <Select
               allowClear
               placeholder="状态筛选"
@@ -211,6 +298,96 @@ export default function Subscriptions() {
             </Descriptions.Item>
           </Descriptions>
         )}
+      </Modal>
+
+      <Modal
+        title="新建订阅"
+        open={createVisible}
+        onCancel={() => {
+          setCreateVisible(false)
+          createForm.resetFields()
+        }}
+        onOk={handleCreate}
+        okText="创建"
+        cancelText="取消"
+        width={520}
+      >
+        <Form form={createForm} layout="vertical" initialValues={{ billing_cycle: 'monthly', auto_renew: true }}>
+          <Form.Item name="tenant_id" label="租户" rules={[{ required: true, message: '请选择租户' }]}>
+            <Select
+              showSearch
+              placeholder="选择租户"
+              optionFilterProp="label"
+              options={tenants.map((t) => ({ value: t.id, label: `${t.name} (${t.slug})` }))}
+            />
+          </Form.Item>
+          <Form.Item name="plan_id" label="套餐" rules={[{ required: true, message: '请选择套餐' }]}>
+            <Select
+              placeholder="选择套餐"
+              options={plans.map((p) => ({
+                value: p.id,
+                label: `${p.name} (${p.code}) - ¥${p.price_monthly}/月`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="billing_cycle" label="计费周期" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: 'monthly', label: '月付' },
+                { value: 'yearly', label: '年付' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="auto_renew" label="自动续费" valuePropName="checked">
+            <Select
+              options={[
+                { value: true, label: '开启' },
+                { value: false, label: '关闭' },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`升级/换套餐 — ${upgradeTarget?.tenant_name || ''}`}
+        open={Boolean(upgradeTarget)}
+        onCancel={() => {
+          setUpgradeTarget(null)
+          upgradeForm.resetFields()
+        }}
+        onOk={handleUpgrade}
+        okText="保存"
+        cancelText="取消"
+        width={520}
+      >
+        <Form form={upgradeForm} layout="vertical" initialValues={{ billing_cycle: 'monthly', auto_renew: true }}>
+          <Form.Item name="plan_id" label="新套餐" rules={[{ required: true, message: '请选择套餐' }]}>
+            <Select
+              placeholder="选择套餐"
+              options={plans.map((p) => ({
+                value: p.id,
+                label: `${p.name} (${p.code}) - ¥${p.price_monthly}/月`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="billing_cycle" label="计费周期" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: 'monthly', label: '月付' },
+                { value: 'yearly', label: '年付' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="auto_renew" label="自动续费" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: true, label: '开启' },
+                { value: false, label: '关闭' },
+              ]}
+            />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   )

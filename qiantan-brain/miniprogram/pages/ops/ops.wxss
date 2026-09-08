@@ -10,9 +10,9 @@
 .cat-name { display:block; color:var(--ink); font-size:27rpx; font-weight:750; }
 .cat-meta { display:block; margin-top:4rpx; color:var(--muted); font-size:20rpx; }
 .cat-amount { font-family:var(--font-num); font-size:25rpx; font-weight:800; flex:0 0 auto; }
-.cat-amount.warn { color:#c93a30; }
+.cat-amount.warn { color:var(--tomato); }
 .cat-balance { font-size:23rpx; font-weight:700; flex:0 0 auto; }
-.cat-balance.warn { color:#c93a30; }
+.cat-balance.warn { color:var(--tomato); }
 .cat-actions { display:flex; gap:8rpx; flex:0 0 auto; }
 .act-btn { padding:6rpx 14rpx; color:var(--green-800); background:var(--green-50); border-radius:99rpx; font-size:20rpx; }
 .act-btn:active { opacity:.7; }
@@ -44,8 +44,8 @@
 .clear-head { display:flex; justify-content:space-between; align-items:center; }
 .clear-name { color:var(--ink); font-size:27rpx; font-weight:750; }
 .risk-tag { padding:4rpx 14rpx; border-radius:99rpx; font-size:19rpx; font-weight:700; }
-.risk-tag.high { color:#fff; background:#c93a30; }
-.risk-tag.medium { color:#8f5a00; background:var(--amber-soft); }
+.risk-tag.high { color:#fff; background:var(--tomato); }
+.risk-tag.medium { color:var(--corn-ink); background:var(--corn-soft); }
 .risk-tag.low { color:var(--green-700); background:var(--green-100); }
 .clear-stats { display:flex; gap:20rpx; margin-top:10rpx; color:var(--muted); font-size:22rpx; }
 .clear-suggest { display:flex; justify-content:space-between; align-items:center; margin-top:14rpx; padding-top:14rpx; border-top:1rpx dashed var(--line); color:var(--green-800); font-size:23rpx; font-weight:700; }
@@ -55,7 +55,7 @@
 .statement-summary { display:flex; gap:16rpx; margin-bottom:20rpx; padding:20rpx; background:var(--green-50); border-radius:16rpx; }
 .stmt-stat { flex:1; text-align:center; }
 .stmt-num { display:block; color:var(--ink); font-size:30rpx; font-weight:850; }
-.stmt-num.warn { color:#c93a30; }
+.stmt-num.warn { color:var(--tomato); }
 .stmt-label { display:block; margin-top:4rpx; color:var(--muted); font-size:19rpx; }
 .statement-list { max-height:420rpx; overflow-y:auto; }
 .stmt-item { display:flex; justify-content:space-between; align-items:flex-start; padding:16rpx 0; border-bottom:1rpx solid var(--line); }
@@ -77,15 +77,15 @@
 /* 2026 统一设计升级：经营事务中心 */
 .ops-page { padding: 0 28rpx 90rpx; }
 .ops-hero { margin: 0 -28rpx; padding: 34rpx 32rpx 28rpx; border-radius: 0 0 30rpx 30rpx; }
-.ops-hero .hero-desc { display: block; margin-top: 10rpx; color: rgba(255,255,255,.68); font-size: 21rpx; }
+.ops-hero .hero-desc { display: block; margin-top: 10rpx; color: rgba(255,255,255,.68); font-size: 22rpx; }
 .ops-pulse { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 24rpx; padding: 16rpx 6rpx; background: rgba(255,255,255,.1); border: 1rpx solid rgba(255,255,255,.14); border-radius: 20rpx; }
 .ops-pulse view { text-align: center; border-right: 1rpx solid rgba(255,255,255,.12); }
 .ops-pulse view:last-child { border-right: 0; }
 .ops-pulse-num { display: block; color: #fff; font-family: var(--font-num); font-size: 31rpx; font-weight: 850; }
 .ops-pulse-num.warn { color: var(--corn); }
-.ops-pulse-label { display: block; margin-top: 5rpx; color: rgba(255,255,255,.63); font-size: 18rpx; }
+.ops-pulse-label { display: block; margin-top: 5rpx; color: rgba(255,255,255,.63); font-size: 22rpx; }
 .ops-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin: 20rpx 0 24rpx; padding: 5rpx; background: var(--paper-2); border-radius: 18rpx; overflow: visible; }
-.ops-tabs .tab-chip { padding: 14rpx 4rpx; text-align: center; background: transparent; border: 0; border-radius: 14rpx; font-size: 21rpx; }
+.ops-tabs .tab-chip { padding: 14rpx 4rpx; text-align: center; background: transparent; border: 0; border-radius: 14rpx; font-size: 22rpx; }
 .ops-tabs .tab-chip.active { color: var(--green-800); background: var(--paper); box-shadow: var(--shadow-sm); }
 .ops-page .cat-list, .clear-card, .export-card { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }
 .ops-page .empty-state { margin-top: 12rpx; padding: 56rpx 28rpx; background: var(--paper); border: 2rpx dashed var(--line); border-radius: 22rpx; }

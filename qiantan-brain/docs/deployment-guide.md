@@ -35,8 +35,8 @@ uvicorn app.main:app --port 8000
 | `DATABASE_URL` | 完整数据库连接串 | 本地 sqlite 路径 |
 | `ASR_APP_ID` / `ASR_API_KEY` / `ASR_API_SECRET` / `ASR_API_URL` | 讯飞语音鉴权 | 空（走演示模式） |
 | `WEATHER_API_KEY` / `WEATHER_API_URL` / `WEATHER_CITY_ID` | 和风天气 | 空（走 Mock） |
-| `PRIVACY_EPSILON` | 经验云差分隐私预算，越小越私密 | `1.0` |
-| `PRIVACY_QUERY_BUDGET` | 单 key 查询预算上限 | `100` |
+| `PRIVACY_EPSILON` | 经验云差分隐私预算，越小越私密（经验云已下线，不再生效） | `1.0` |
+| `PRIVACY_QUERY_BUDGET` | 单 key 查询预算上限（经验云已下线，不再生效） | `100` |
 
 ## 4. 全新数据库验收流程（必做）
 

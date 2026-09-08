@@ -27,7 +27,6 @@ from scripts.seed_data.common import (
     date_ago,
     days_ago,
     make_rng,
-    money,
     products_for,
     qty,
     sku_uuid,
@@ -100,9 +99,13 @@ async def seed_inventory_records(db) -> dict:
                 pid = prod.id
                 net_stock[merchant_id].setdefault(pid, Decimal("0"))
 
-                if n_purchase > 0 and pid in [p.id for p in rng.sample(list(my_products), min(n_purchase, len(my_products)))]:
+                if n_purchase > 0 and pid in [
+                    p.id for p in rng.sample(list(my_products), min(n_purchase, len(my_products)))
+                ]:
                     purchase_qty_val = _purchase_qty(rng, profile)
-                    cost = prod.default_price * Decimal(str(round(rng.uniform(*prod.cost_ratio), 2)))
+                    cost = prod.default_price * Decimal(
+                        str(round(rng.uniform(*prod.cost_ratio), 2))
+                    )
                     day = date_ago(d)
                     if not skip:
                         db.add(
@@ -113,7 +116,9 @@ async def seed_inventory_records(db) -> dict:
                                 quantity=qty(purchase_qty_val),
                                 unit=prod.unit,
                                 unit_cost=cost,
-                                total_amount=(cost * Decimal(purchase_qty_val)).quantize(Decimal("0.01")),
+                                total_amount=(cost * Decimal(purchase_qty_val)).quantize(
+                                    Decimal("0.01")
+                                ),
                                 event_type="purchase",
                                 event_time=days_ago(d, hour=6),
                                 source="seed",
@@ -137,7 +142,9 @@ async def seed_inventory_records(db) -> dict:
                                 quantity=qty(-sold),
                                 unit=prod.unit,
                                 unit_price=prod.default_price,
-                                total_amount=(prod.default_price * Decimal(sold)).quantize(Decimal("0.01")),
+                                total_amount=(prod.default_price * Decimal(sold)).quantize(
+                                    Decimal("0.01")
+                                ),
                                 event_type="sale",
                                 event_time=days_ago(d, hour=18),
                                 source="seed",
@@ -149,10 +156,7 @@ async def seed_inventory_records(db) -> dict:
     await db.flush()
     print(f"  [+] 库存流水: {n} 条（三摊 30 天）")
     # 只保留还有存货的
-    return {
-        m: {pid: v for pid, v in items.items() if v > 0}
-        for m, items in net_stock.items()
-    }
+    return {m: {pid: v for pid, v in items.items() if v > 0} for m, items in net_stock.items()}
 
 
 async def seed_current_inventory(db, net_stock: dict) -> None:
@@ -230,8 +234,10 @@ async def seed_batches(db, net_stock: dict) -> None:
             expiry = purchase_date + timedelta(hours=prod.shelf_life_hours)
 
             # 状态决策（故事化）
-            supplier_idx = 1 if prod.group in {"叶菜类", "根茎类", "瓜果类"} else (
-                2 if prod.group == "水果类" else 3
+            supplier_idx = (
+                1
+                if prod.group in {"叶菜类", "根茎类", "瓜果类"}
+                else (2 if prod.group == "水果类" else 3)
             )
             supplier_name = {1: "老王蔬菜批发", 2: "张姐水果直供", 3: "李记肉联厂"}.get(
                 supplier_idx, "老王蔬菜批发"
@@ -286,7 +292,10 @@ async def seed_batches(db, net_stock: dict) -> None:
                     origin=origin,
                     unit_cost=(prod.default_price * Decimal("0.65")).quantize(Decimal("0.01")),
                     certificates=json.dumps(
-                        {"quarantine": f"Q{2026}{prod.id:03d}", "inspection": "合格" if inspection == "pass" else "复检中"},
+                        {
+                            "quarantine": f"Q{2026}{prod.id:03d}",
+                            "inspection": "合格" if inspection == "pass" else "复检中",
+                        },
                         ensure_ascii=False,
                     ),
                     inspection_result=inspection,

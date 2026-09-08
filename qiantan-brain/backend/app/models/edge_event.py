@@ -35,7 +35,10 @@ class EdgeEvent(Base):
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
 
     __table_args__ = (
-        sa.UniqueConstraint("event_id", name="uq_edge_events_event_id"),
+        # 审计 M-5：event_id 幂等去重按商户隔离 —— (merchant_id, event_id) 唯一。
+        # 不同商户的设备各自生成序列号，可能复用同一 event_id，属正常事件；
+        # 全局唯一会让商户 B 的合法事件被误判为商户 A 的重复而丢弃。
+        sa.UniqueConstraint("merchant_id", "event_id", name="uq_edge_events_merchant_event_id"),
         sa.Index("ix_edge_events_event_id", "event_id"),
         sa.Index("ix_edge_events_merchant_occurred", "merchant_id", "occurred_at"),
     )

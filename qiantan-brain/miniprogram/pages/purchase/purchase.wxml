@@ -67,7 +67,7 @@
     </view>
     <view class="expected-arrival" wx:if="{{listData.expected_arrival}}">
       <text class="arrival-label">预计到货</text>
-      <text class="arrival-date">{{listData.expected_arrival}}</text>
+      <text class="arrival-date">{{fmt.datePart(listData.expected_arrival)}}</text>
     </view>
 
     <!-- Section -->

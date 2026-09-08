@@ -85,6 +85,11 @@
 
   <!-- 员工列表 -->
   <block wx:else>
+    <view class="empty-state surface" wx:if="{{staffList.length === 0}}">
+      <mascot size="md" mood="idle"/>
+      <text class="empty-title">还没有员工</text>
+      <text>添加员工后，他们可用自己的身份登录并按角色限权操作，不用共享你的微信。</text>
+    </view>
     <view class="staff-list">
       <view wx:for="{{staffList}}" wx:key="staff_id" class="staff-card {{expandedId === item.staff_id ? 'expanded' : ''}}">
         <!-- 主行 -->

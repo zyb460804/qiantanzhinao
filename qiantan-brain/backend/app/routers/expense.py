@@ -1,7 +1,5 @@
 """费用管理 + 月度利润报表 API (sections 4.19)."""
 
-import csv
-import io
 import uuid
 from datetime import date
 from datetime import datetime as dt
@@ -13,12 +11,15 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.export import export_csv
 from app.core.security import get_current_merchant
+from app.core.timezone import cst_month_bounds_utc
 from app.database import get_db
 from app.models.accounts import SupplierPayable
 from app.models.expense import Expense, Invoice
+from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
-from app.models.pos import SaleOrder
+from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 
 
@@ -79,6 +80,7 @@ async def create_expense(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("inventory_adjust")),
 ):
     try:
         amount = Decimal(str(body.get("amount", 0)))
@@ -98,6 +100,9 @@ async def create_expense(
         expense_date = date.fromisoformat(body.get("expense_date", ""))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="费用日期格式必须为YYYY-MM-DD") from exc
+    # P2-3 修复：费用日期不允许晚于今天（此前 2030-01-01 也能入账，污染月报）。
+    if expense_date > date.today():
+        raise HTTPException(status_code=422, detail="费用日期不能晚于今天")
     e = Expense(
         merchant_id=merchant.id,
         category=category,
@@ -144,30 +149,36 @@ async def monthly_report(
 
     # Revenue — 直接从 SaleOrder 聚合（total - refund），不再依赖 DailySettlement。
     # 原口径只在手动日结后有收入数据，摊主不日结时月报收入恒为 0；改用订单源数据
-    # 保证语音/POS 记账即可反映收入。status='cancelled' 的订单不计入。
-    month_start = dt.combine(start, dt.min.time())
-    month_end = dt.combine(end, dt.min.time())
-    gross_row = (
+    # 保证语音/POS 记账即可反映收入。cancelled 与 held 订单不计入收入（held 尚未
+    # 完成交易，没有实际资金流入，计入会把挂单虚增为收入）。
+    # 审计 C4：SaleOrder/SupplierPayable 的 created_at 为 naive UTC，月界按 CST
+    # 业务月切——把 CST 月初 00:00 换算成 naive UTC 再比较，否则 CST 月初 0-8 点
+    # 的订单会串到上个月。Expense.expense_date 是 Date 列，无需换算。
+    month_start, month_end = cst_month_bounds_utc(y, m)
+    # P2-5 口径统一：月报 revenue 改从库存台账聚合（sale - refund，未作废）。
+    # 此前按 SaleOrder 聚合，语音记账的销售不在订单表里 → 月报收入恒低于
+    # 日报（实测日报 220.5 vs 月报 7.0）。台账同时覆盖语音与 POS，且天然
+    # 排除挂单/取消（未产生库存流水）。CST 月界同前。
+    ledger_rows = (
         await db.execute(
-            select(func.coalesce(func.sum(SaleOrder.total_amount), Decimal("0"))).where(
-                SaleOrder.merchant_id == merchant.id,
-                SaleOrder.status != "cancelled",
-                SaleOrder.created_at >= month_start,
-                SaleOrder.created_at < month_end,
+            select(
+                InventoryRecord.event_type,
+                func.coalesce(func.sum(InventoryRecord.total_amount), Decimal("0")),
             )
-        )
-    ).scalar() or Decimal("0")
-    refund_row = (
-        await db.execute(
-            select(func.coalesce(func.sum(SaleOrder.refunded_amount), Decimal("0"))).where(
-                SaleOrder.merchant_id == merchant.id,
-                SaleOrder.status != "cancelled",
-                SaleOrder.created_at >= month_start,
-                SaleOrder.created_at < month_end,
+            .where(
+                InventoryRecord.merchant_id == merchant.id,
+                InventoryRecord.is_voided == False,  # noqa: E712
+                InventoryRecord.event_type.in_(("sale", "refund")),
+                InventoryRecord.event_time >= month_start,
+                InventoryRecord.event_time < month_end,
             )
+            .group_by(InventoryRecord.event_type)
         )
-    ).scalar() or Decimal("0")
-    revenue_row = gross_row - refund_row
+    ).all()
+    ledger_by_type = {row[0]: row[1] for row in ledger_rows}
+    revenue_row = (ledger_by_type.get("sale", Decimal("0"))) - (
+        ledger_by_type.get("refund", Decimal("0"))
+    )
 
     # Purchase cost
     purchase_row = (
@@ -175,8 +186,8 @@ async def monthly_report(
             select(func.coalesce(func.sum(SupplierPayable.amount), Decimal("0"))).where(
                 SupplierPayable.merchant_id == merchant.id,
                 SupplierPayable.direction == "purchase",
-                SupplierPayable.created_at >= dt.combine(start, dt.min.time()),
-                SupplierPayable.created_at < dt.combine(end, dt.min.time()),
+                SupplierPayable.created_at >= month_start,
+                SupplierPayable.created_at < month_end,
             )
         )
     ).scalar() or Decimal("0")
@@ -249,17 +260,20 @@ async def export_monthly(
         .all()
     )
 
-    output = io.StringIO()
-    w = csv.writer(output)
-    w.writerow(["千摊智脑 — 月度经营报表", month])
-    w.writerow([])
-    w.writerow(["日期", "类别", "金额", "描述"])
-    for e in expenses:
-        w.writerow([e.expense_date.isoformat(), e.category, float(e.amount), e.description or ""])
-
-    output.seek(0)
+    # 走统一导出工具（审计顺手项）：UTF-8 BOM + 公式注入净化——描述等文本
+    # 字段以 =/+/-/@ 开头时加单引号，防 Excel/WPS 把单元格解释成公式。
+    # 月份信息已在文件名与 Content-Disposition 中。
+    rows = [
+        {
+            "日期": e.expense_date.isoformat(),
+            "类别": e.category,
+            "金额": float(e.amount),
+            "描述": e.description or "",
+        }
+        for e in expenses
+    ]
     return StreamingResponse(
-        iter([output.getvalue()]),
+        iter([export_csv(rows, filename=f"monthly_report_{month}")]),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=monthly_report_{month}.csv"},
     )
@@ -305,6 +319,7 @@ async def create_invoice(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("inventory_adjust")),
 ):
     invoice_number = (body.get("invoice_number") or "").strip()
     try:

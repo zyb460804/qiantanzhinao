@@ -73,3 +73,10 @@ htmlcov/
 
 # Local AI assistant configuration
 .claude/
+
+# 工具运行时缓存（2026-08-17，勿入库）
+.mimosa/
+
+# QA 端到端驱动工作区（2026-09-08，勿入库：state.json 含有效 JWT token
+# 等真实凭证，driver.py 硬编码本机绝对路径 E:/千摊/...）
+/qa/

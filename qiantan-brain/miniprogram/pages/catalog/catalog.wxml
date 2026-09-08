@@ -59,8 +59,16 @@
       <text>正在加载商品档案…</text>
     </view>
 
+    <!-- 加载失败：不伪装成空状态 -->
+    <view wx:elif="{{loadError}}" class="empty-state cat-empty">
+      <view class="empty-illust">!</view>
+      <text class="empty-title">商品档案加载失败</text>
+      <text class="empty-desc">请检查网络后重试</text>
+      <button class="btn-primary empty-action" bindtap="retrySkus">重新加载</button>
+    </view>
+
     <!-- 使用页面自然滚动，避免固定高度列表造成大块空白和双重滚动 -->
-    <view wx:if="{{!loading && (searchKeyword ? filteredSkus.length : skus.length)}}" class="sku-list">
+    <view wx:if="{{!loading && !loadError && (searchKeyword ? filteredSkus.length : skus.length)}}" class="sku-list">
       <view wx:for="{{searchKeyword ? filteredSkus : skus}}" wx:key="sku_id"
             class="sku-card stagger" data-id="{{item.sku_id}}" bindtap="openDetail">
         <view class="sku-main">
@@ -93,7 +101,7 @@
     </view>
 
     <!-- 空状态 -->
-    <view wx:if="{{!loading && skus.length === 0}}" class="empty-state cat-empty">
+    <view wx:if="{{!loading && !loadError && skus.length === 0}}" class="empty-state cat-empty">
       <view class="empty-illust">＋</view>
       <text class="empty-title">建立第一份商品档案</text>
       <text class="empty-desc">先添加商品名称、售价和标准单位，之后可继续维护别名、规格及供应商。</text>
@@ -101,7 +109,7 @@
     </view>
 
     <!-- 过滤无结果 -->
-    <view wx:if="{{!loading && skus.length > 0 && searchKeyword && filteredSkus.length === 0}}" class="empty-state search-empty">
+    <view wx:if="{{!loading && !loadError && skus.length > 0 && searchKeyword && filteredSkus.length === 0}}" class="empty-state search-empty">
       <view class="empty-search-icon">⌕</view>
       <text class="empty-title">没有匹配的商品</text>
       <text class="empty-desc">换个名称或分类关键词试试</text>

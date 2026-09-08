@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,7 @@ from app.models.payment import (
     ReconciliationDifference,
     ReconciliationTask,
 )
+from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 from app.schemas.reconciliation import ResolveDifferenceRequest
 from app.services.channel_bill_download import (
@@ -36,6 +38,14 @@ from app.services.reconciliation import (
 router = APIRouter(prefix="/api/v1/reconciliation", tags=["reconciliation"])
 MAX_BILL_FILE_SIZE = 10 * 1024 * 1024
 ChannelName = Literal["wechat", "alipay"]
+
+
+class ChannelCreateRequest(BaseModel):
+    """创建支付渠道请求 — 用 Pydantic 约束替代 body:dict，防字段缺失/类型漂移。"""
+
+    channel: str = Field(min_length=1, max_length=30)
+    fee_rate: float = Field(default=0.006, ge=0, le=0.1)
+    sub_mch_id: str | None = None
 
 
 async def _channel_fee_rate(
@@ -79,15 +89,15 @@ async def list_channels(
 
 @router.post("/channels", response_model=AnyResponse)
 async def create_channel(
-    body: dict,
+    body: ChannelCreateRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
     c = PaymentChannel(
         merchant_id=merchant.id,
-        channel=body["channel"],
-        sub_mch_id=body.get("sub_mch_id"),
-        fee_rate=Decimal(str(body.get("fee_rate", 0.006))),
+        channel=body.channel,
+        sub_mch_id=body.sub_mch_id,
+        fee_rate=Decimal(str(body.fee_rate)),
     )
     db.add(c)
     await db.commit()
@@ -306,6 +316,7 @@ async def resolve_difference(
     body: ResolveDifferenceRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("daily_settle")),
 ):
     difference = await db.scalar(
         select(ReconciliationDifference).where(

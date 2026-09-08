@@ -7,7 +7,7 @@ total_variance / total_loss_amount 等）不一致。因路由使用 response_mo
 """
 
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -25,11 +25,15 @@ from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
 from app.models.product import ProductCategory
 from app.models.stocktake import StocktakeItem, StocktakeSession
+from app.models.voice import VoiceLog
+from app.routers.staff import require_permission
 from app.schemas import inventory as inventory_schemas
 from app.schemas.common import AnyResponse
 from app.services.batch import create_batch, get_active_batches, rollback_batch_on_void
 from app.services.lifecycle import calc_batch_status
 from app.services.offline_sync import upsert_offline_items
+from app.services.sku_service import resolve_sku_id
+from app.services.voice_ledger import void_voice_confirmed_record
 
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
@@ -313,9 +317,67 @@ async def void_inventory_record(
     req: inventory_schemas.VoidRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("void_record")),
 ):
-    """Void an inventory record by ID — rolls back batches, creates audit log."""
-    query = select(InventoryRecord).where(InventoryRecord.id == record_id)
+    """Void an inventory record by ID — rolls back batches, creates audit log.
+
+    按 source 分发（第五轮 V2-H1）：
+      - "pos"   → 409，引导走订单退款链路（pos.py refund 有完整核销逻辑）；
+      - "voice" → 复用 voice 侧共享撤销核心（先锁 VoiceLog 再锁流水行，
+                  与 voice.py 的 void/edit 维持统一加锁次序，消除跨路径
+                  双撤销竞态：双批次回滚 / 双往来账冲销）；
+      - 其他    → 原有手动撤销路径（流水行锁锚点 + 批次回滚 + 审计）。
+    """
+    # 第一跳（无锁读，仅定位与分发）：source 是不可变字段，无 TOCTOU 风险；
+    # 真正的加锁在分支内按既定次序进行。
+    probe = (
+        (await db.execute(select(InventoryRecord).where(InventoryRecord.id == record_id)))
+        .scalars()
+        .first()
+    )
+    if not probe or probe.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="库存记录不存在")
+
+    if probe.source == "pos":
+        # 订单体系另有完整退款链路（pos.py refund），直接撤销会绕过其核销逻辑。
+        raise HTTPException(
+            status_code=409,
+            detail="POS订单流水不支持直接撤销，请通过订单退款链路处理",
+        )
+
+    if probe.source == "voice" and probe.voice_log_id is not None:
+        # 语音链路记录：必须先锁 VoiceLog 再锁流水行（与 voice.py void/edit
+        # 的加锁次序一致），否则与语音侧并发撤销构成 ABBA。
+        log = (
+            (
+                await db.execute(
+                    select(VoiceLog).where(VoiceLog.id == probe.voice_log_id).with_for_update()
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if log is None or log.merchant_id != merchant.id:
+            raise HTTPException(status_code=404, detail="库存记录不存在")
+
+        record, batch_summary = await void_voice_confirmed_record(
+            db, log, req.reason or "", voided_by="manual"
+        )
+        if record is None:
+            # 目标流水已在别处被撤销（历史数据不一致）：回滚本次事务并按
+            # 幂等语义 409，不再重复落第二套回滚/审计。
+            raise HTTPException(status_code=409, detail="该记录已撤销")
+        await db.commit()
+        return {
+            "code": 0,
+            "message": "记录已撤销，库存和批次已回滚",
+            "data": {"record_id": str(record.id), "batch_summary": batch_summary},
+        }
+
+    # ── 手动路径（manual / purchase_list / stocktake / food_safety / offline …）──
+    # 锚点行锁：串行化同一记录的并发撤销，消除 is_voided 检查的 TOCTOU 竞态
+    # （PG 生效；SQLite 静默忽略 FOR UPDATE）。
+    query = select(InventoryRecord).where(InventoryRecord.id == record_id).with_for_update()
     result = await db.execute(query)
     record = result.scalar_one_or_none()
     if not record:
@@ -323,7 +385,7 @@ async def void_inventory_record(
     if record.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="库存记录不存在")
     if record.is_voided:
-        raise HTTPException(status_code=400, detail="该记录已撤销")
+        raise HTTPException(status_code=409, detail="该记录已撤销")
 
     before_data = {
         "quantity": float(record.quantity),
@@ -338,13 +400,16 @@ async def void_inventory_record(
     record.void_reason = req.reason or ""
     record.voided_by = "manual"
 
+    # sa.JSON 列默认走 json.dumps，不支持 Decimal——落库前转为 float
+    # （服务层返回值保持 Decimal 不变，仅在此 JSON 边界转换）。
+    audit_summary = {**batch_summary, "qty_adjusted": float(batch_summary["qty_adjusted"])}
     audit = AuditLog(
         merchant_id=record.merchant_id,
         action="void",
         target_table="inventory_records",
         target_id=str(record.id),
         before_data=before_data,
-        after_data={"is_voided": True, "batch_summary": batch_summary},
+        after_data={"is_voided": True, "batch_summary": audit_summary},
         reason=req.reason or "",
         operator="merchant",
     )
@@ -521,11 +586,21 @@ async def start_stocktake(
         for product in missing_result.scalars().all():
             products_by_id[product.id] = product
 
+    # P2-2 修复：只为「有账面流水」的品项生成待盘项（账面 0 但有历史流水
+    # 的仍保留——可能漏记）。此前全品类生成（12 项里 11 项从未交易过），
+    # 摊主被迫逐项录 0 才能完成盘点。
+    ledger_product_ids = sorted(pid for pid in book_qty_by_product if pid in products_by_id)
+    if not ledger_product_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="还没有任何库存流水，先记一笔进货再盘点",
+        )
+
     session = StocktakeSession(merchant_id=merchant_id, status="in_progress")
     db.add(session)
     await db.flush()
 
-    for product_id in sorted(products_by_id):
+    for product_id in ledger_product_ids:
         product = products_by_id[product_id]
         db.add(
             StocktakeItem(
@@ -556,8 +631,11 @@ async def submit_stocktake_item(
     db: AsyncSession = Depends(get_db),
 ):
     """Submit one actual count against the immutable start-time snapshot."""
+    # 锚点行锁（V2-H3）：与 complete 同款——先锁会话行再做状态检查，
+    # 串行化 submit 与 complete/cancel 的并发交错（否则 complete 提交后，
+    # 在途的 submit 仍能把已结束会话的条目改写）。
     session_result = await db.execute(
-        select(StocktakeSession).where(StocktakeSession.id == session_id)
+        select(StocktakeSession).where(StocktakeSession.id == session_id).with_for_update()
     )
     session = session_result.scalar_one_or_none()
     if not session or session.merchant_id != merchant.id:
@@ -577,7 +655,11 @@ async def submit_stocktake_item(
 
     actual_qty = req.actual_qty
     book_qty = float(item.book_qty)
-    variance = round(actual_qty - book_qty, 2)
+    variance = float(
+        (Decimal(str(actual_qty)) - Decimal(str(book_qty))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    )
     item.actual_qty = actual_qty
     item.variance = variance
     item.variance_reason = req.variance_reason or req.diff_reason or ""
@@ -590,7 +672,7 @@ async def submit_stocktake_item(
             "item_id": str(item.id),
             "product_id": item.product_id,
             "book_qty": round(book_qty, 2),
-            "actual_qty": actual_qty,
+            "actual_qty": float(actual_qty),
             "variance": variance,
             "unit": item.unit,
         },
@@ -608,8 +690,9 @@ async def submit_stocktake_batch(
 
     返回每个 product_id 的处理结果（ok / error），调用方按结果更新本地状态。
     """
+    # 锚点行锁（V2-H3）：与 complete 同款，先锁会话行再做状态检查。
     session_result = await db.execute(
-        select(StocktakeSession).where(StocktakeSession.id == session_id)
+        select(StocktakeSession).where(StocktakeSession.id == session_id).with_for_update()
     )
     session = session_result.scalar_one_or_none()
     if not session or session.merchant_id != merchant.id:
@@ -634,7 +717,11 @@ async def submit_stocktake_batch(
             continue
         actual_qty = float(entry.actual_qty)
         book_qty = float(item.book_qty)
-        variance = round(actual_qty - book_qty, 2)
+        variance = float(
+            (Decimal(str(actual_qty)) - Decimal(str(book_qty))).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        )
         item.actual_qty = actual_qty
         item.variance = variance
         item.variance_reason = entry.variance_reason or ""
@@ -666,8 +753,11 @@ async def cancel_stocktake(
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel an in-progress stocktake. Completed sessions remain immutable."""
+    # 锚点行锁（V2-H3）：与 complete 同款——先锁会话行再做状态检查，
+    # 串行化 cancel 与 submit/complete 的并发交错。completed → 守卫拒绝，
+    # 不会被覆写为 cancelled。
     session_result = await db.execute(
-        select(StocktakeSession).where(StocktakeSession.id == session_id)
+        select(StocktakeSession).where(StocktakeSession.id == session_id).with_for_update()
     )
     session = session_result.scalar_one_or_none()
     if not session or session.merchant_id != merchant.id:
@@ -699,8 +789,10 @@ async def complete_stocktake(
     db: AsyncSession = Depends(get_db),
 ):
     """Complete a stocktake after every persisted snapshot line is counted."""
+    # 锚点行锁：串行化同一会话的并发 complete，防止双并发各自 INSERT 调整记录与
+    # 盘盈批次（PG 生效；SQLite 静默忽略 FOR UPDATE）。
     session_result = await db.execute(
-        select(StocktakeSession).where(StocktakeSession.id == session_id)
+        select(StocktakeSession).where(StocktakeSession.id == session_id).with_for_update()
     )
     session = session_result.scalar_one_or_none()
     if not session or session.merchant_id != merchant.id:
@@ -741,13 +833,68 @@ async def complete_stocktake(
     total_loss_amount = 0.0
     adjustments = []
 
+    # 修复 F3：批量预加载本会话涉及的商品，避免循环内逐条查 ProductCategory 造成 N+1。
+    product_ids = {item.product_id for item in items}
+    product_map: dict[int, ProductCategory] = {}
+    if product_ids:
+        prod_result = await db.execute(
+            select(ProductCategory).where(ProductCategory.id.in_(product_ids))
+        )
+        product_map = {p.id: p for p in prod_result.scalars().all()}
+
+    # 修复 F1：批量预计算每个商品的加权均价，损耗按成本而非售价估算（与 /current 同口径）。
+    avg_costs: dict[int, float] = {}
+    if product_ids:
+        cost_result = await db.execute(
+            select(
+                InventoryRecord.product_id,
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                InventoryRecord.quantity > 0,
+                                InventoryRecord.unit_cost * InventoryRecord.quantity,
+                            ),
+                            else_=0,
+                        )
+                    )
+                    / func.nullif(
+                        func.sum(
+                            case(
+                                (
+                                    InventoryRecord.quantity > 0,
+                                    InventoryRecord.quantity,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    0,
+                ).label("avg_cost"),
+            )
+            .where(
+                InventoryRecord.product_id.in_(product_ids),
+                InventoryRecord.is_voided == False,  # noqa: E712
+            )
+            .group_by(InventoryRecord.product_id)
+        )
+        for row in cost_result:
+            avg_costs[row.product_id] = round(float(row.avg_cost), 2)
+
     for item in items:
         if item.actual_qty is None:
             raise HTTPException(status_code=409, detail="盘点数据不完整，请重新录入")
         actual_qty = float(item.actual_qty)
         book_qty = float(item.book_qty)
         variance = (
-            float(item.variance) if item.variance is not None else round(actual_qty - book_qty, 2)
+            float(item.variance)
+            if item.variance is not None
+            else float(
+                (Decimal(str(actual_qty)) - Decimal(str(book_qty))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+            )
         )
         if item.variance is None:
             item.variance = variance
@@ -757,14 +904,14 @@ async def complete_stocktake(
         if abs(variance) < 0.01 or item.adjustment_record_id:
             continue
 
-        prod_result = await db.execute(
-            select(ProductCategory).where(ProductCategory.id == item.product_id)
-        )
-        product = prod_result.scalar_one_or_none()
+        product = product_map.get(item.product_id)
         product_name = product.name if product else f"商品{item.product_id}"
+        # 修复 F2：调整记录需解析并填充 sku_id，保证账本与 SKU 体系对齐。
+        sku_id = await resolve_sku_id(db, session.merchant_id, product_id=item.product_id)
         record = InventoryRecord(
             merchant_id=session.merchant_id,
             product_id=item.product_id,
+            sku_id=sku_id,
             quantity=variance,
             unit=item.unit,
             event_type="adjustment",
@@ -780,7 +927,7 @@ async def complete_stocktake(
         item.adjustment_record_id = record.id
 
         if variance < 0:
-            total_loss_amount += abs(variance) * float(product.default_price or 0) if product else 0
+            total_loss_amount += abs(variance) * float(avg_costs.get(item.product_id, 0.0))
         else:
             await create_batch(
                 db,
@@ -790,6 +937,7 @@ async def complete_stocktake(
                 batch_label=f"盘点盘盈-{utc_now().strftime('%m%d%H%M')}",
                 quantity=Decimal(str(variance)),
                 unit_cost=None,
+                sku_id=sku_id,
             )
 
         adjustments.append(

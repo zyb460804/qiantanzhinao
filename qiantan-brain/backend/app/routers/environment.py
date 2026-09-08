@@ -1,13 +1,14 @@
 """Environment data API router — QWeather integration + DB persistence."""
 
 import uuid
-from datetime import date
+from datetime import timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_merchant_id
+from app.core.timezone import cst_today
 from app.database import get_db
 from app.models.environment import EnvironmentRecord
 from app.schemas.common import AnyResponse
@@ -18,13 +19,20 @@ router = APIRouter(prefix="/api/v1/env", tags=["environment"])
 
 
 @router.get("/today", response_model=AnyResponse)
-async def get_today(city: str = "上海", db: AsyncSession = Depends(get_db)):
+async def get_today(
+    city: str = Query(default="上海", max_length=20),
+    merchant_id: uuid.UUID = Depends(get_merchant_id),
+    db: AsyncSession = Depends(get_db),
+):
     """Get today's environment data.
 
     Checks DB first. If not cached, fetches from QWeather API
     (falls back to mock when API key is not configured).
+
+    「今天」按 CST 业务日：日历键必须与天气服务写端（cst_today()）一致，
+    否则部署在非 CST 时区的服务器会在 UTC 16-24 点读写到错误的日期。
     """
-    today = date.today()
+    today = cst_today()
 
     # Check DB cache
     query = select(EnvironmentRecord).where(
@@ -59,8 +67,9 @@ async def get_today(city: str = "上海", db: AsyncSession = Depends(get_db)):
 
 @router.get("/forecast", response_model=AnyResponse)
 async def get_forecast(
-    city: str = "上海",
-    days: int = 3,
+    city: str = Query(default="上海", max_length=20),
+    days: int = Query(default=3, ge=1, le=30),
+    merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Get N-day weather forecast. Persists to DB for offline use."""
@@ -98,14 +107,13 @@ async def get_forecast(
 
 @router.get("/history", response_model=AnyResponse)
 async def get_history(
-    city: str = "上海",
-    days: int = 30,
+    city: str = Query(default="上海", max_length=20),
+    days: int = Query(default=30, ge=1, le=365),
+    merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get recent environment records from DB."""
-    from datetime import timedelta
-
-    start_date = date.today() - timedelta(days=days)
+    """Get recent environment records from DB (CST-day window)."""
+    start_date = cst_today() - timedelta(days=days)
 
     query = (
         select(EnvironmentRecord)
@@ -290,7 +298,7 @@ def resolve_solar_term(mmdd: str) -> dict:
 @router.get("/solar-term", response_model=AnyResponse)
 async def get_solar_term():
     """Get the current solar term and seasonal products."""
-    term_data = resolve_solar_term(date.today().strftime("%m%d"))
+    term_data = resolve_solar_term(cst_today().strftime("%m%d"))
     current_term = term_data["solar_term"]
     term_data["in_season_products"] = SEASONAL_PRODUCTS.get(current_term, "西瓜·番茄·黄瓜")
     term_data["in_season_product_list"] = [
@@ -308,14 +316,13 @@ async def get_seasonal_advice(
 
     Combines solar-term lookup with merchant-specific weather forecast summary.
     """
-    today = date.today()
+    today = cst_today()
     mmdd = today.strftime("%m%d")
 
-    # Find current solar term
-    current_term = "小暑"
-    for td, name in sorted(SOLAR_TERMS, key=lambda x: x[0]):
-        if td <= mmdd:
-            current_term = name
+    # Resolve the current solar term via the shared lookup so early-January dates
+    # correctly wrap back to the previous year's 冬至 instead of defaulting to 小暑
+    # (a mid-summer term that would surface heat-wave advice in mid-winter).
+    current_term = resolve_solar_term(mmdd)["solar_term"]
 
     products = SEASONAL_PRODUCTS.get(current_term, "西瓜·番茄·黄瓜")
     advice = SEASONAL_ADVICE.get(current_term, DEFAULT_ADVICE)

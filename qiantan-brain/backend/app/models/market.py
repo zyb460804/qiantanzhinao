@@ -4,7 +4,6 @@
 - MarketMerchant: 商户入场登记
 - MarketInspection: 市场巡检记录
 - MarketComplaint: 投诉处理
-- MarketNotice: 消息通知
 """
 
 import uuid
@@ -27,7 +26,7 @@ class Market(Base):
     contact: Mapped[str | None] = mapped_column(sa.String(50))
     is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
 
@@ -50,7 +49,7 @@ class MarketMerchant(Base):
     food_safety_score: Mapped[int] = mapped_column(sa.Integer, default=100)  # 食安评分
     status: Mapped[str] = mapped_column(sa.String(20), default="active")  # active/suspended/closed
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
     __table_args__ = (sa.UniqueConstraint("market_id", "merchant_id", name="uq_market_merchant"),)
@@ -74,7 +73,7 @@ class MarketInspection(Base):
     notes: Mapped[str | None] = mapped_column(sa.Text)
     photos: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
 
@@ -96,24 +95,6 @@ class MarketComplaint(Base):
     )  # open/in_progress/resolved/closed
     resolution: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
+        sa.DateTime, server_default=sa.func.now(), nullable=False
     )
     resolved_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
-
-
-class MarketNotice(Base):
-    """市场通知/公告。"""
-
-    __tablename__ = "market_notices"
-
-    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
-    market_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, sa.ForeignKey("markets.id"), nullable=False
-    )
-    title: Mapped[str] = mapped_column(sa.String(100), nullable=False)
-    content: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    notice_type: Mapped[str] = mapped_column(sa.String(20), default="info")  # info/warning/urgent
-    is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, server_default=sa.func.now(), nullable=True
-    )

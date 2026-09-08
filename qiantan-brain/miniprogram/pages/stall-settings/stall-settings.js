@@ -5,6 +5,13 @@
 var app = getApp();
 var Theme = require('../../utils/theme');
 
+// 旧存储值 → 权威方言键（与 voice.js _dialectAliases、后端 DIALECT_MAP 兼容键对齐）
+var DIALECT_ALIASES = { sichuanese: 'sichuan', shanghainese: 'mandarin', southwest: 'mandarin' };
+function normalizeDialect(code) {
+  if (!code) return 'mandarin';
+  return DIALECT_ALIASES[code] || code;
+}
+
 Page({
   data: {
     skinClass: '',
@@ -13,8 +20,9 @@ Page({
     cityOptions: ['上海', '北京', '广州', '深圳', '杭州', '南京', '成都', '武汉', '重庆', '西安'],
     cityIndex: 0,
     merchantCity: '上海',
-    dialects: ['普通话', '四川话', '粤语', '上海话'],
-    dialectValues: ['mandarin', 'sichuanese', 'cantonese', 'shanghainese'],
+    // 方言选项与 voice.js _dialectOptions / 后端 DIALECT_MAP 权威键统一（M4）
+    dialects: ['普通话', '四川话', '粤语', '河南话', '山东话'],
+    dialectValues: ['mandarin', 'sichuan', 'cantonese', 'henan', 'shandong'],
     dialectIndex: 0,
     voiceDialect: 'mandarin',
     hoursOptions: ['早市 (6:00-12:00)', '午市 (12:00-18:00)', '晚市 (18:00-24:00)', '全天'],
@@ -41,7 +49,7 @@ Page({
   },
 
   loadSettings: function () {
-    var storedDialect = wx.getStorageSync('voiceDialect') || 'mandarin';
+    var storedDialect = normalizeDialect(wx.getStorageSync('voiceDialect'));
     var storedRisk = wx.getStorageSync('riskProfile') || 'neutral';
     var storedHours = wx.getStorageSync('businessHours') || 'morning';
     var storedNotify = wx.getStorageSync('notificationEnabled');
@@ -61,7 +69,7 @@ Page({
     var self = this;
     app.request({ url: '/auth/me/preferences', auth: true }).then(function (prefs) {
       if (!prefs) return;
-      var dialect = prefs.voice_dialect || storedDialect;
+      var dialect = normalizeDialect(prefs.voice_dialect || storedDialect);
       var risk = prefs.risk_profile || storedRisk;
       var hours = prefs.business_hours || storedHours;
       var notify = prefs.notification_enabled !== undefined ? prefs.notification_enabled : storedNotify;
@@ -129,7 +137,8 @@ Page({
       url: '/auth/me', method: 'PUT',
       data: { name: this.data.merchantName },
     }).then(function () {}).catch(function () { /* 名称更新失败不阻塞偏好保存 */ });
-    // 推送偏好到后端（跨设备同步）
+    // 推送偏好到后端（跨设备同步）；成功才提示已保存，失败明确报错
+    var self = this;
     app.request({
       url: '/auth/me/preferences', method: 'PUT',
       data: {
@@ -139,7 +148,11 @@ Page({
         notification_enabled: this.data.notificationEnabled,
         merchant_city: this.data.merchantCity,
       },
-    }).then(function () {}).catch(function () {});
-    wx.showToast({ title: '偏好已保存', icon: 'success' });
+    }).then(function () {
+      wx.showToast({ title: '偏好已保存', icon: 'success' });
+    }).catch(function (err) {
+      var msg = (err && err.body && (err.body.detail || err.body.message)) || '偏好保存失败，请重试';
+      wx.showToast({ title: String(msg), icon: 'none' });
+    });
   },
 });

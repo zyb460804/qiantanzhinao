@@ -2,7 +2,7 @@
 
 功能：
   - check_quota: 检查租户某指标是否超出套餐配额
-  - record_usage: 记录用量（累加到当天）— 带并发冲突重试
+  - record_usage: 记录用量（累加到当天）— 单条原子 UPSERT，无并发丢失更新
   - get_current_usage: 获取当前月份的累计用量
   - get_quota_limit: 从租户的套餐中获取配额上限
   - get_usage_trend: 获取最近 N 天的用量趋势
@@ -10,14 +10,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.saas import Plan, Tenant, UsageRecord
@@ -86,59 +86,40 @@ async def record_usage(
     tenant_id: uuid.UUID,
     metric: str,
     value: int = 1,
-    max_retries: int = 3,
 ) -> None:
     """记录用量（累加到当天，不存在则创建）。
 
-    处理并发冲突：当多请求同时写入同一 (tenant_id, metric, date)
-    组合时，SELECT-then-INSERT 会产生唯一约束冲突。
-    此时自动重试（先 SELECT 已有记录 → UPDATE）。
+    用单条原子 UPSERT 在数据库侧完成读-改-写累加：
+
+        INSERT INTO usage_records (...) VALUES (...)
+        ON CONFLICT (tenant_id, metric, recorded_date) DO UPDATE
+        SET value = usage_records.value + excluded.value
+
+    消除并发丢失更新：旧实现是应用层 ``record.value += value``
+    （无锁读-算-写），IntegrityError 重试只覆盖插入竞态，
+    20 并发协程实测最终 value=1（期望 20），生产双副本下计量漏计。
+    PG 与 SQLite 方言均支持 ON CONFLICT DO UPDATE，按会话绑定
+    方言选择对应 insert 构造。
+
+    取舍：UPSERT 后唯一约束插入竞态不再可能发生，故移除原重试循环
+    与 max_retries 参数（全仓调用方均为 4 参内调用，无人传该参数；
+    FK 违例等其他 IntegrityError 语义不变，直接向上传播）。
     """
     today = datetime.now(UTC).strftime("%Y-%m-%d")
 
-    for attempt in range(max_retries):
-        try:
-            # 查找当天记录
-            result = await db.execute(
-                select(UsageRecord).where(
-                    UsageRecord.tenant_id == tenant_id,
-                    UsageRecord.metric == metric,
-                    UsageRecord.recorded_date == today,
-                )
-            )
-            record = result.scalar_one_or_none()
-
-            if record:
-                record.value += value
-            else:
-                record = UsageRecord(
-                    tenant_id=tenant_id,
-                    metric=metric,
-                    recorded_date=today,
-                    value=value,
-                )
-                db.add(record)
-            await db.commit()
-            return
-        except IntegrityError:
-            await db.rollback()
-            if attempt < max_retries - 1:
-                logger.debug(
-                    "record_usage 并发冲突，重试 %d/%d (tenant=%s metric=%s)",
-                    attempt + 1,
-                    max_retries,
-                    tenant_id,
-                    metric,
-                )
-                await asyncio.sleep(0.1 * (attempt + 1))  # 指数退避
-            else:
-                logger.error(
-                    "record_usage 重试耗尽 (tenant=%s metric=%s date=%s)",
-                    tenant_id,
-                    metric,
-                    today,
-                )
-                raise
+    upsert = pg_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
+    stmt = upsert(UsageRecord).values(
+        tenant_id=tenant_id,
+        metric=metric,
+        recorded_date=today,
+        value=value,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["tenant_id", "metric", "recorded_date"],
+        set_={"value": UsageRecord.value + stmt.excluded.value},
+    )
+    await db.execute(stmt)
+    await db.commit()
 
 
 async def get_usage_trend(

@@ -7,12 +7,11 @@
   DELETE /item/{id}               取消采购项
   POST   /{id}/acceptance         记录到货验收
   POST   /{id}/acceptance/confirm 确认验收 → 批次入库+库存+应付
-  POST   /{id}/cancel             取消采购清单
   POST   /supplier-payment        向供应商付款
   POST   /items/{id}/return       退货给供应商
-  GET    /supplier/{id}/statement 供应商对账单
 """
 
+import hashlib
 import uuid
 from decimal import Decimal
 
@@ -20,6 +19,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.idempotency import short_idem_key
 from app.core.security import get_current_merchant
 from app.core.timezone import utc_now, utc_today_start
 from app.database import get_db
@@ -31,6 +31,7 @@ from app.models.merchant import Merchant
 from app.models.product import ProductCategory
 from app.models.purchase import PurchaseItem, PurchaseList
 from app.models.recommendation import Recommendation
+from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 from app.schemas.purchase import (
     ConfirmAcceptanceRequest,
@@ -41,11 +42,10 @@ from app.schemas.purchase import (
 )
 from app.services.accounts_service import (
     get_supplier_balance,
-    get_supplier_statement,
     record_supplier_payable_from_purchase,
     record_supplier_payment,
 )
-from app.services.batch import create_batch
+from app.services.batch import create_batch, reduce_batches_on_purchase_return
 from app.services.sku_service import resolve_sku_id
 
 
@@ -792,7 +792,9 @@ async def confirm_acceptance(
     Idempotent: items with inventory_record_id are skipped.
     State must be 'accepted'.
     """
-    list_query = select(PurchaseList).where(PurchaseList.id == list_id)
+    # 行锁串行化整个多步入库（批次/库存/应付），防并发双 confirm 双重入库
+    # （SQLite 忽略 FOR UPDATE 属预期，靠状态检查 + 幂等键兜底；PG16 生效）。
+    list_query = select(PurchaseList).where(PurchaseList.id == list_id).with_for_update()
     list_result = await db.execute(list_query)
     plist = list_result.scalar_one_or_none()
     if plist is None or plist.merchant_id != merchant.id:
@@ -849,6 +851,7 @@ async def confirm_acceptance(
             source="purchase_list",
             batch_label=batch_label,
             notes=f"验收入库: 到货{_fmt_q(item.arrival_qty)} 合格{_fmt_q(item.accepted_qty)}",
+            idempotency_key=_purchase_inventory_idem_key(plist.id, item.id),
         )
         db.add(record)
         await db.flush()
@@ -869,7 +872,9 @@ async def confirm_acceptance(
         item.purchased_at = now
 
         # Generate supplier payable
-        idem_key = f"purchase-accept:{plist.id}:{item.id}"
+        # 应付幂等键：源串 88 字符超 supplier_payables.idempotency_key VARCHAR(64)，
+        # 压缩后 legacy /confirm 与 /acceptance/confirm 共用同一键空间互相兜底
+        idem_key = short_idem_key("purchase-payable", plist.id, item.id)
         await record_supplier_payable_from_purchase(db, plist, item, idempotency_key=idem_key)
 
         if item.recommendation_id:
@@ -931,6 +936,7 @@ async def pay_supplier(
     body: SupplierPaymentRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("supplier_payment")),
 ):
     """Record a payment to a supplier."""
     supplier = await db.get(Supplier, body.supplier_id)
@@ -958,7 +964,7 @@ async def pay_supplier(
             target_id=str(payment.id),
             after_data={
                 "supplier_id": str(body.supplier_id),
-                "amount": body.amount,
+                "amount": float(body.amount),
                 "method": body.method,
             },
             reason=body.note,
@@ -971,13 +977,21 @@ async def pay_supplier(
 
     # Auto-complete: if all purchase lists for this supplier are fully paid, mark them completed
     if new_balance <= 0:
-        # Find stored lists for this supplier that are fully paid
+        # Find stored lists for this supplier that are fully paid.
+        # 修复：原查询缺供应商维度，会把本商户其他供应商的 stored+paid 清单
+        # 一并误标 completed。PurchaseList 无 supplier_id，经条目反查该供应商的清单。
         stored_lists = (
             (
                 await db.execute(
                     select(PurchaseList).where(
                         PurchaseList.merchant_id == merchant.id,
                         PurchaseList.status == "stored",
+                        PurchaseList.id.in_(
+                            select(PurchaseItem.list_id).where(
+                                PurchaseItem.merchant_id == merchant.id,
+                                PurchaseItem.supplier_id == body.supplier_id,
+                            )
+                        ),
                     )
                 )
             )
@@ -1005,27 +1019,6 @@ async def pay_supplier(
 
 
 # ---------------------------------------------------------------------------
-# 供应商对账单
-# ---------------------------------------------------------------------------
-
-
-@router.get("/supplier/{supplier_id}/statement", response_model=AnyResponse)
-async def supplier_statement(
-    supplier_id: uuid.UUID,
-    limit: int = 50,
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get supplier statement (ledger of all transactions)."""
-    supplier = await db.get(Supplier, supplier_id)
-    if not supplier or supplier.merchant_id != merchant.id:
-        raise HTTPException(status_code=404, detail="供应商不存在")
-
-    statement = await get_supplier_statement(db, merchant.id, supplier_id, limit=limit)
-    return {"code": 0, "data": statement}
-
-
-# ---------------------------------------------------------------------------
 # 采购退货
 # ---------------------------------------------------------------------------
 
@@ -1039,10 +1032,12 @@ async def return_purchase_item(
 ):
     """Return purchased goods to supplier, optionally offset payable."""
     item = await db.scalar(
-        select(PurchaseItem).where(
+        select(PurchaseItem)
+        .where(
             PurchaseItem.id == item_id,
             PurchaseItem.merchant_id == merchant.id,
         )
+        .with_for_update()
     )
     if not item:
         raise HTTPException(status_code=404, detail="采购项不存在")
@@ -1056,6 +1051,12 @@ async def return_purchase_item(
 
     unit_cost = item.actual_unit_cost or item.estimated_unit_cost or Decimal("0")
     return_amount = (return_qty * unit_cost).quantize(Decimal("0.01"))
+
+    # F1: idempotency keys include the accumulated returned_qty (BEFORE this
+    # return) so multiple returns on the same item never collide on the unique
+    # constraint. item.returned_qty is updated below after the records are
+    # created, so reading it here yields the pre-update value.
+    prior_returned = item.returned_qty or Decimal("0")
 
     # Reverse inventory
     db.add(
@@ -1071,24 +1072,86 @@ async def return_purchase_item(
             event_time=utc_now(),
             source="purchase_list",
             notes=f"退货给供应商: {body.reason}",
-            idempotency_key=f"purchase-return:{item.id}:{return_qty}",
+            idempotency_key=short_idem_key("purchase-return", item.id, prior_returned, return_qty),
         )
     )
 
-    # Offset payable if requested
-    if body.offset_payable and item.supplier_id:
-        db.add(
-            SupplierPayable(
+    # 批次同步缩减（V2-H4）：修复前只减账面不减批次 → 批次仍按旧余量参与
+    # FIFO 消耗，造成超卖。按 rollback purchase 分支口径同步压降
+    # remaining_qty / purchase_qty（详见 services/batch.py 注释），
+    # 优先按本采购项入库时的 batch_label 精确命中。
+    purchase_record = (
+        await db.get(InventoryRecord, item.inventory_record_id)
+        if item.inventory_record_id
+        else None
+    )
+    await reduce_batches_on_purchase_return(
+        db,
+        merchant.id,
+        item.product_id,
+        return_qty,
+        batch_label=purchase_record.batch_label if purchase_record else None,
+        sku_id=item.sku_id,
+    )
+
+    # F2: Offset payable — reconcile the original purchase-direction SupplierPayable
+    # instead of inserting a bare payment row that leaves settled_amount stale.
+    if body.offset_payable and item.supplier_id and return_amount > 0:
+        # Find purchase-direction payables for this supplier + list that still
+        # carry an outstanding balance.
+        purchase_payables = (
+            (
+                await db.execute(
+                    select(SupplierPayable)
+                    .where(
+                        SupplierPayable.merchant_id == merchant.id,
+                        SupplierPayable.supplier_id == item.supplier_id,
+                        SupplierPayable.purchase_list_id == item.list_id,
+                        SupplierPayable.direction == "purchase",
+                    )
+                    .order_by(SupplierPayable.created_at, SupplierPayable.id)
+                    .with_for_update()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        payable_ids = [
+            p.id for p in purchase_payables if (p.amount - (p.settled_amount or Decimal("0"))) > 0
+        ]
+
+        if payable_ids:
+            # Reuse the payment reconciliation logic — it creates the payment
+            # row, increases settled_amount on the purchase rows, and syncs the
+            # PurchaseList payment status. This keeps supplier_balance and
+            # remaining_total consistent.
+            await record_supplier_payment(
+                db,
                 merchant_id=merchant.id,
                 supplier_id=item.supplier_id,
-                direction="payment",  # 退货 = 减少应付，等同于付款方向
+                payable_ids=payable_ids,
                 amount=return_amount,
-                purchase_list_id=item.list_id,
                 note=f"退货抵扣: {body.reason}",
-                settled=True,
-                idempotency_key=f"purchase-return-payable:{item.id}",
+                idempotency_key=short_idem_key("purchase-return-payable", item.id, prior_returned),
             )
-        )
+        else:
+            # No outstanding purchase payable to offset (e.g. already fully paid
+            # or item has no linked payable) — record a standalone payment so the
+            # supplier balance still reflects the refund.
+            db.add(
+                SupplierPayable(
+                    merchant_id=merchant.id,
+                    supplier_id=item.supplier_id,
+                    direction="payment",
+                    amount=return_amount,
+                    purchase_list_id=item.list_id,
+                    note=f"退货抵扣: {body.reason}",
+                    settled=True,
+                    idempotency_key=short_idem_key(
+                        "purchase-return-payable", item.id, prior_returned
+                    ),
+                )
+            )
 
     item.returned_qty = (item.returned_qty or Decimal("0")) + return_qty
     remaining = (item.accepted_qty or item.actual_qty) - (item.returned_qty or Decimal("0"))
@@ -1127,38 +1190,6 @@ async def return_purchase_item(
 
 
 # ---------------------------------------------------------------------------
-# 取消采购单
-# ---------------------------------------------------------------------------
-
-
-@router.post("/{list_id}/cancel", response_model=AnyResponse)
-async def cancel_purchase_list(
-    list_id: uuid.UUID,
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    query = select(PurchaseList).where(PurchaseList.id == list_id)
-    result = await db.execute(query)
-    plist = result.scalar_one_or_none()
-    if plist is None or plist.merchant_id != merchant.id:
-        raise HTTPException(status_code=404, detail="采购清单不存在")
-    if plist.status in ("stored", "completed"):
-        raise HTTPException(status_code=400, detail="已入库的清单不能取消")
-
-    plist.status = "cancelled"
-    items_query = select(PurchaseItem).where(
-        PurchaseItem.list_id == list_id,
-        PurchaseItem.status == "pending",
-    )
-    items_result = await db.execute(items_query)
-    for item in items_result.scalars().all():
-        item.status = "cancelled"
-
-    await db.commit()
-    return {"code": 0, "message": "采购清单已取消"}
-
-
-# ---------------------------------------------------------------------------
 # Legacy: 直接确认采购（跳过验收，兼容旧流程）
 # ---------------------------------------------------------------------------
 
@@ -1174,11 +1205,17 @@ async def confirm_purchase(
 
     New integrations should use /acceptance followed by /acceptance/confirm.
     """
-    list_query = select(PurchaseList).where(PurchaseList.id == list_id)
+    # 行锁 + 已入库状态检查：防并发双 confirm 双重入库，以及重复 confirm
+    # 把 total_actual_cost 清零、重复写审计日志的旧缺陷。
+    list_query = select(PurchaseList).where(PurchaseList.id == list_id).with_for_update()
     list_result = await db.execute(list_query)
     plist = list_result.scalar_one_or_none()
     if plist is None or plist.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="采购清单不存在")
+    if plist.status in ("stored", "completed"):
+        raise HTTPException(
+            status_code=409, detail=f"采购清单已确认入库，请勿重复确认，当前状态: {plist.status}"
+        )
 
     all_items_query = select(PurchaseItem).where(PurchaseItem.list_id == list_id)
     all_items = (await db.execute(all_items_query)).scalars().all()
@@ -1215,6 +1252,7 @@ async def confirm_purchase(
             event_time=now,
             source="purchase_list",
             batch_label=batch_label,
+            idempotency_key=_purchase_inventory_idem_key(plist.id, item.id),
         )
         db.add(record)
         await db.flush()
@@ -1234,7 +1272,7 @@ async def confirm_purchase(
         item.status = "purchased"
         item.purchased_at = now
 
-        idem_key = f"purchase:{plist.id}:{item.id}"
+        idem_key = short_idem_key("purchase-payable", plist.id, item.id)
         await record_supplier_payable_from_purchase(db, plist, item, idempotency_key=idem_key)
 
         if item.recommendation_id:
@@ -1294,6 +1332,19 @@ def _fmt_q(value) -> str:
     if value is None:
         return "?"
     return str(float(value))
+
+
+def _purchase_inventory_idem_key(plist_id: uuid.UUID, item_id: uuid.UUID) -> str:
+    """采购确认产生的库存流水幂等键（跨端/重试兜底）。
+
+    源串 "purchase-accept:{list_id}:{item_id}" 长 89 字符，超出
+    inventory_records.idempotency_key 的 VARCHAR(64) 列宽（PG 会直接拒写），
+    故对源串取 sha256 前 40 位压缩为 56 字符：同一条 (list, item) 永远
+    得到同一个键，(merchant_id, idempotency_key) 唯一约束即可拦截重复入库。
+    legacy /confirm 与 /acceptance/confirm 共用同一键空间，互相兜底。
+    """
+    digest = hashlib.sha256(f"purchase-accept:{plist_id}:{item_id}".encode()).hexdigest()[:40]
+    return f"purchase-accept:{digest}"
 
 
 def _gen_order_no(plist: PurchaseList) -> str:

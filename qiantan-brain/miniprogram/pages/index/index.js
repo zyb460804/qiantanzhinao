@@ -2,6 +2,7 @@
 var app = getApp();
 var Theme = require('../../utils/theme');
 var invStatus = require('../../utils/inventory-status');
+var PushRules = require('../../utils/push-rules');
 var CACHE_KEY = 'homeCache';
 var CACHE_TTL = 300000; // 缓存有效期 5 分钟
 
@@ -48,6 +49,7 @@ Page({
     }
 
     this.loadWeather();
+    this._loadYdayTrend();
   },
 
   onReady: function () {
@@ -74,6 +76,36 @@ Page({
     this.setData({ showSkeleton: true, staleData: false });
     this._fetchRemote(true, function () { wx.stopPullDownRefresh(); });
     this.loadWeather();
+    this._loadYdayTrend();
+  },
+
+  /* ── 较昨日趋势（昨日营收来自 /reports/daily，与"我的"页同源）── */
+
+  _loadYdayTrend: function () {
+    var self = this;
+    app.request({ url: '/reports/daily' }).then(function (d) {
+      self._ydayRevenue = Number(d && d.yesterday_revenue) || 0;
+      self._renderYdayTrend();
+    }).catch(function () { /* 趋势缺失不影响首屏其余内容 */ });
+  },
+
+  /** 今日数字每次刷新后重算趋势；昨日无数据时不展示 */
+  _renderYdayTrend: function () {
+    var yday = this._ydayRevenue || 0;
+    var today = Number(this.data.todayRevenue) || 0;
+    var patch;
+    if (yday > 0) {
+      var pct = Math.round((today - yday) / yday * 100);
+      patch = {
+        ydayDir: pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat'),
+        ydayText: (pct > 0 ? '+' : '') + pct + '%',
+      };
+    } else if (today > 0) {
+      patch = { ydayDir: 'flat', ydayText: '昨日无账' };
+    } else {
+      patch = { ydayDir: '', ydayText: '' };
+    }
+    this.setData(patch);
   },
 
   applySkin: function (skin) {
@@ -176,7 +208,7 @@ Page({
     items.forEach(function (item) {
       var qty = invStatus.resolveQty(item);
       if (invStatus.isInStock(qty)) inStock += 1;
-      if (invStatus.isLowStock(qty)) low += 1;
+      if (invStatus.isLowStock(qty, invStatus.resolveThreshold(item))) low += 1;
     });
 
     var recent = [];
@@ -191,6 +223,9 @@ Page({
         return copy;
       });
     }
+
+    // 保存最近一次成功渲染的原始数据，供天气异步返回后重建待办（降雨规则需要 weather）
+    this._lastData = { db: db, items: items, recent: recent };
 
     var tasks = this._rebuildTasks(db, items, recent);
 
@@ -216,7 +251,10 @@ Page({
       recentRecords: recent, todayTasks: tasks,
     });
 
-    this.setData(patch, function () { self._updateRiskLevel(); });
+    this.setData(patch, function () {
+      self._updateRiskLevel();
+      self._renderYdayTrend();
+    });
   },
 
   /** 从缓存快速恢复页面内容 */
@@ -234,7 +272,10 @@ Page({
       lowStockCount: cached.lowStockCount || 0,
       recentRecords: cached.recentRecords || [],
       todayTasks: cached.todayTasks || [],
-    }, function () { self._updateRiskLevel(); });
+    }, function () {
+      self._updateRiskLevel();
+      self._renderYdayTrend();
+    });
   },
 
   _updateRiskLevel: function () {
@@ -246,34 +287,33 @@ Page({
     this.setData({ riskLevel: level, riskColor: color });
   },
 
-  _rebuildTasks: function (db, items, recent) {
+  /** 待办卡片：消费统一规则引擎 utils/push-rules（与参谋页同源），仅做 index 版样式映射 */
+  _rebuildTasks: function (db, items, recent, weather) {
     if (!db) {
       if (!recent) return [];
       return [{ id: 'partial', tone: 'normal', glyph: '记', title: '部分数据加载失败', desc: '请下拉刷新获取最新经营数据。', action: '下拉刷新', route: '' }];
     }
-    var tasks = [];
-    var exp = Number(db.expiring_count) || 0;
-    if (exp > 0) {
-      tasks.push({ id: 'expiry', tone: 'danger', glyph: '临', title: exp + ' 个临期批次待处理', desc: '先查看临期商品，再决定促销、退货或报损。', action: '查看库存', route: 'inventory' });
-    }
-    var lowCount = 0;
-    (items || []).forEach(function (item) {
-      if (invStatus.isLowStock(invStatus.resolveQty(item))) lowCount++;
+    var cards = PushRules.buildPushCards({
+      dashboard: db,
+      inventory: items,
+      weather: weather || this.data.weather || null,
+      recentCount: recent.length,
     });
-    if (lowCount > 0) {
-      tasks.push({ id: 'low', tone: 'warn', glyph: '补', title: lowCount + ' 个品类余量较少', desc: '数量提示不等于必须补货，建议结合销量和明日客流判断。', action: '查看建议', route: 'advisor' });
-    }
-    var risk = Number(db.risk_score) || 0;
-    if (risk >= 60) {
-      tasks.push({ id: 'risk', tone: 'warn', glyph: '险', title: '经营风险分偏高', desc: '打开经营镜像，查看风险来自库存、现金流还是客流波动。', action: '查看原因', route: 'dashboard' });
-    }
-    if (recent.length === 0) {
-      tasks.push({ id: 'record', tone: 'normal', glyph: '记', title: '今天还没有经营流水', desc: '先记进货、销售或损耗，后续利润和库存才会准确。', action: '记一笔', route: 'voice' });
-    }
+    var tasks = cards.map(function (c) {
+      return {
+        id: c.id,
+        tone: c.severity === 'info' ? 'normal' : c.severity,
+        glyph: c.glyph,
+        title: c.title,
+        desc: c.desc,
+        action: c.action,
+        route: c.route,
+      };
+    });
     if (tasks.length === 0) {
       tasks.push({ id: 'steady', tone: 'good', glyph: '稳', title: '当前没有紧急待办', desc: '经营状态平稳，可以查看今日建议安排下一轮进货。', action: '看建议', route: 'advisor' });
     }
-    return tasks.slice(0, 3);
+    return tasks.slice(0, PushRules.MAX_CARDS);
   },
 
   handleTask: function (e) {
@@ -286,17 +326,19 @@ Page({
   loadWeather: function () {
     var self = this;
     var city = app.getCity();
-    app.request({ url: '/env/today', data: { city: city } }).then(function (d) { self.setData({ weather: d }); }).catch(function () {});
+    app.request({ url: '/env/today', data: { city: city } }).then(function (d) {
+      self.setData({ weather: d });
+      // 天气晚于经营数据返回时，用最新天气重建待办（降雨预警规则依赖 weather）
+      var last = self._lastData;
+      if (last && last.db) {
+        self.setData({ todayTasks: self._rebuildTasks(last.db, last.items, last.recent, d) });
+      }
+    }).catch(function () {});
   },
 
+  // ── 页面导航（v3.3 收敛：删除 8+ 项工具跳转，只保留两大高频动作与页面内既有入口）──
   navigateToVoice: function () { wx.switchTab({ url: '/pages/voice/voice' }); },
+  navigateToWaste: function () { wx.navigateTo({ url: '/pages/ops/ops?tab=waste' }); },
   navigateToInventory: function () { wx.switchTab({ url: '/pages/inventory/inventory' }); },
-  navigateToVision: function () { wx.navigateTo({ url: '/pages/vision/vision' }); },
-  navigateToStocktake: function () { wx.navigateTo({ url: '/pages/stocktake/stocktake' }); },
-  navigateToReport: function () { wx.navigateTo({ url: '/pages/report/report' }); },
-  navigateToPurchase: function () { wx.navigateTo({ url: '/pages/purchase/purchase' }); },
   navigateToAdvisor: function () { wx.switchTab({ url: '/pages/advisor/advisor' }); },
-  navigateToDashboard: function () { wx.navigateTo({ url: '/pages/dashboard/dashboard' }); },
-  navigateToPos: function () { wx.navigateTo({ url: '/pages/pos/pos' }); },
-  navigateToSandbox: function () { wx.navigateTo({ url: '/pages/sandbox/sandbox' }); },
 });

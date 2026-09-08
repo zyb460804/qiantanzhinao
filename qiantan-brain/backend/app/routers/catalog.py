@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant
@@ -26,9 +27,23 @@ from app.models.catalog import (
 )
 from app.models.merchant import Merchant
 from app.schemas.common import AnyResponse
+from app.services.supplier_scoring import calculate_supplier_score
 
 
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
+
+# P2-9：新商户单位字典为空时的内置常用单位兜底（只读引导，unit_id 为空表示未建档）。
+BUILT_IN_UNITS = (
+    ("斤", "斤"),
+    ("公斤", "公斤"),
+    ("克", "克"),
+    ("份", "份"),
+    ("箱", "箱"),
+    ("袋", "袋"),
+    ("个", "个"),
+    ("根", "根"),
+    ("把", "把"),
+)
 
 
 def _d(v) -> Decimal:
@@ -79,6 +94,39 @@ async def list_skus(
     }
 
 
+async def _conversion_hint(
+    db: AsyncSession, merchant_id: uuid.UUID, sku: ProductSKU, body: dict
+) -> dict | None:
+    """主（采购）单位 ≠ 账本基准单位时的引导性提示 — 只读建议，不强制。
+
+    优先取请求里的 primary_unit（采购主单位）；未提供时回退到商户单位
+    字典中 is_base 的基础单位。两者与 canonical_unit 相同则不打扰用户。
+    """
+    from_unit = (body.get("primary_unit") or "").strip() or None
+    if from_unit is None:
+        from_unit = await db.scalar(
+            select(Unit.code)
+            .where(
+                Unit.merchant_id == merchant_id,
+                Unit.is_base == True,  # noqa: E712
+            )
+            .order_by(Unit.code)
+            .limit(1)
+        )
+    if not from_unit or from_unit == sku.canonical_unit:
+        return None
+    return {
+        "need_conversion": True,
+        "from_unit": from_unit,
+        "to_unit": sku.canonical_unit,
+        "message": (
+            f"采购主单位「{from_unit}」与账本基准单位「{sku.canonical_unit}」不同，"
+            "建议设置换算（POST /api/v1/catalog/unit-conversions），"
+            "否则整件入账无法自动折算为基准单位"
+        ),
+    }
+
+
 @router.post("/skus", response_model=AnyResponse)
 async def create_sku(
     body: dict,
@@ -88,20 +136,39 @@ async def create_sku(
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="商品名称不能为空")
+    # P2-1 修复：名称长度上限（此前 200 字名称可直接落库撑爆列表/卡片）。
+    if len(name) > 50:
+        raise HTTPException(status_code=422, detail="商品名称不能超过 50 个字")
+    # P1-5 修复：售价上下限（此前 -1 与 1e13 均落库成功）。
+    sale_price = body.get("default_sale_price")
+    if sale_price is not None and sale_price != "":
+        sale_price = Decimal(str(sale_price))
+        if not (Decimal("0") <= sale_price <= Decimal("1000000")):
+            raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
+    else:
+        sale_price = None
     sku = ProductSKU(
         merchant_id=merchant.id,
         name=name,
         category_group=body.get("category_group"),
         canonical_unit=body.get("canonical_unit", "斤"),
         shelf_life_hours=body.get("shelf_life_hours", 72),
-        default_sale_price=Decimal(str(body["default_sale_price"]))
-        if body.get("default_sale_price")
-        else None,
+        default_sale_price=sale_price,
     )
     db.add(sku)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        # uq_active_sku_name_per_merchant：同商户活跃同名 SKU 重复
+        # （并发创建越过应用层检查时由 DB 约束兜底）。
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="商品已存在") from e
     await db.refresh(sku)
-    return {"code": 0, "data": {"sku_id": str(sku.id), "name": sku.name}}
+    data = {"sku_id": str(sku.id), "name": sku.name}
+    hint = await _conversion_hint(db, merchant.id, sku, body)
+    if hint:
+        data["unit_conversion_hint"] = hint
+    return {"code": 0, "data": data}
 
 
 @router.put("/skus/{sku_id}", response_model=AnyResponse)
@@ -117,13 +184,22 @@ async def update_sku(
     for field in ("name", "category_group", "canonical_unit"):
         if field in body:
             setattr(sku, field, body[field])
+    # P2-1：更新路径同样限制名称长度
+    if sku.name and len(sku.name) > 50:
+        raise HTTPException(status_code=422, detail="商品名称不能超过 50 个字")
     if "shelf_life_hours" in body:
         sku.shelf_life_hours = int(body["shelf_life_hours"])
     if "default_sale_price" in body:
         old_price = sku.default_sale_price
-        new_price = Decimal(str(body["default_sale_price"]))
+        raw_price = body["default_sale_price"]
+        new_price = None
+        if raw_price is not None and raw_price != "":
+            new_price = Decimal(str(raw_price))
+            # P1-5：更新路径（含 POS 改价）同样拒绝越界售价
+            if not (Decimal("0") <= new_price <= Decimal("1000000")):
+                raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
         sku.default_sale_price = new_price
-        if old_price and old_price != new_price:
+        if old_price and new_price is not None and old_price != new_price:
             db.add(
                 PriceHistory(
                     merchant_id=merchant.id,
@@ -317,6 +393,21 @@ async def list_units(
         .scalars()
         .all()
     )
+    if not units:
+        # P2-9 修复：空字典时返回内置常用单位，单位选择不再面对空列表。
+        return {
+            "code": 0,
+            "data": [
+                {
+                    "unit_id": None,
+                    "code": code,
+                    "name": name,
+                    "kind": "built_in",
+                    "is_base": code == "斤",
+                }
+                for code, name in BUILT_IN_UNITS
+            ],
+        }
     return {
         "code": 0,
         "data": [
@@ -1006,10 +1097,22 @@ async def add_supplier_product(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 归属校验：供应商和 SKU 必须属于当前商户，防止跨租户串写关联。
+    supplier = await db.get(Supplier, supplier_id)
+    if not supplier or supplier.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="供应商不存在")
+    try:
+        sku_uuid = uuid.UUID(body["sku_id"])
+    except (KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="sku_id 缺失或格式错误") from exc
+    sku = await db.get(ProductSKU, sku_uuid)
+    if not sku or sku.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="SKU不存在")
+
     sp = SupplierProduct(
         merchant_id=merchant.id,
         supplier_id=supplier_id,
-        sku_id=uuid.UUID(body["sku_id"]),
+        sku_id=sku_uuid,
         last_price=Decimal(str(body["last_price"])) if body.get("last_price") else None,
         min_order_qty=Decimal(str(body["min_order_qty"])) if body.get("min_order_qty") else None,
     )
@@ -1101,105 +1204,27 @@ async def recalculate_supplier_score(
 ):
     """Auto-calculate supplier quality metrics from purchase acceptance history.
 
-    Analyzes all purchase items for this supplier to compute:
-    - shortage_rate: (sum shortage_qty / sum expected_qty) × 100
-    - return_rate: (sum returned_qty / sum expected_qty) × 100
-    - quality_issue_rate: (count quality_ok=false / total accepted) × 100
-    - on_time_rate: estimated from delivery timeliness (simplified)
-    - composite_score: weighted average
-      (100 - shortage×0.25 - return×0.25 - quality×0.35 - late×0.15)
-    - total_orders: count of distinct purchase lists
+    Scoring algorithm is implemented once in app.services.supplier_scoring.
     """
-    from app.models.purchase import PurchaseItem
-
     supplier = await db.get(Supplier, supplier_id)
     if not supplier or supplier.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="供应商不存在")
 
-    # Get all purchase items for this supplier
-    items = (
-        (
-            await db.execute(
-                select(PurchaseItem).where(
-                    PurchaseItem.merchant_id == merchant.id,
-                    PurchaseItem.supplier_id == supplier_id,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-    if not items:
+    score = await calculate_supplier_score(db, merchant.id, supplier_id)
+    if score is None:
         return {
             "code": 0,
             "message": "该供应商暂无采购记录，无法评分",
             "data": {"supplier_id": str(supplier_id), "score": None},
         }
 
-    # Count distinct purchase lists
-    list_ids = set(item.list_id for item in items if item.list_id)
-
-    total_expected = Decimal("0")
-    total_shortage = Decimal("0")
-    total_returned = Decimal("0")
-    total_damaged = Decimal("0")
-    accepted_count = 0
-    quality_ok_count = 0
-    late_count = 0
-
-    for item in items:
-        qty = item.actual_qty or Decimal("0")
-        if qty > 0:
-            total_expected += qty
-        shortage = item.shortage_qty or Decimal("0")
-        if shortage > 0:
-            total_shortage += shortage
-        returned = item.returned_qty or Decimal("0")
-        if returned > 0:
-            total_returned += returned
-        damaged = item.damaged_qty or Decimal("0")
-        if damaged > 0:
-            total_damaged += damaged
-        if item.accepted_at is not None:
-            accepted_count += 1
-            if item.quality_ok:
-                quality_ok_count += 1
-        # Late delivery: simplified heuristic (arrival > expected lead time)
-        if item.accepted_at and item.status == "accepted":
-            # This is simplified; real implementation would compare
-            # PurchaseList.expected_arrival vs actual acceptance date
-            pass
-
-    # Calculate rates (0-100)
-    shortage_rate = (total_shortage / total_expected * 100) if total_expected > 0 else Decimal("0")
-    return_rate = (total_returned / total_expected * 100) if total_expected > 0 else Decimal("0")
-    quality_issue_rate = (
-        Decimal("100") - (Decimal(str(quality_ok_count)) / Decimal(str(accepted_count)) * 100)
-        if accepted_count > 0
-        else Decimal("0")
-    )
-    on_time_rate = Decimal("100")  # Default 100%, adjusted if late deliveries detected
-    if accepted_count > 0 and late_count > 0:
-        on_time_rate = Decimal("100") - (
-            Decimal(str(late_count)) / Decimal(str(accepted_count)) * Decimal("100")
-        )
-
-    # Composite score (0-100, higher = better)
-    composite = Decimal("100")
-    composite -= shortage_rate * Decimal("0.25")
-    composite -= return_rate * Decimal("0.25")
-    composite -= quality_issue_rate * Decimal("0.35")
-    composite -= (Decimal("100") - on_time_rate) * Decimal("0.15")
-    composite = max(Decimal("0"), min(Decimal("100"), composite))
-
     # Update supplier record
-    supplier.shortage_rate = shortage_rate.quantize(Decimal("0.01"))
-    supplier.return_rate = return_rate.quantize(Decimal("0.01"))
-    supplier.quality_issue_rate = quality_issue_rate.quantize(Decimal("0.01"))
-    supplier.on_time_rate = on_time_rate.quantize(Decimal("0.01"))
-    supplier.composite_score = composite.quantize(Decimal("0.01"))
-    supplier.total_orders = len(list_ids)
+    supplier.shortage_rate = score.shortage_rate.quantize(Decimal("0.01"))
+    supplier.return_rate = score.return_rate.quantize(Decimal("0.01"))
+    supplier.quality_issue_rate = score.quality_issue_rate.quantize(Decimal("0.01"))
+    supplier.on_time_rate = score.on_time_rate.quantize(Decimal("0.01"))
+    supplier.composite_score = score.composite_score.quantize(Decimal("0.01"))
+    supplier.total_orders = score.total_orders
 
     from app.models.audit import AuditLog
 
@@ -1210,12 +1235,12 @@ async def recalculate_supplier_score(
             target_table="suppliers",
             target_id=str(supplier.id),
             after_data={
-                "composite_score": float(composite),
-                "shortage_rate": float(shortage_rate),
-                "return_rate": float(return_rate),
-                "quality_issue_rate": float(quality_issue_rate),
-                "on_time_rate": float(on_time_rate),
-                "total_orders": len(list_ids),
+                "composite_score": float(score.composite_score),
+                "shortage_rate": float(score.shortage_rate),
+                "return_rate": float(score.return_rate),
+                "quality_issue_rate": float(score.quality_issue_rate),
+                "on_time_rate": float(score.on_time_rate),
+                "total_orders": score.total_orders,
             },
             operator="merchant",
         )
@@ -1228,14 +1253,14 @@ async def recalculate_supplier_score(
         "data": {
             "supplier_id": str(supplier_id),
             "supplier_name": supplier.name,
-            "composite_score": float(composite),
-            "shortage_rate": float(shortage_rate),
-            "return_rate": float(return_rate),
-            "quality_issue_rate": float(quality_issue_rate),
-            "on_time_rate": float(on_time_rate),
-            "total_orders": len(list_ids),
-            "total_expected_qty": float(total_expected),
-            "total_shortage_qty": float(total_shortage),
-            "total_returned_qty": float(total_returned),
+            "composite_score": float(score.composite_score),
+            "shortage_rate": float(score.shortage_rate),
+            "return_rate": float(score.return_rate),
+            "quality_issue_rate": float(score.quality_issue_rate),
+            "on_time_rate": float(score.on_time_rate),
+            "total_orders": score.total_orders,
+            "total_expected_qty": float(score.total_expected),
+            "total_shortage_qty": float(score.total_shortage),
+            "total_returned_qty": float(score.total_returned),
         },
     }

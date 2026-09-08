@@ -6,15 +6,19 @@ merchant-facing reports with clear calculation logic.
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import date, timedelta
 from typing import Literal, TypedDict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_merchant_id
-from app.core.timezone import local_days_ago, local_now, local_today_start, utc_now, utc_today_start
+from app.core.timezone import (
+    cst_day_bounds_utc,
+    cst_days_ago_bounds_utc,
+    cst_today,
+)
 from app.database import get_db
 from app.models.batch import BatchLifecycle
 from app.models.inventory import InventoryRecord
@@ -51,10 +55,12 @@ class ProductRankingRow(TypedDict):
 
 
 def _date_range(days: int):
-    """Return (start, end) for the last N days (local time, used for event_time)."""
-    end = local_now()
-    start = end - timedelta(days=days)
-    return start, end
+    """Return (start, end) for the last N CST business days, as naive UTC.
+
+    event_time 在 DB 中为 naive UTC，日界按 CST 业务日切（审计 C4），
+    否则 CST 凌晨 0-8 点的销售会被归入前一天。
+    """
+    return cst_days_ago_bounds_utc(days)
 
 
 async def _estimate_cogs(
@@ -82,7 +88,7 @@ async def _estimate_cogs(
             unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
 
     if unknown_products:
-        cutoff = local_days_ago(cutoff_days)
+        cutoff = cst_days_ago_bounds_utc(cutoff_days)[0]
         cost_query = (
             select(
                 InventoryRecord.product_id,
@@ -109,23 +115,35 @@ async def _estimate_cogs(
 
 @router.get("/daily", response_model=AnyResponse)
 async def daily_report(
+    date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Daily business report — revenue, cost, profit, top products, AI summary."""
-    today_start_local = local_today_start()
-    yesterday_start_local = today_start_local - timedelta(days=1)
+    """Daily business report — revenue, cost, profit, top products, AI summary.
 
-    # --- Today's records (event_time is in local time) ---
+    date 不传（None）= CST 业务「今天」；传历史日期返回该业务日快照
+    （语音数/建议采纳/临期参考点同样随目标日平移到该日的 CST 日界内）。
+    非法日期由 FastAPI 参数解析自动 422。
+    """
+    target_day = date or cst_today()
+    day_label = "今日" if target_day == cst_today() else f"{target_day.month}月{target_day.day}日"
+    today_start, today_end = cst_day_bounds_utc(target_day)
+    yesterday_start = cst_day_bounds_utc(target_day - timedelta(days=1))[0]
+
+    # --- Target day's records (event_time is naive UTC; day boundary is CST) ---
     today_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
-        InventoryRecord.event_time >= today_start_local,
+        InventoryRecord.event_time >= today_start,
+        InventoryRecord.event_time < today_end,
     )
     today_result = await db.execute(today_query)
     today_records = today_result.scalars().all()
 
     revenue = sum(float(r.total_amount or 0) for r in today_records if r.event_type == "sale")
+    # P2-5 口径统一：退款（event_type='refund'）从营收中扣除 —— 与 POS 日结
+    # total_sales（订单 total - refunded）一致；此前日报不扣退款，两页数字打架。
+    revenue -= sum(float(r.total_amount or 0) for r in today_records if r.event_type == "refund")
     cost = sum(float(r.total_amount or 0) for r in today_records if r.event_type == "purchase")
     estimated_cogs = await _estimate_cogs(db, merchant_id, today_records)
     estimated_gross_profit = revenue - estimated_cogs
@@ -142,8 +160,8 @@ async def daily_report(
     yesterday_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
-        InventoryRecord.event_time >= yesterday_start_local,
-        InventoryRecord.event_time < today_start_local,
+        InventoryRecord.event_time >= yesterday_start,
+        InventoryRecord.event_time < today_start,
     )
     yesterday_result = await db.execute(yesterday_query)
     yesterday_records = yesterday_result.scalars().all()
@@ -155,22 +173,23 @@ async def daily_report(
     if yesterday_revenue > 0:
         revenue_change = round((revenue - yesterday_revenue) / yesterday_revenue * 100, 1)
 
-    # --- Voice count today (created_at is UTC) ---
-    today_start_utc = utc_today_start()
+    # --- Voice count for the target CST business day (created_at is naive UTC) ---
     voice_query = select(func.count(VoiceLog.id)).where(
         VoiceLog.merchant_id == merchant_id,
-        VoiceLog.created_at >= today_start_utc,
+        VoiceLog.created_at >= today_start,
+        VoiceLog.created_at < today_end,
     )
     voice_result = await db.execute(voice_query)
     voice_count = int(voice_result.scalar() or 0)
 
-    # --- Expiring count ---
+    # --- Expiring count（参考点 = 目标业务日结束后 24h，随 date 参数平移；
+    #     不传 date 时等价于原 utc_now()+24h 的日界化版本）---
     expiring_query = select(func.count(BatchLifecycle.id)).where(
         BatchLifecycle.merchant_id == merchant_id,
         BatchLifecycle.remaining_qty > 0,
         BatchLifecycle.status != "spoiled",
         BatchLifecycle.expiry_date.isnot(None),
-        BatchLifecycle.expiry_date <= utc_now() + timedelta(hours=24),
+        BatchLifecycle.expiry_date <= today_end + timedelta(hours=24),
     )
     expiring_result = await db.execute(expiring_query)
     expiring_count = int(expiring_result.scalar() or 0)
@@ -225,11 +244,11 @@ async def daily_report(
                 }
             )
 
-    # --- Recommendation adoption ---
-    today_start_utc = utc_today_start()
+    # --- Recommendation adoption (target CST business day) ---
     rec_query = select(Recommendation).where(
         Recommendation.merchant_id == merchant_id,
-        Recommendation.created_at >= today_start_utc,
+        Recommendation.created_at >= today_start,
+        Recommendation.created_at < today_end,
     )
     rec_result = await db.execute(rec_query)
     recs = rec_result.scalars().all()
@@ -239,7 +258,7 @@ async def daily_report(
     # --- AI summary ---
     summary_parts = []
     if revenue > 0:
-        summary_parts.append(f"今日营业额{round(revenue, 1)}元")
+        summary_parts.append(f"{day_label}营业额{round(revenue, 1)}元")
     if estimated_gross_profit > 0:
         summary_parts.append(f"估算毛利{round(estimated_gross_profit, 1)}元")
     elif cash_balance > 0:
@@ -252,7 +271,7 @@ async def daily_report(
         elif revenue_change < 0:
             summary_parts.append(f"较昨日下降{abs(revenue_change)}%")
 
-    ai_summary = "，".join(summary_parts) + "。" if summary_parts else "今日暂无经营数据。"
+    ai_summary = "，".join(summary_parts) + "。" if summary_parts else f"{day_label}暂无经营数据。"
 
     # --- Action items for tomorrow ---
     action_items = []
@@ -262,13 +281,13 @@ async def daily_report(
         action_items.append(f"{item['product_name']}库存{item['stock_qty']}斤未售出，建议促销")
     if waste_amount > revenue * 0.1 and revenue > 0:
         action_items.append(
-            f"今日损耗率较高({round(waste_amount / revenue * 100, 1)}%)，建议减少进货量"
+            f"{day_label}损耗率较高({round(waste_amount / revenue * 100, 1)}%)，建议减少进货量"
         )
 
     return {
         "code": 0,
         "data": {
-            "date": local_now().date().isoformat(),
+            "date": target_day.isoformat(),
             "revenue": round(revenue, 2),
             "cost": round(cost, 2),
             "profit": round(profit, 2),
@@ -294,18 +313,28 @@ async def daily_report(
 
 @router.get("/weekly", response_model=AnyResponse)
 async def weekly_report(
+    end_date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Weekly report — 7-day trends, rankings, weather impact, health score."""
-    start_7d, end_now = _date_range(7)
-    start_14d = end_now - timedelta(days=14)
+    """Weekly report — 7-day trends, rankings, weather impact, health score.
+
+    end_date 不传 = 以 CST 今天为窗口最后一天；传历史日期则统计
+    [end_date-6, end_date] 共 7 个完整 CST 业务日，对比期为再往前 7 天。
+    """
+    anchor = end_date or cst_today()
+    start_7d = cst_day_bounds_utc(anchor - timedelta(days=6))[0]
+    # 窗口上界（含 anchor 全天）。默认 anchor=今天时与旧「无上界」等价；
+    # 历史 anchor 若不封上界，窗口之后的新记录会被错误计入。
+    end_7d = cst_day_bounds_utc(anchor)[1]
+    start_14d = cst_day_bounds_utc(anchor - timedelta(days=13))[0]
 
     # This week's records
     week_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
         InventoryRecord.event_time >= start_7d,
+        InventoryRecord.event_time < end_7d,
     )
     week_result = await db.execute(week_query)
     week_records = week_result.scalars().all()
@@ -335,11 +364,11 @@ async def weekly_report(
     if last_week_revenue > 0:
         revenue_change = round((week_revenue - last_week_revenue) / last_week_revenue * 100, 1)
 
-    # Daily trends
+    # Daily trends (per CST business day, anchored on end_date)
     daily_trends = []
     for i in range(7):
-        day_start = datetime.combine((end_now - timedelta(days=6 - i)).date(), datetime.min.time())
-        day_end = day_start + timedelta(days=1)
+        d = anchor - timedelta(days=6 - i)
+        day_start, day_end = cst_day_bounds_utc(d)
         day_sale_records = [
             r
             for r in week_records
@@ -356,7 +385,7 @@ async def weekly_report(
         day_customer_price = round(day_revenue / day_sale_count, 2) if day_sale_count > 0 else 0
         daily_trends.append(
             {
-                "date": day_start.date().isoformat(),
+                "date": d.isoformat(),
                 "revenue": round(day_revenue, 2),
                 "cost": round(day_cost, 2),
                 "profit": round(day_revenue - day_cost, 2),
@@ -411,10 +440,11 @@ async def weekly_report(
     ]
     waste_ranking = sorted(waste_rows, key=lambda row: row["amount"], reverse=True)[:10]
 
-    # Recommendation adoption rate
+    # Recommendation adoption rate (within the anchored 7-day window)
     rec_query = select(Recommendation).where(
         Recommendation.merchant_id == merchant_id,
         Recommendation.created_at >= start_7d,
+        Recommendation.created_at < end_7d,
     )
     rec_result = await db.execute(rec_query)
     recs = rec_result.scalars().all()
@@ -435,7 +465,8 @@ async def weekly_report(
     health = max(0, min(100, round(health)))
 
     # Weekly summary
-    summary = f"本周营业额{round(week_revenue, 1)}元"
+    period_label = "本周" if anchor == cst_today() else "近7日"
+    summary = f"{period_label}营业额{round(week_revenue, 1)}元"
     if revenue_change is not None:
         if revenue_change > 0:
             summary += f"，较上周增长{revenue_change}%"
@@ -474,11 +505,11 @@ async def weekly_report(
 @router.get("/trends", response_model=AnyResponse)
 async def trends_report(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
-    days: int = 7,
+    days: int = Query(default=7, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
 ):
     """Revenue and profit trends over N days."""
-    start, end = _date_range(days)
+    start, _end = _date_range(days)
 
     query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
@@ -492,7 +523,7 @@ async def trends_report(
     sale_products = {r.product_id for r in records if r.event_type == "sale"}
     avg_costs = {}
     if sale_products:
-        cutoff = local_days_ago(30)
+        cutoff = cst_days_ago_bounds_utc(30)[0]
         cost_query = (
             select(
                 InventoryRecord.product_id,
@@ -511,11 +542,10 @@ async def trends_report(
         avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
 
     trends = []
+    today = cst_today()
     for i in range(days):
-        day_start = datetime.combine(
-            (end - timedelta(days=days - 1 - i)).date(), datetime.min.time()
-        )
-        day_end = day_start + timedelta(days=1)
+        d = today - timedelta(days=days - 1 - i)
+        day_start, day_end = cst_day_bounds_utc(d)
         day_records = [r for r in records if day_start <= r.event_time < day_end]
         revenue = sum(float(r.total_amount or 0) for r in day_records if r.event_type == "sale")
         cost = sum(float(r.total_amount or 0) for r in day_records if r.event_type == "purchase")
@@ -528,7 +558,7 @@ async def trends_report(
         )
         trends.append(
             {
-                "date": day_start.date().isoformat(),
+                "date": d.isoformat(),
                 "revenue": round(revenue, 2),
                 "cost": round(cost, 2),
                 "profit": round(revenue - cost, 2),
@@ -544,12 +574,12 @@ async def trends_report(
 @router.get("/product-ranking", response_model=AnyResponse)
 async def product_ranking(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
-    days: int = 7,
+    days: int = Query(default=7, ge=1, le=365),
     metric: str = "revenue",
     db: AsyncSession = Depends(get_db),
 ):
     """Product ranking by revenue, sales volume, or waste."""
-    start, end = _date_range(days)
+    start, _end = _date_range(days)
 
     query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
@@ -616,24 +646,32 @@ async def product_ranking(
 
 @router.get("/monthly", response_model=AnyResponse)
 async def monthly_report(
+    end_date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Monthly report — 30-day trends, rankings, waste, health score, AI summary.
 
+    end_date 不传 = 以 CST 今天为 30 天滚动窗口最后一天；传历史日期则统计
+    [end_date-29, end_date] 共 30 个完整 CST 业务日，对比期为再往前 30 天。
+
     Unlike the frontend client-side aggregation fallback, this endpoint
     computes sales ranking, waste ranking, health score, and a data-driven
     AI summary server-side, giving the monthly tab the same depth as weekly.
     """
+    anchor = end_date or cst_today()
     days = 30
-    start, end = _date_range(days)
-    start_60d = end - timedelta(days=60)
+    start = cst_day_bounds_utc(anchor - timedelta(days=29))[0]
+    # 窗口上界（含 anchor 全天）：历史 anchor 不封上界会错计窗口后的新记录。
+    end_30d = cst_day_bounds_utc(anchor)[1]
+    start_60d = cst_day_bounds_utc(anchor - timedelta(days=59))[0]
 
     # This month's records
     month_query = select(InventoryRecord).where(
         InventoryRecord.merchant_id == merchant_id,
         InventoryRecord.is_voided == False,  # noqa: E712
         InventoryRecord.event_time >= start,
+        InventoryRecord.event_time < end_30d,
     )
     month_result = await db.execute(month_query)
     month_records = month_result.scalars().all()
@@ -661,28 +699,55 @@ async def monthly_report(
     if prev_revenue > 0:
         revenue_change = round((month_revenue - prev_revenue) / prev_revenue * 100, 1)
 
-    # Daily trends
+    # Pre-compute average purchase cost per product for daily COGS estimation.
+    # Uses 60-day window to match the aggregate _estimate_cogs cutoff above.
+    sale_products = {r.product_id for r in month_records if r.event_type == "sale"}
+    avg_costs = {}
+    if sale_products:
+        cutoff = cst_days_ago_bounds_utc(60)[0]
+        cost_query = (
+            select(
+                InventoryRecord.product_id,
+                func.avg(InventoryRecord.unit_cost).label("avg_cost"),
+            )
+            .where(
+                InventoryRecord.merchant_id == merchant_id,
+                InventoryRecord.is_voided == False,  # noqa: E712
+                InventoryRecord.event_type == "purchase",
+                InventoryRecord.unit_cost.isnot(None),
+                InventoryRecord.product_id.in_(sale_products),
+                InventoryRecord.event_time >= cutoff,
+            )
+            .group_by(InventoryRecord.product_id)
+        )
+        cost_result = await db.execute(cost_query)
+        avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
+
+    # Daily trends (per CST business day, anchored on end_date)
     daily_trends = []
     for i in range(days):
-        day_start = datetime.combine(
-            (end - timedelta(days=days - 1 - i)).date(), datetime.min.time()
-        )
-        day_end = day_start + timedelta(days=1)
+        d = anchor - timedelta(days=days - 1 - i)
+        day_start, day_end = cst_day_bounds_utc(d)
         day_records = [r for r in month_records if day_start <= r.event_time < day_end]
         day_sale_records = [r for r in day_records if r.event_type == "sale"]
         day_revenue = sum(float(r.total_amount or 0) for r in day_sale_records)
         day_cost = sum(
             float(r.total_amount or 0) for r in day_records if r.event_type == "purchase"
         )
+        # Per-day COGS: prefer actual FIFO unit_cost, fall back to 60-day avg.
+        # Matches _estimate_cogs semantics so daily gross profit is real, not zero.
         day_cogs = sum(
-            abs(float(r.quantity)) * 0 for r in day_sale_records
-        )  # COGS approximated at aggregate level
+            abs(float(r.quantity)) * float(r.unit_cost)
+            if r.unit_cost is not None
+            else abs(float(r.quantity)) * avg_costs.get(r.product_id, 0)
+            for r in day_sale_records
+        )
         # 客单价 = 当日营业额 / 当日销售笔数(与 /reports/trends 口径保持一致)
         day_sale_count = len(day_sale_records)
         day_customer_price = round(day_revenue / day_sale_count, 2) if day_sale_count > 0 else 0
         daily_trends.append(
             {
-                "date": day_start.date().isoformat(),
+                "date": d.isoformat(),
                 "revenue": round(day_revenue, 2),
                 "cost": round(day_cost, 2),
                 "profit": round(day_revenue - day_cost, 2),
@@ -738,10 +803,11 @@ async def monthly_report(
     ]
     waste_ranking = sorted(waste_rows, key=lambda row: row["amount"], reverse=True)[:10]
 
-    # Recommendation adoption
+    # Recommendation adoption (within the anchored 30-day window)
     rec_query = select(Recommendation).where(
         Recommendation.merchant_id == merchant_id,
         Recommendation.created_at >= start,
+        Recommendation.created_at < end_30d,
     )
     rec_result = await db.execute(rec_query)
     recs = rec_result.scalars().all()

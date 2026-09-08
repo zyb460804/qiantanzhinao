@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import func, select
 from tests.conftest import TEST_MERCHANT_ID
 
-from app.core.timezone import utc_now
+from app.core.timezone import local_now
 from app.models.payment import ChannelBillEntry, ChannelBillImport, ReconciliationTask
 from app.models.pos import Payment, SaleOrder
 
@@ -52,7 +52,7 @@ async def _seed_payment(
 
 
 async def _upload(client, content: str, *, channel: str = "wechat", name: str = "bill.csv"):
-    recon_date = utc_now().date().isoformat()
+    recon_date = local_now().date().isoformat()
     return await client.post(
         f"/api/v1/reconciliation/import/{recon_date}?channel={channel}",
         files={"file": (name, content.encode("utf-8-sig"), "text/csv")},
@@ -67,7 +67,7 @@ async def test_reconciliation_stays_pending_until_channel_bill_is_imported(clien
         transaction_id="wx-reconciliation-pending-001",
     )
 
-    recon_date = utc_now().date().isoformat()
+    recon_date = local_now().date().isoformat()
     response = await client.post(f"/api/v1/reconciliation/run/{recon_date}?channel=wechat")
     assert response.status_code == 200
     data = response.json()["data"]
@@ -259,14 +259,14 @@ async def test_provider_download_flows_into_import_and_matching(client, db_sessi
 
     async def fake_download(channel, bill_date):
         assert channel == "wechat"
-        assert bill_date == utc_now().date()
+        assert bill_date == local_now().date()
         return content
 
     monkeypatch.setattr(
         "app.routers.reconciliation.download_channel_bill",
         fake_download,
     )
-    recon_date = utc_now().date().isoformat()
+    recon_date = local_now().date().isoformat()
     response = await client.post(
         f"/api/v1/reconciliation/download/{recon_date}?channel=wechat"
     )

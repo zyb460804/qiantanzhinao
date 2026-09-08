@@ -8,15 +8,47 @@ Covers:
 """
 
 import uuid
+from datetime import UTC, datetime, time, timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 from tests.conftest import TEST_MERCHANT_ID
 
+from app.core.timezone import CST, cst_today
+from app.models.inventory import InventoryRecord
 from app.models.recommendation import Recommendation
 
 
 pytestmark = pytest.mark.asyncio
+
+
+async def _seed_three_days_of_ledger(db_session):
+    """播种 ≥3 个 CST 业务日的流水（触发冷启动阈值之上的正常建议路径）。
+
+    advice/daily 对记录不足 3 天的商户返回引导建议（不落库），见
+    tests/test_advice_cold_start.py。
+    """
+    mid = uuid.UUID(TEST_MERCHANT_ID)
+    today = cst_today()
+    async with db_session() as session:
+        for offset in (2, 1, 0):
+            session.add(
+                InventoryRecord(
+                    merchant_id=mid,
+                    product_id=1,
+                    quantity=Decimal("-5"),
+                    unit="斤",
+                    total_amount=Decimal("7.5"),
+                    event_type="sale",
+                    event_time=datetime.combine(
+                        today - timedelta(days=offset), time(10, 0), tzinfo=CST
+                    )
+                    .astimezone(UTC)
+                    .replace(tzinfo=None),
+                )
+            )
+        await session.commit()
 
 
 class TestSimulateWhatIf:
@@ -54,7 +86,7 @@ class TestSimulateWhatIf:
         assert "recommendation" in comp
 
     async def test_zero_purchase_no_crash(self, client):
-        """Zero purchase quantity should not crash the simulation."""
+        """P2-8：进货量 ≤0 直接 422 校验拒绝（不再算出垃圾结果，也不 500）。"""
         resp = await client.post(
             "/api/v1/simulate/what-if",
             json={
@@ -68,10 +100,21 @@ class TestSimulateWhatIf:
             },
         )
 
-        assert resp.status_code == 200
-        output = resp.json()["data"]["output"]
-        assert output["estimated_sales"] == 0
-        assert output["net_profit"] == 0
+        assert resp.status_code == 422
+
+        negative = await client.post(
+            "/api/v1/simulate/what-if",
+            json={
+                "merchant_id": TEST_MERCHANT_ID,
+                "product_id": 1,
+                "scenario": {
+                    "purchase_qty": -10,
+                    "unit_cost": 0.3,
+                    "unit_price": 1.5,
+                },
+            },
+        )
+        assert negative.status_code == 422
 
     async def test_monotonicity_more_purchase_more_waste(self, client):
         """Buying more → waste rate should not decrease (monotonicity check)."""
@@ -164,6 +207,8 @@ class TestAdviceDaily:
 
     async def test_recommendations_are_committed(self, client, db_session):
         """Returned recommendation IDs must remain available after request session closes."""
+        # 冷启动商户只返回引导不落库；先播种 3 天数据走正常建议路径
+        await _seed_three_days_of_ledger(db_session)
         resp = await client.get(
             "/api/v1/advice/daily",
             params={

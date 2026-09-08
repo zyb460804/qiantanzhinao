@@ -23,12 +23,16 @@ import api from '../api/client'
 import EmptyState from '../components/EmptyState'
 import { ErrorState } from '../components/EmptyState'
 import { SkeletonCard } from '../components/SkeletonCard'
+import ConfirmWithReason from '../components/ConfirmWithReason'
+import { PERMISSIONS, hasPermission } from '../permissions'
+import PermissionGate from '../permissions/PermissionGate'
+import { useAuth } from '../context/AuthContext'
 
 const statusColors = { trial: 'orange', active: 'green', suspended: 'red', expired: 'default' }
 
 // ── 顶部摘要 ──────────────────────────────────────────
 
-function TenantSummary({ tenant, loading }) {
+function TenantSummary({ tenant, loading, onSuspend, onResume }) {
   if (loading) return <SkeletonCard rows={2} />
   if (!tenant) return null
   return (
@@ -57,9 +61,32 @@ function TenantSummary({ tenant, loading }) {
         </Col>
         <Col>
           <Space>
-            <Button icon={<EditOutlined />} onClick={() => document.getElementById('tab-org')?.click()}>
-              编辑资料
-            </Button>
+            <PermissionGate permission={PERMISSIONS.TENANT_UPDATE}>
+              <Button icon={<EditOutlined />} onClick={() => document.getElementById('tab-org')?.click()}>
+                编辑资料
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission={PERMISSIONS.TENANT_SUSPEND}>
+              {tenant.status === 'suspended' ? (
+                <ConfirmWithReason
+                  title="恢复租户"
+                  description={`恢复租户「${tenant.name}」为正常状态`}
+                  impact="恢复后租户可继续使用平台服务，操作会记录审计日志。"
+                  onSubmit={onResume}
+                >
+                  <Button type="primary">恢复</Button>
+                </ConfirmWithReason>
+              ) : (
+                <ConfirmWithReason
+                  title="停用租户"
+                  description={`停用租户「${tenant.name}」`}
+                  impact="停用后租户将无法继续使用平台服务，操作会记录审计日志。"
+                  onSubmit={onSuspend}
+                >
+                  <Button danger>停用</Button>
+                </ConfirmWithReason>
+              )}
+            </PermissionGate>
           </Space>
         </Col>
       </Row>
@@ -69,7 +96,7 @@ function TenantSummary({ tenant, loading }) {
 
 // ── 概览 Tab ──────────────────────────────────────────
 
-function OverviewTab({ subscriptions, invoices, usage }) {
+function OverviewTab({ subscriptions, invoices, usage, canAudit }) {
   const sub = subscriptions?.[0]
   const overdueInvoices = invoices?.filter((i) => i.status === 'overdue') || []
   const availableTabs = [
@@ -78,8 +105,10 @@ function OverviewTab({ subscriptions, invoices, usage }) {
     { key: 'usage', label: '用量与配额', desc: `${usage?.quotas?.length || 0} 项指标` },
     { key: 'device', label: '设备与同步', desc: '设备状态与同步记录' },
     { key: 'ai', label: 'AI 使用', desc: 'AI 识别与建议统计' },
-    { key: 'risk', label: '风险与审计', desc: '审计与安全摘要' },
   ]
+  if (canAudit) {
+    availableTabs.push({ key: 'risk', label: '风险与审计', desc: '审计与安全摘要' })
+  }
 
   return (
     <Row gutter={[16, 16]}>
@@ -260,9 +289,11 @@ function OrgTab({ tenant, plans, onSave }) {
       id="tab-org"
       style={{ borderRadius: 10 }}
       extra={
-        <Button icon={<EditOutlined />} onClick={() => setEditing(true)}>
-          编辑
-        </Button>
+        <PermissionGate permission={PERMISSIONS.TENANT_UPDATE}>
+          <Button icon={<EditOutlined />} onClick={() => setEditing(true)}>
+            编辑
+          </Button>
+        </PermissionGate>
       }
     >
       <Descriptions column={2} bordered size="small">
@@ -381,7 +412,6 @@ function UsageTab({ usage, loading }) {
                       api_calls: 'API 调用数',
                       storage_mb: '存储 (MB)',
                       merchant_count: '商户数',
-                      voice_seconds: '语音 (秒)',
                     }[q.metric] || q.metric
                   }
                   value={q.current}
@@ -665,6 +695,8 @@ function RiskAuditTab({ tenantId: _tenantId }) {
 export default function TenantDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { admin } = useAuth()
+  const canAudit = hasPermission(PERMISSIONS.AUDIT_READ, admin?.role, admin?.permissions)
   const [tenant, setTenant] = useState(null)
   const [plans, setPlans] = useState([])
   const [subscriptions, setSubscriptions] = useState([])
@@ -707,6 +739,18 @@ export default function TenantDetail() {
     await fetchAll()
   }
 
+  const handleSuspend = async (_reason) => {
+    await api.put(`/tenants/${id}`, { status: 'suspended' })
+    message.success('租户已停用')
+    await fetchAll()
+  }
+
+  const handleResume = async (_reason) => {
+    await api.put(`/tenants/${id}`, { status: 'active' })
+    message.success('租户已恢复')
+    await fetchAll()
+  }
+
   if (error) {
     return (
       <div>
@@ -722,7 +766,9 @@ export default function TenantDetail() {
     {
       key: 'overview',
       label: '概览',
-      children: <OverviewTab subscriptions={subscriptions} invoices={invoices} usage={usage} />,
+      children: (
+        <OverviewTab subscriptions={subscriptions} invoices={invoices} usage={usage} canAudit={canAudit} />
+      ),
     },
     {
       key: 'org',
@@ -749,12 +795,15 @@ export default function TenantDetail() {
       label: 'AI 使用',
       children: <AIUsageTab tenantId={id} />,
     },
-    {
+  ]
+
+  if (canAudit) {
+    tabItems.push({
       key: 'risk',
       label: '风险与审计',
       children: <RiskAuditTab tenantId={id} />,
-    },
-  ]
+    })
+  }
 
   return (
     <div>
@@ -764,7 +813,12 @@ export default function TenantDetail() {
         </Button>
       </div>
 
-      <TenantSummary tenant={tenant} loading={loading} />
+      <TenantSummary
+        tenant={tenant}
+        loading={loading}
+        onSuspend={handleSuspend}
+        onResume={handleResume}
+      />
 
       <Card style={{ borderRadius: 10 }} bodyStyle={{ padding: '0 24px' }}>
         <Tabs

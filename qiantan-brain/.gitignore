@@ -59,3 +59,12 @@ htmlcov/
 # Admin web build artifacts
 backend/admin-web/dist/
 backend/admin-web/node_modules/
+
+# Repo hygiene (A8): generated / local-only artifacts, kept out of git
+# datasets/: synthetic placeholder data, not production-usable; regenerate via ml/prepare_dataset.py
+datasets/
+# reference/: offline-sync reference implementation, superseded by the live port in miniprogram/utils
+reference/
+# edge runtime state (edge_config.example.json stays tracked)
+edge/edge_data.db
+edge/edge_config.json

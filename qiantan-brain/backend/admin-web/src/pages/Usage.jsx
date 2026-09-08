@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Card, Row, Col, Statistic, Progress, Select, Button, Table, Space, Tag } from 'antd'
 import { ReloadOutlined, WarningOutlined } from '@ant-design/icons'
 import api from '../api/client'
@@ -9,25 +9,41 @@ const metricLabels = {
   api_calls: 'API 调用数',
   storage_mb: '存储 (MB)',
   merchant_count: '商户数',
-  voice_seconds: '语音 (秒)',
 }
-const metricUnits = { api_calls: '次', storage_mb: 'MB', merchant_count: '个', voice_seconds: '秒' }
+const metricUnits = { api_calls: '次', storage_mb: 'MB', merchant_count: '个' }
 
 export default function Usage() {
   const [tenants, setTenants] = useState([])
-  const [selectedTenant, setSelectedTenant] = useState(undefined)
+  const [tenantTotal, setTenantTotal] = useState(0)
+  const [tenantPage, setTenantPage] = useState(1)
+  const [tenantLoading, setTenantLoading] = useState(false)
+  const [tenantSearch, setTenantSearch] = useState('')
+  const [selectedTenant, setSelectedTenant] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('tenant_id') || undefined
+  })
+  const [urlTenantId] = useState(() => new URLSearchParams(window.location.search).get('tenant_id') || null)
+  const urlTenantLoaded = useRef(false)
   const [overview, setOverview] = useState(null)
   const [error, setError] = useState(null)
   const [trendMetric, setTrendMetric] = useState('api_calls')
   const [trendData, setTrendData] = useState([])
   const [loading, setLoading] = useState(false)
 
-  const fetchTenants = useCallback(async () => {
+  const fetchTenants = useCallback(async (page = 1, search = '', append = false) => {
+    setTenantLoading(true)
     try {
-      const res = await api.get('/tenants', { params: { page: 1, page_size: 100 } })
-      setTenants(res.items || [])
+      const params = { page, page_size: 20 }
+      if (search) params.search = search
+      const res = await api.get('/tenants', { params })
+      const items = res.items || []
+      setTenants((prev) => (append ? [...prev, ...items.filter((item) => !prev.some((p) => p.id === item.id))] : items))
+      setTenantTotal(res.total || 0)
+      setTenantPage(page)
     } catch {
       /* error handled globally */
+    } finally {
+      setTenantLoading(false)
     }
   }, [])
 
@@ -48,8 +64,31 @@ export default function Usage() {
   }, [selectedTenant, trendMetric])
 
   useEffect(() => {
-    fetchTenants()
+    fetchTenants(1, '', false)
   }, [fetchTenants])
+
+  useEffect(() => {
+    if (!urlTenantId || urlTenantLoaded.current) return
+    const found = tenants.some((t) => t.id === urlTenantId)
+    if (found) {
+      if (!selectedTenant) setSelectedTenant(urlTenantId)
+      urlTenantLoaded.current = true
+      return
+    }
+    if (!tenantLoading) {
+      urlTenantLoaded.current = true
+      api
+        .get(`/tenants/${urlTenantId}`)
+        .then((t) => {
+          setTenants((prev) => [t, ...prev.filter((p) => p.id !== t.id)])
+          if (!selectedTenant || selectedTenant === urlTenantId) setSelectedTenant(urlTenantId)
+        })
+        .catch(() => {
+          /* URL 参数对应的租户不存在，保留手动选择 */
+        })
+    }
+  }, [urlTenantId, selectedTenant, tenants, tenantLoading])
+
   useEffect(() => {
     fetchOverview()
   }, [fetchOverview])
@@ -111,11 +150,27 @@ export default function Usage() {
         <Space style={{ marginBottom: 24 }} size="middle" wrap>
           <Select
             showSearch
-            placeholder="选择租户"
-            style={{ width: 240 }}
+            placeholder="搜索/选择租户"
+            style={{ width: 280 }}
             value={selectedTenant}
             onChange={setSelectedTenant}
-            filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+            filterOption={false}
+            loading={tenantLoading}
+            onSearch={(value) => {
+              setTenantSearch(value)
+              fetchTenants(1, value, false)
+            }}
+            onPopupScroll={(event) => {
+              const target = event.target
+              if (
+                target.scrollTop + target.clientHeight >= target.scrollHeight - 20 &&
+                tenants.length < tenantTotal &&
+                !tenantLoading
+              ) {
+                fetchTenants(tenantPage + 1, tenantSearch, true)
+              }
+            }}
+            notFoundContent={tenantLoading ? '加载中...' : '未找到租户'}
             options={tenants.map((t) => ({ value: t.id, label: `${t.name} (${t.slug})` }))}
           />
           <Select

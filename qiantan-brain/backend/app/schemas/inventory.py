@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.schemas.common import ApiResponse, PaginatedResponse
+from app.schemas.common import ApiResponse, DecimalNum, PaginatedResponse
 
 
 class CurrentInventoryItem(BaseModel):
     product_id: int
     product_name: str
-    total_qty: float
+    total_qty: DecimalNum
     unit: str
     sku_id: str | None = None
     sku_name: str | None = None
@@ -21,11 +21,11 @@ class InventoryHistoryItem(BaseModel):
     product_id: int
     product_name: str | None = None
     sku_id: str | None = None
-    quantity: float
+    quantity: DecimalNum
     unit: str
-    unit_cost: float | None = None
-    unit_price: float | None = None
-    total_amount: float | None = None
+    unit_cost: DecimalNum | None = None
+    unit_price: DecimalNum | None = None
+    total_amount: DecimalNum | None = None
     event_type: str
     event_time: str | None = None
     is_voided: bool = False
@@ -37,8 +37,8 @@ class AlertItem(BaseModel):
     product_name: str
     type: str
     message: str
-    current_qty: float
-    threshold: float | None = None
+    current_qty: DecimalNum
+    threshold: DecimalNum | None = None
 
 
 class VoidResult(BaseModel):
@@ -55,19 +55,19 @@ class StocktakeSubmitData(BaseModel):
     item_id: str
     product_id: int
     product_name: str
-    book_qty: float
-    actual_qty: float = Field(ge=0)
-    diff: float
+    book_qty: DecimalNum
+    actual_qty: DecimalNum = Field(ge=0)
+    diff: DecimalNum
     diff_reason: str | None = None
 
 
 class StocktakeCompleteData(BaseModel):
     session_id: str
     status: str
-    total_book: float
-    total_actual: float
-    total_diff: float
-    waste_amount: float | None = None
+    total_book: DecimalNum
+    total_actual: DecimalNum
+    total_diff: DecimalNum
+    waste_amount: DecimalNum | None = None
     items: list[dict]
 
 
@@ -94,7 +94,7 @@ class VoidRequest(BaseModel):
 
 class StocktakeSubmitRequest(BaseModel):
     product_id: int
-    actual_qty: float = Field(ge=0)
+    actual_qty: DecimalNum = Field(ge=0)
     unit: str | None = None
     diff_reason: str | None = None
     variance_reason: str | None = None
@@ -109,11 +109,11 @@ class OfflineSyncItem(BaseModel):
     event_type: str = "sale"
     product_id: int | None = None
     product_name: str | None = None
-    quantity: float | None = None
+    quantity: DecimalNum | None = None
     unit: str = "斤"
-    unit_cost: float | None = None
-    unit_price: float | None = None
-    total_amount: float | None = None
+    unit_cost: DecimalNum | None = None
+    unit_price: DecimalNum | None = None
+    total_amount: DecimalNum | None = None
     event_time: str | None = None
     notes: str = ""
     source: str = "offline"

@@ -1,6 +1,5 @@
 .calendar-page { padding-top: 22rpx; padding-bottom: 60rpx; }
 .cal-hero { background: var(--green-800); }
-.today-pill { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 10rpx; margin-top: 24rpx; padding: 12rpx 20rpx; color: #fff; background: rgba(255,255,255,.12); border: 1rpx solid rgba(255,255,255,.14); border-radius: 999rpx; font-size: 24rpx; font-weight: 650; }
 
 /* 星期条 */
 .week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8rpx; margin-top: 22rpx; padding: 18rpx 14rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
@@ -8,7 +7,7 @@
 .week-cell.today { background: var(--green-50); }
 .week-d { color: var(--ink-2); font-size: 22rpx; font-weight: 650; }
 .week-cell.today .week-d { color: var(--green-800); font-weight: 800; }
-.week-tag { font-size: 17rpx; color: var(--muted); }
+.week-tag { font-size: 22rpx; color: var(--muted); }
 .week-dot { width: 10rpx; height: 10rpx; background: var(--corn); border-radius: 50%; }
 
 /* 时令卡 */
@@ -17,7 +16,7 @@
 .term-badge { display: flex; align-items: center; justify-content: center; width: 72rpx; height: 72rpx; background: var(--green-50); border-radius: 20rpx; }
 .term-meta { flex: 1; min-width: 0; }
 .term-name { display: block; font-size: 32rpx; font-weight: 800; color: var(--ink); }
-.term-range { display: block; margin-top: 3rpx; color: var(--muted); font-size: 21rpx; }
+.term-range { display: block; margin-top: 3rpx; color: var(--muted); font-size: 22rpx; }
 .term-row { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 0; border-bottom: 1rpx solid var(--line); }
 .term-row:last-child { border-bottom: 0; }
 .term-ic { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 58rpx; height: 58rpx; background: var(--green-50); border-radius: 16rpx; }
@@ -32,10 +31,10 @@
 .plan-card { display: flex; align-items: center; gap: 18rpx; padding: 24rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .plan-date { flex: 0 0 auto; width: 96rpx; text-align: center; }
 .plan-d { display: block; font-family: var(--font-num); font-size: 38rpx; font-weight: 800; color: var(--ink); }
-.plan-w { display: block; margin-top: 2rpx; color: var(--muted); font-size: 20rpx; }
+.plan-w { display: block; margin-top: 2rpx; color: var(--muted); font-size: 22rpx; }
 .plan-body { flex: 1; min-width: 0; }
 .plan-weather { display: block; color: var(--ink-2); font-size: 23rpx; font-weight: 650; }
-.plan-tip { display: block; margin-top: 4rpx; color: var(--muted); font-size: 21rpx; line-height: 1.45; }
+.plan-tip { display: block; margin-top: 4rpx; color: var(--muted); font-size: 22rpx; line-height: 1.45; }
 
 /* 2026 统一设计升级：节气决策页 */
 .calendar-page { padding: 0 28rpx 70rpx; }
@@ -44,8 +43,8 @@
 .cal-hero-copy { flex: 1; min-width: 0; }
 .term-orb { display: flex; flex: 0 0 auto; flex-direction: column; align-items: center; justify-content: center; width: 132rpx; height: 132rpx; color: #fff; background: rgba(255,255,255,.12); border: 1rpx solid rgba(255,255,255,.18); border-radius: 50%; }
 .term-orb-name { font-size: 30rpx; font-weight: 850; }
-.term-orb-day { margin-top: 4rpx; color: rgba(255,255,255,.68); font-size: 19rpx; }
-.calendar-signals { display: flex; align-items: center; gap: 10rpx; margin-top: 24rpx; color: rgba(255,255,255,.72); font-size: 20rpx; }
+.term-orb-day { margin-top: 4rpx; color: rgba(255,255,255,.68); font-size: 22rpx; }
+.calendar-signals { display: flex; align-items: center; gap: 10rpx; margin-top: 24rpx; color: rgba(255,255,255,.72); font-size: 22rpx; }
 .season-purchase-btn { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 72rpx; margin-top: 18rpx; padding: 0 22rpx; color: var(--green-950); background: var(--corn); border: 0; border-radius: 18rpx; font-size: 23rpx; font-weight: 800; }
 .season-purchase-btn::after { border: 0; }
 .week-strip { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }

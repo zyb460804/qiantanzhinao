@@ -16,7 +16,7 @@
 .sstat-num { display: block; font-family: var(--font-num); font-size: 34rpx; font-weight: 750; color: #fff; }
 .sstat-num.up { color: #7ee8a0; }
 .sstat-num.down { color: #ffb088; }
-.sstat-label { display: block; margin-top: 4rpx; font-size: 21rpx; color: rgba(255,255,255,.6); }
+.sstat-label { display: block; margin-top: 4rpx; font-size: 22rpx; color: rgba(255,255,255,.6); }
 .snapshot-week { position: relative; z-index: 2; display: block; margin-top: 22rpx; padding: 14rpx 22rpx; background: rgba(255,255,255,.1); border-radius: 999rpx; font-size: 23rpx; color: rgba(255,255,255,.8); }
 
 /* 骨架屏 */
@@ -28,14 +28,14 @@
 .quick-card { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8rpx; padding: 28rpx 12rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); transition: transform var(--dur-fast) var(--ease-spring); }
 .quick-card:active { transform: scale(.97); }
 .quick-card .quick-title { display: block; margin-top: 8rpx; color: var(--ink); font-size: 26rpx; font-weight: 700; }
-.quick-card .quick-desc { display: block; color: var(--muted); font-size: 21rpx; }
+.quick-card .quick-desc { display: block; color: var(--muted); font-size: 22rpx; }
 
 .quick-purchase { display: flex; align-items: center; justify-content: space-between; margin-top: 16rpx; padding: 24rpx 28rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .quick-purchase:active { transform: scale(.99); }
 .qp-left { display: flex; align-items: center; gap: 16rpx; }
 .qp-title { color: var(--ink); font-size: 27rpx; font-weight: 700; }
 .qp-right { display: flex; align-items: center; gap: 8rpx; }
-.qp-badge { padding: 6rpx 16rpx; color: #fff; background: var(--red); border-radius: 999rpx; font-size: 21rpx; font-weight: 700; }
+.qp-badge { padding: 6rpx 16rpx; color: #fff; background: var(--red); border-radius: 999rpx; font-size: 22rpx; font-weight: 700; }
 .qp-badge.muted { color: var(--muted); background: var(--line); }
 
 /* ── ③ 设备与同步 ── */
@@ -55,14 +55,11 @@
 /* ── ④ 经营工具 ── */
 .tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16rpx; }
 .tool-group { margin-top: 20rpx; }
-.tool-group-head { display: flex; align-items: baseline; gap: 14rpx; margin-bottom: 14rpx; padding: 0 6rpx; }
-.tool-group-title { font-size: 26rpx; font-weight: 700; color: var(--ink); }
-.tool-group-caption { font-size: 20rpx; color: var(--muted); }
 .tool-chip { display: flex; flex-direction: column; align-items: center; gap: 12rpx; padding: 26rpx 12rpx; background: var(--paper); border: 1rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .tool-chip:active { transform: translateY(1rpx); box-shadow: none; }
 .tool-glyph { display: flex; align-items: center; justify-content: center; width: 76rpx; height: 76rpx; border-radius: 22rpx; font-size: 28rpx; font-weight: 800; }
-.tool-glyph.blue { color: #2e6685; background: #e0eff7; }
-.tool-glyph.corn { color: #8f5a00; background: #fdf0d8; }
+.tool-glyph.blue { color: var(--info-ink); background: var(--info-soft); }
+.tool-glyph.corn { color: var(--corn-ink); background: var(--corn-soft); }
 .tool-glyph.green { color: var(--green-800); background: var(--green-100); }
 .tool-name { color: var(--ink-2); font-size: 22rpx; font-weight: 650; }
 
@@ -74,12 +71,11 @@
 .setting-entry-desc { color: var(--muted); font-size: 22rpx; }
 .setting-entry-arrow { color: var(--muted); font-size: 40rpx; font-weight: 300; line-height: 1; }
 
-/* ── ⑥ 帮助与反馈 ── */
-.help-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16rpx; }
-.help-card { display: flex; flex-direction: column; align-items: center; gap: 8rpx; padding: 30rpx 16rpx; background: var(--paper); border: 1rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.help-card:active { transform: scale(.98); }
-.help-title { display: block; margin-top: 6rpx; color: var(--ink); font-size: 25rpx; font-weight: 700; }
-.help-desc { display: block; color: var(--muted); font-size: 21rpx; }
+/* ── ⑥ 帮助与反馈（低频区：一行四项紧凑排布）── */
+.help-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12rpx; }
+.help-item { display: flex; flex-direction: column; align-items: center; gap: 10rpx; padding: 24rpx 8rpx; background: var(--paper); border: 1rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.help-item:active { transform: scale(.97); }
+.help-title { color: var(--ink-2); font-size: 22rpx; font-weight: 650; }
 
 /* ── ⑦ 关于 ── */
 .about-section { overflow: hidden; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
@@ -87,10 +83,7 @@
 .about-row:last-child { border-bottom: 0; }
 .about-row .muted { color: var(--muted); font-size: 23rpx; }
 .about-row.logout-row { border-bottom: 0; }
-.logout-text { color: var(--red, var(--tomato)); font-weight: 700; }
-
-/* ── 皮肤切换 ── */
-.skin-group { display: block; }
+.logout-text { color: var(--tomato); font-weight: 700; }
 
 /* ── 员工身份切换横条（权限体系）── */
 .identity-bar {

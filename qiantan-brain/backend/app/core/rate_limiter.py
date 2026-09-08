@@ -48,25 +48,29 @@ REDIS_URL = os.getenv("RATE_LIMIT_REDIS_URL", "redis://localhost:6379/0")
 
 
 class RateLimitBackend(ABC):
-    """限流后端抽象基类。"""
+    """限流后端抽象基类。
+
+    所有方法均为 async —— 即使 MemoryBackend 的内存操作本身不阻塞，
+    统一 async 接口可确保 RedisBackend 在 async 路由中不会阻塞事件循环。
+    """
 
     @abstractmethod
-    def check(self, key: str, max_attempts: int, window: int, lock: int) -> None:
+    async def check(self, key: str, max_attempts: int, window: int, lock: int) -> None:
         """检查是否超限，超限抛 429。"""
         ...
 
     @abstractmethod
-    def record(self, key: str, max_attempts: int, window: int, lock: int) -> None:
+    async def record(self, key: str, max_attempts: int, window: int, lock: int) -> None:
         """记录一次失败尝试。"""
         ...
 
     @abstractmethod
-    def clear(self, key: str) -> None:
+    async def clear(self, key: str) -> None:
         """清除记录（登录成功后）。"""
         ...
 
     @abstractmethod
-    def status(self, key: str, max_attempts: int, window: int) -> dict:
+    async def status(self, key: str, max_attempts: int, window: int) -> dict:
         """获取当前状态。"""
         ...
 
@@ -91,7 +95,7 @@ class MemoryBackend(RateLimitBackend):
         now = time.time()
         self._attempts[key] = [t for t in self._attempts.get(key, []) if now - t < window]
 
-    def check(self, key: str, max_attempts: int, window: int, lock: int) -> None:
+    async def check(self, key: str, max_attempts: int, window: int, lock: int) -> None:
         now = time.time()
         if key in self._locked:
             if now < self._locked[key]:
@@ -111,7 +115,7 @@ class MemoryBackend(RateLimitBackend):
                 detail=f"登录失败次数过多，账号已锁定 {lock // 60} 分钟",
             )
 
-    def record(self, key: str, max_attempts: int, window: int, lock: int) -> None:
+    async def record(self, key: str, max_attempts: int, window: int, lock: int) -> None:
         now = time.time()
         if key not in self._attempts:
             self._attempts[key] = []
@@ -120,11 +124,11 @@ class MemoryBackend(RateLimitBackend):
         if len(recent) >= max_attempts:
             self._locked[key] = now + lock
 
-    def clear(self, key: str) -> None:
+    async def clear(self, key: str) -> None:
         self._attempts.pop(key, None)
         self._locked.pop(key, None)
 
-    def status(self, key: str, max_attempts: int, window: int) -> dict:
+    async def status(self, key: str, max_attempts: int, window: int) -> dict:
         now = time.time()
         if key in self._locked and now < self._locked[key]:
             return {
@@ -150,12 +154,13 @@ class RedisBackend(RateLimitBackend):
     """Redis 集中式限流后端。
 
     使用 Redis 的 ZSET 滑动窗口 + TTL key 实现多实例共享限流状态。
+    所有方法均为 async，使用 redis.asyncio 客户端，避免在 async 路由中阻塞事件循环。
     依赖: pip install redis[hiredis]
     """
 
     def __init__(self, redis_url: str = REDIS_URL):
         try:
-            import redis
+            import redis.asyncio as aioredis
         except ImportError as exc:
             raise ImportError(
                 "Redis 限流后端需要 redis 包。安装: pip install redis[hiredis]"
@@ -166,18 +171,18 @@ class RedisBackend(RateLimitBackend):
         # Any 注解：redis-py 7.x 的方法签名统一写成 Union[Awaitable[Any], Any]
         # （sync/async 共享同一泛型类），mypy 无法区分同步调用，导致下游 float/
         # 比较报假阳性。标注为 Any 让类型检查放行，运行时语义由 decode_responses
-        # =True 保证（pytest 549 passed 已验证）。
-        self._client: Any = redis.from_url(
+        # =True 保证。
+        self._client: Any = aioredis.from_url(
             redis_url,
             decode_responses=True,
             socket_connect_timeout=2,
             socket_timeout=2,
         )
 
-    def check(self, key: str, max_attempts: int, window: int, lock: int) -> None:
+    async def check(self, key: str, max_attempts: int, window: int, lock: int) -> None:
         lock_key = f"ratelimit:lock:{key}"
         now = time.time()
-        lock_until = self._client.get(lock_key)
+        lock_until = await self._client.get(lock_key)
         if lock_until and float(lock_until) > now:
             remaining = int(float(lock_until) - now)
             raise HTTPException(
@@ -186,32 +191,32 @@ class RedisBackend(RateLimitBackend):
             )
         # 清理过期 + 计数
         data_key = f"ratelimit:data:{key}"
-        self._client.zremrangebyscore(data_key, 0, now - window)
-        count = self._client.zcard(data_key)
+        await self._client.zremrangebyscore(data_key, 0, now - window)
+        count = await self._client.zcard(data_key)
         if count >= max_attempts:
-            self._client.setex(lock_key, lock, now + lock)
+            await self._client.setex(lock_key, lock, now + lock)
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"登录失败次数过多，账号已锁定 {lock // 60} 分钟",
             )
 
-    def record(self, key: str, max_attempts: int, window: int, lock: int) -> None:
+    async def record(self, key: str, max_attempts: int, window: int, lock: int) -> None:
         now = time.time()
         data_key = f"ratelimit:data:{key}"
         lock_key = f"ratelimit:lock:{key}"
-        self._client.zadd(data_key, {str(now): now})
-        self._client.expire(data_key, window)
-        count = self._client.zcard(data_key)
+        await self._client.zadd(data_key, {str(now): now})
+        await self._client.expire(data_key, window)
+        count = await self._client.zcard(data_key)
         if count >= max_attempts:
-            self._client.setex(lock_key, lock, now + lock)
+            await self._client.setex(lock_key, lock, now + lock)
 
-    def clear(self, key: str) -> None:
-        self._client.delete(f"ratelimit:data:{key}", f"ratelimit:lock:{key}")
+    async def clear(self, key: str) -> None:
+        await self._client.delete(f"ratelimit:data:{key}", f"ratelimit:lock:{key}")
 
-    def status(self, key: str, max_attempts: int, window: int) -> dict:
+    async def status(self, key: str, max_attempts: int, window: int) -> dict:
         now = time.time()
         lock_key = f"ratelimit:lock:{key}"
-        lock_until = self._client.get(lock_key)
+        lock_until = await self._client.get(lock_key)
         if lock_until and float(lock_until) > now:
             return {
                 "locked": True,
@@ -219,8 +224,8 @@ class RedisBackend(RateLimitBackend):
                 "attempts": max_attempts,
             }
         data_key = f"ratelimit:data:{key}"
-        self._client.zremrangebyscore(data_key, 0, now - window)
-        count = self._client.zcard(data_key)
+        await self._client.zremrangebyscore(data_key, 0, now - window)
+        count = await self._client.zcard(data_key)
         return {
             "locked": False,
             "attempts": count,
@@ -291,34 +296,34 @@ def _get_global_key(email: str) -> str:
 # ═══════════════════════════════════════════
 
 
-def check_rate_limit(request: Request, email: str) -> None:
+async def check_rate_limit(request: Request, email: str) -> None:
     """检查登录限流（IP + 邮箱）。"""
     backend = _get_backend()
     # 1. 先检查全局账号级限流（跨 IP）
-    backend.check(
+    await backend.check(
         _get_global_key(email), GLOBAL_MAX_ATTEMPTS, GLOBAL_WINDOW_SECONDS, GLOBAL_LOCK_SECONDS
     )
     # 2. 再检查 IP + 邮箱限流
-    backend.check(_get_key(request, email), MAX_ATTEMPTS, WINDOW_SECONDS, LOCK_SECONDS)
+    await backend.check(_get_key(request, email), MAX_ATTEMPTS, WINDOW_SECONDS, LOCK_SECONDS)
 
 
-def record_failed_attempt(request: Request, email: str) -> None:
+async def record_failed_attempt(request: Request, email: str) -> None:
     """记录失败尝试。"""
     backend = _get_backend()
-    backend.record(_get_key(request, email), MAX_ATTEMPTS, WINDOW_SECONDS, LOCK_SECONDS)
-    backend.record(
+    await backend.record(_get_key(request, email), MAX_ATTEMPTS, WINDOW_SECONDS, LOCK_SECONDS)
+    await backend.record(
         _get_global_key(email), GLOBAL_MAX_ATTEMPTS, GLOBAL_WINDOW_SECONDS, GLOBAL_LOCK_SECONDS
     )
 
 
-def clear_attempts(request: Request, email: str) -> None:
+async def clear_attempts(request: Request, email: str) -> None:
     """登录成功后清除记录。"""
     backend = _get_backend()
-    backend.clear(_get_key(request, email))
-    backend.clear(_get_global_key(email))
+    await backend.clear(_get_key(request, email))
+    await backend.clear(_get_global_key(email))
 
 
-def get_rate_limit_status(request: Request, email: str) -> dict[str, Any]:
+async def get_rate_limit_status(request: Request, email: str) -> dict[str, Any]:
     """获取当前限流状态。"""
     backend = _get_backend()
-    return backend.status(_get_key(request, email), MAX_ATTEMPTS, WINDOW_SECONDS)
+    return await backend.status(_get_key(request, email), MAX_ATTEMPTS, WINDOW_SECONDS)

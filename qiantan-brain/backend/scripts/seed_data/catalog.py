@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -25,6 +26,9 @@ from app.models.product import ProductCategory
 from scripts.seed_data.common import (
     ALL_MERCHANT_IDS,
     DEMO_TENANT_ID,
+    MERCHANT_FRUIT,
+    MERCHANT_MEAT,
+    MERCHANT_VEGETABLE,
     MERCHANTS,
     PRODUCTS,
     SUPPLIERS,
@@ -155,6 +159,8 @@ async def seed_units(db) -> None:
         ("公斤", "公斤", "weight", False),
         ("筐", "筐", "package", False),
         ("件", "件", "package", False),
+        ("箱", "箱", "package", False),
+        ("袋", "袋", "package", False),
         ("个", "个", "count", False),
         ("盒", "盒", "count", False),
     ]
@@ -195,6 +201,48 @@ async def seed_units(db) -> None:
                 )
     await db.flush()
     print(f"  [+] 单位字典: {n_unit} 条（含换算）")
+
+
+# 演示 SKU 专属换算：采购整件（箱/袋/件）、账本按斤。
+# 因子随商品不同 —— 展示「一箱番茄 20 斤」如何覆盖通用「筐→斤 45」，
+# 也是 app/services/unit_conversion.py 专属优先规则的演示数据。
+SKU_CONVERSION_DEFS: tuple[tuple[uuid.UUID, int, str, str, Decimal], ...] = (
+    (MERCHANT_VEGETABLE, 3, "袋", "斤", Decimal("50")),  # 土豆：一袋 50 斤
+    (MERCHANT_VEGETABLE, 6, "箱", "斤", Decimal("20")),  # 番茄：一箱 20 斤
+    (MERCHANT_FRUIT, 8, "箱", "斤", Decimal("15")),  # 苹果：一箱 15 斤
+    (MERCHANT_FRUIT, 14, "箱", "斤", Decimal("10")),  # 草莓：一箱 10 斤
+    (MERCHANT_MEAT, 9, "件", "斤", Decimal("50")),  # 猪肉：一件 50 斤
+)
+
+
+async def seed_sku_unit_conversions(db) -> None:
+    """SKU 级换算因子（采购整件 → 账本按斤），幂等。"""
+    n = 0
+    for merchant_id, pid, from_u, to_u, factor in SKU_CONVERSION_DEFS:
+        if merchant_id not in ALL_MERCHANT_IDS:
+            continue
+        sku_id = sku_uuid(merchant_id, pid)
+        exists = await db.execute(
+            select(UnitConversion.id)
+            .where(UnitConversion.merchant_id == merchant_id)
+            .where(UnitConversion.sku_id == sku_id)
+            .where(UnitConversion.from_unit == from_u)
+            .where(UnitConversion.to_unit == to_u)
+        )
+        if exists.first() is not None:
+            continue
+        db.add(
+            UnitConversion(
+                merchant_id=merchant_id,
+                from_unit=from_u,
+                to_unit=to_u,
+                factor=factor,
+                sku_id=sku_id,
+            )
+        )
+        n += 1
+    await db.flush()
+    print(f"  [+] SKU 专属换算: {n} 条（箱/袋/件 → 斤）")
 
 
 async def seed_suppliers(db) -> None:
@@ -280,6 +328,7 @@ async def seed_catalog(db) -> dict:
     await seed_product_categories(db)
     await seed_skus_and_aliases(db)
     await seed_units(db)
+    await seed_sku_unit_conversions(db)
     await seed_suppliers(db)
     await seed_supplier_products(db)
     return {}

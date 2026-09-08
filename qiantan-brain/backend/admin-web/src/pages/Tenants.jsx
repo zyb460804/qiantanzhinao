@@ -1,23 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import {
-  Table,
-  Card,
-  Input,
-  Select,
-  Space,
-  Tag,
-  Typography,
-  Button,
-  Modal,
-  Form,
-  InputNumber,
-  message,
-  Badge,
-} from 'antd'
+import { Table, Card, Input, Select, Space, Tag, Typography, Button, message, Badge } from 'antd'
 import { SearchOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, ExportOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../api/client'
 import PageHeader from '../components/PageHeader'
+import ConfirmWithReason from '../components/ConfirmWithReason'
 import { PERMISSIONS } from '../permissions'
 import PermissionGate from '../permissions/PermissionGate'
 
@@ -43,11 +30,7 @@ export default function Tenants() {
   const [pageSize, setPageSize] = useState(Number(searchParams.get('pageSize')) || 20)
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || undefined)
   const [search, setSearch] = useState(searchParams.get('search') || '')
-  const [createModalOpen, setCreateModalOpen] = useState(false)
-  const [plans, setPlans] = useState([])
-  const [submitting, setSubmitting] = useState(false)
   const [selectedRowKeys, setSelectedRowKeys] = useState([])
-  const [form] = Form.useForm()
 
   // Sync URL params
   const syncUrl = useCallback(
@@ -78,51 +61,38 @@ export default function Tenants() {
     }
   }, [page, pageSize, statusFilter, search])
 
-  const fetchPlans = useCallback(async () => {
-    try {
-      const res = await api.get('/plans')
-      setPlans(res || [])
-    } catch {
-      /* ignore */
-    }
-  }, [])
-
   useEffect(() => {
     fetchData()
   }, [fetchData])
 
-  useEffect(() => {
-    if (createModalOpen && plans.length === 0) {
-      fetchPlans()
-    }
-  }, [createModalOpen, plans, fetchPlans])
-
-  const handleCreate = async () => {
-    try {
-      const values = await form.validateFields()
-      setSubmitting(true)
-      await api.post('/tenants', {
-        name: values.name,
-        slug: values.slug,
-        plan_id: values.plan_id,
-        merchant_name: values.merchant_name,
-        contact_email: values.contact_email || undefined,
-        contact_phone: values.contact_phone || undefined,
-        trial_days: values.trial_days || 14,
-      })
-      message.success('租户创建成功')
-      form.resetFields()
-      setCreateModalOpen(false)
-      fetchData()
-    } catch (err) {
-      if (err.errorFields) return
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
   const handleExport = () => {
     window.open('/api/admin/export/tenants', '_blank')
+  }
+
+  const handleBatchExport = async (_reason) => {
+    try {
+      const blob = await api.post(
+        '/export/tenants/batch',
+        {
+          ids: selectedRowKeys,
+          search: search || undefined,
+          status: statusFilter || undefined,
+        },
+        { responseType: 'blob' },
+      )
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `tenants-${Date.now()}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      message.success(`已导出 ${selectedRowKeys.length} 个租户`)
+      setSelectedRowKeys([])
+    } catch (err) {
+      message.error(err?.response?.data?.detail || '批量导出失败')
+    }
   }
 
   const columns = [
@@ -194,7 +164,7 @@ export default function Tenants() {
         extra={
           <Space>
             <PermissionGate permission={PERMISSIONS.TENANT_CREATE}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/onboarding')}>
                 新建租户
               </Button>
             </PermissionGate>
@@ -239,9 +209,14 @@ export default function Tenants() {
             刷新
           </Button>
           <PermissionGate permission={PERMISSIONS.EXPORT_DATA}>
-            <Button icon={<DownloadOutlined />} onClick={handleExport}>
-              导出 CSV
-            </Button>
+            <ConfirmWithReason
+              title="导出全部租户 CSV"
+              description="将导出当前全部租户数据（不受列表筛选影响）"
+              impact="包含租户名称、Slug、联系方式等敏感信息，请谨慎操作。"
+              onSubmit={handleExport}
+            >
+              <Button icon={<DownloadOutlined />}>导出 CSV</Button>
+            </ConfirmWithReason>
           </PermissionGate>
         </div>
 
@@ -262,9 +237,16 @@ export default function Tenants() {
               已选 <strong>{selectedRowKeys.length}</strong> 项
             </span>
             <PermissionGate permission={PERMISSIONS.EXPORT_DATA}>
-              <Button size="small" icon={<ExportOutlined />}>
-                批量导出
-              </Button>
+              <ConfirmWithReason
+                title="批量导出租户"
+                description={`导出已选中的 ${selectedRowKeys.length} 个租户；若未选择，则导出当前筛选结果。`}
+                impact="包含租户敏感信息，将记录到审计日志。"
+                onSubmit={handleBatchExport}
+              >
+                <Button size="small" icon={<ExportOutlined />}>
+                  批量导出
+                </Button>
+              </ConfirmWithReason>
             </PermissionGate>
             <Button size="small" onClick={() => setSelectedRowKeys([])}>
               取消选择
@@ -297,51 +279,6 @@ export default function Tenants() {
           }}
         />
       </Card>
-
-      {/* 新建租户 Modal */}
-      <Modal
-        title="新建租户"
-        open={createModalOpen}
-        onCancel={() => {
-          setCreateModalOpen(false)
-          form.resetFields()
-        }}
-        onOk={handleCreate}
-        confirmLoading={submitting}
-        okText="创建"
-        cancelText="取消"
-        width={520}
-      >
-        <Form form={form} layout="vertical" initialValues={{ trial_days: 14 }}>
-          <Form.Item name="name" label="租户名称" rules={[{ required: true, message: '请输入租户名称' }]}>
-            <Input placeholder="如：上海XX市场" />
-          </Form.Item>
-          <Form.Item name="slug" label="Slug（URL标识）" rules={[{ required: true, message: '请输入 slug' }]}>
-            <Input placeholder="如：sh-xx-market" />
-          </Form.Item>
-          <Form.Item name="plan_id" label="初始套餐" rules={[{ required: true, message: '请选择套餐' }]}>
-            <Select
-              placeholder="选择套餐"
-              options={plans.map((p) => ({
-                value: p.id,
-                label: `${p.name} (${p.code}) - ¥${p.price_monthly}/月`,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="merchant_name" label="首个商户名称" rules={[{ required: true, message: '请输入商户名称' }]}>
-            <Input placeholder="如：老张菜摊" />
-          </Form.Item>
-          <Form.Item name="contact_email" label="联系邮箱">
-            <Input placeholder="可选" />
-          </Form.Item>
-          <Form.Item name="contact_phone" label="联系电话">
-            <Input placeholder="可选" />
-          </Form.Item>
-          <Form.Item name="trial_days" label="试用期天数">
-            <InputNumber min={1} max={90} style={{ width: '100%' }} />
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   )
 }

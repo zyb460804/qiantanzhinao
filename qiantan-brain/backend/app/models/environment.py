@@ -1,6 +1,7 @@
 """Environment record model."""
 
 from datetime import date, datetime
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
@@ -14,10 +15,10 @@ class EnvironmentRecord(Base):
     id: Mapped[int] = mapped_column(sa.Integer, primary_key=True, autoincrement=True)
     date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     city: Mapped[str] = mapped_column(sa.String(50), default="上海")
-    temp_high: Mapped[float | None] = mapped_column(sa.Numeric(5, 1))
-    temp_low: Mapped[float | None] = mapped_column(sa.Numeric(5, 1))
+    temp_high: Mapped[Decimal | None] = mapped_column(sa.Numeric(5, 1))
+    temp_low: Mapped[Decimal | None] = mapped_column(sa.Numeric(5, 1))
     weather_type: Mapped[str | None] = mapped_column(sa.String(30))
-    rainfall_prob: Mapped[float | None] = mapped_column(sa.Numeric(5, 1))
+    rainfall_prob: Mapped[Decimal | None] = mapped_column(sa.Numeric(5, 1))
     is_holiday: Mapped[bool] = mapped_column(sa.Boolean, default=False)
     holiday_name: Mapped[str | None] = mapped_column(sa.String(50))
     day_of_week: Mapped[int | None] = mapped_column(sa.Integer)

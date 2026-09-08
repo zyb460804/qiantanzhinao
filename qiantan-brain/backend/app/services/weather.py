@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 import httpx
 
 from app.config import settings
+from app.core.timezone import cst_today
 
 
 logger = logging.getLogger(__name__)
@@ -171,17 +172,26 @@ async def fetch_current_weather(city: str = "上海") -> dict | None:
     now = data.get("now", {})
     temp = float(now.get("temp", 25))
     weather_text = now.get("text", "晴")
-    precip = float(now.get("precip", 0))
-    # If currently raining, rainfall prob is high; otherwise estimate from humidity
+    # QWeather `precip` is accumulated precipitation (mm), NOT a probability.
+    # `pop` is the proper probability-of-precipitation field (0-100).
+    pop = now.get("pop")
+    precip = float(now.get("precip", 0) or 0)
     humidity = float(now.get("humidity", 50))
-    if "雨" in weather_text:
-        rainfall_prob = max(60.0, precip)
+    if pop is not None:
+        rainfall_prob = float(pop)
+    elif "雨" in weather_text:
+        # Currently raining — high probability baseline scaled by intensity.
+        rainfall_prob = 75.0 if precip > 1 else 60.0
     elif humidity > 80:
         rainfall_prob = 40.0
+    elif precip > 0:
+        rainfall_prob = 40.0
     else:
-        rainfall_prob = float(precip) if precip > 0 else 10.0
+        rainfall_prob = 10.0
 
-    today = date.today()
+    # 日历键按 CST 业务日，与 environment.py 读端（cst_today()）对齐：
+    # UTC 16-24 点（= CST 次日 0-8 点）时 date.today() 会取到前一天。
+    today = cst_today()
     dow = today.weekday()
     is_holiday, holiday_name = _get_holiday(today)
 
@@ -220,6 +230,17 @@ async def fetch_forecast(city: str = "上海", days: int = 3) -> list[dict] | No
         fx_date = datetime.strptime(daily["fxDate"], "%Y-%m-%d").date()
         dow = fx_date.weekday()
         is_holiday, holiday_name = _get_holiday(fx_date)
+        # QWeather daily `precip` is mm, not a probability — prefer `pop` when present.
+        pop = daily.get("pop")
+        precip = float(daily.get("precip", 0) or 0)
+        if pop is not None:
+            rainfall_prob = float(pop)
+        elif precip > 1:
+            rainfall_prob = 75.0
+        elif precip > 0:
+            rainfall_prob = 40.0
+        else:
+            rainfall_prob = 10.0
         results.append(
             {
                 "date": fx_date,
@@ -227,7 +248,7 @@ async def fetch_forecast(city: str = "上海", days: int = 3) -> list[dict] | No
                 "temp_high": float(daily.get("tempMax", 25)),
                 "temp_low": float(daily.get("tempMin", 15)),
                 "weather_type": _simplify_weather(daily.get("textDay", "晴")),
-                "rainfall_prob": float(daily.get("precip", 0)),
+                "rainfall_prob": rainfall_prob,
                 "is_holiday": is_holiday,
                 "holiday_name": holiday_name,
                 "day_of_week": dow,
@@ -261,7 +282,7 @@ async def get_forecast_env(city: str = "上海", days: int = 3) -> list[dict]:
 
 def _mock_today(city: str) -> dict:
     """Mock today's environment data (used when no API key configured)."""
-    today = date.today()
+    today = cst_today()
     dow = today.weekday()
     is_holiday, holiday_name = _get_holiday(today)
     return {
@@ -280,10 +301,14 @@ def _mock_today(city: str) -> dict:
 
 
 def _mock_forecast(city: str, days: int) -> list[dict]:
-    """Mock forecast data (used when no API key configured)."""
-    today = date.today()
+    """Mock forecast data (used when no API key configured).
+
+    ``days`` covers today plus subsequent days (i=0 is today), mirroring QWeather
+    where a 3-day forecast includes today as day 1.
+    """
+    today = cst_today()
     results = []
-    for i in range(1, days + 1):
+    for i in range(0, days):
         d = today + timedelta(days=i)
         dow = d.weekday()
         is_holiday, holiday_name = _get_holiday(d)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -182,8 +183,6 @@ async def lookup_trace(
     无鉴权枚举全平台批次与供应商信息。现用 autoescape=True 并校验格式。
     """
     # 格式白名单：仅允许 32 位 hex 或 UUID（与 generate_trace_code 的输出格式一致）
-    import re
-
     if not re.fullmatch(r"[A-Za-z0-9\-]{8,64}", trace_code):
         raise HTTPException(status_code=400, detail="追溯码格式无效")
 
@@ -230,11 +229,22 @@ async def trace_qr_image(
     """返回追溯码的二维码 PNG 图片 — 无需认证，用于打印标签。
 
     图片大小 400×400px，含高纠错级别，适合打印后张贴。
+
+    安全（审计 P1-9 同 lookup_trace）：trace_code 进入 LIKE 查询前需格式校验
+    + autoescape，防通配符注入无鉴权枚举全平台批次。
     """
     import qrcode
 
-    # 查找 batch
-    query = select(BatchLifecycle).where(BatchLifecycle.qr_data.contains(trace_code)).limit(1)
+    # 格式白名单（与 lookup_trace 一致）：阻断 LIKE 通配符注入
+    if not re.fullmatch(r"[A-Za-z0-9\-]{8,64}", trace_code):
+        raise HTTPException(status_code=400, detail="追溯码格式无效")
+
+    # 查找 batch（autoescape=True 转义 LIKE 通配符）
+    query = (
+        select(BatchLifecycle)
+        .where(BatchLifecycle.qr_data.contains(trace_code, autoescape=True))
+        .limit(1)
+    )
     result = await db.execute(query)
     batch = result.scalar_one_or_none()
     if not batch:
@@ -282,8 +292,16 @@ async def submit_consumer_trace_feedback(
     if len(content) < 2 or len(content) > 2000:
         raise HTTPException(status_code=400, detail="反馈内容长度需在 2-2000 字之间")
 
-    # 反查批次 → 拿到批次归属商户
-    query = select(BatchLifecycle).where(BatchLifecycle.qr_data.contains(trace_code)).limit(1)
+    # 格式白名单（与 lookup_trace 一致）：阻断 LIKE 通配符注入
+    if not re.fullmatch(r"[A-Za-z0-9\-]{8,64}", trace_code):
+        raise HTTPException(status_code=400, detail="追溯码格式无效")
+
+    # 反查批次 → 拿到批次归属商户（autoescape=True 转义 LIKE 通配符）
+    query = (
+        select(BatchLifecycle)
+        .where(BatchLifecycle.qr_data.contains(trace_code, autoescape=True))
+        .limit(1)
+    )
     result = await db.execute(query)
     batch = result.scalar_one_or_none()
     if not batch:
@@ -333,6 +351,8 @@ async def record_inspection(
     if not batch or batch.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="批次不存在")
     result = body.get("result", "pass")
+    if result not in ("pass", "fail", "pending"):
+        raise HTTPException(status_code=400, detail="快检结果必须为 pass/fail/pending")
     batch.inspection_result = result
 
     db.add(

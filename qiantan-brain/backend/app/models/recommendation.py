@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,8 +27,8 @@ class Recommendation(Base):
     suggestion: Mapped[str] = mapped_column(sa.Text, nullable=False)
     basis: Mapped[list] = mapped_column(sa.JSON, default=list)
     risk_warning: Mapped[str | None] = mapped_column(sa.Text)
-    recommended_qty: Mapped[float | None] = mapped_column(sa.Numeric(10, 2))
-    confidence: Mapped[float | None] = mapped_column(sa.Numeric(4, 2))
+    recommended_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))
+    confidence: Mapped[Decimal | None] = mapped_column(sa.Numeric(4, 2))
     was_adopted: Mapped[bool | None] = mapped_column(sa.Boolean)
-    actual_deviation: Mapped[float | None] = mapped_column(sa.Numeric(10, 2))
+    actual_deviation: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())

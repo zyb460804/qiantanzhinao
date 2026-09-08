@@ -1,4 +1,4 @@
-<!-- 今日账目 · 营业实况（v4.0 去 AI 化：删除"数字孪生/健康度圆环/实时芯片"等演示话术） -->
+<!-- 经营镜像 · 今日账目与营业实况（v4.0 去 AI 化：删除"数字孪生/健康度圆环/实时芯片"等演示话术） -->
 <view class="page-shell dashboard-page {{skinClass}}">
   <view class="page-hero ledger-hero" wx:if="{{dashboard}}">
     <text class="eyebrow">{{skinLabel}} · 今日账目</text>
@@ -29,13 +29,7 @@
   <view wx:if="{{activeTab === 'inventory'}}">
     <view class="section-head"><text class="section-title">品类库存分布</text><text class="section-caption">当前库存结构</text></view>
     <view class="chart-card"><stock-chart items="{{inventoryChartItems}}" compact="{{true}}" /></view>
-    <view class="category-card" wx:if="{{inventoryMirror && inventoryMirror.by_category}}">
-      <view wx:for="{{inventoryMirror.by_category}}" wx:key="category" class="category-row">
-        <view class="category-head"><text>{{item.category}}</text><text>{{item.total_qty}}{{item.unit}}</text></view>
-        <view class="bar-track"><view class="bar-fill" style="width: {{item.total_qty / maxCategoryQty * 100 > 100 ? 100 : item.total_qty / maxCategoryQty * 100}}%"></view></view>
-      </view>
-      <text class="data-note">不同商品单位不可直接相加;混合单位的品类仅作总量参考,以批次实际单位为准。</text>
-    </view>
+    <text class="data-note">不同商品单位不可直接相加;混合单位的品类仅作总量参考,以批次实际单位为准。</text>
 
     <view class="heatmap-card" wx:if="{{heatmapRows && heatmapRows.length}}">
       <view class="section-head"><text class="section-title">存货剩余天数</text><text class="section-caption">按保质期分布</text></view>

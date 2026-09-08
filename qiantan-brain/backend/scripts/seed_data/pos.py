@@ -24,13 +24,11 @@ from scripts.seed_data.common import (
     ALL_MERCHANT_IDS,
     CREDIT_CUSTOMERS,
     MERCHANTS,
-    PRODUCTS_BY_ID,
     date_ago,
     days_ago,
     make_rng,
     money,
     products_for,
-    qty,
     sku_uuid,
 )
 
@@ -70,7 +68,9 @@ async def seed_pos_orders(db) -> dict:
 
             for _ in range(n_orders):
                 order_seq += 1
-                order_no = f"POS{day.strftime('%Y%m%d')}{merchant_id.hex[-2:].upper()}{order_seq:03d}"
+                order_no = (
+                    f"POS{day.strftime('%Y%m%d')}{merchant_id.hex[-2:].upper()}{order_seq:03d}"
+                )
                 client_id = f"seed-{order_no}"
 
                 items = _pick_products(rng, my_products, rng.randint(1, 4))
@@ -162,7 +162,9 @@ async def seed_pos_orders(db) -> dict:
                             quantity=q,
                             unit=prod.unit,
                             unit_price=prod.default_price,
-                            unit_cost=(prod.default_price * Decimal("0.65")).quantize(Decimal("0.01")),
+                            unit_cost=(prod.default_price * Decimal("0.65")).quantize(
+                                Decimal("0.01")
+                            ),
                             total_amount=line_total,
                         )
                     )
@@ -266,8 +268,10 @@ async def seed_pos_orders(db) -> dict:
 
                 day_sales += total
                 if scenario not in ("held",):
-                    day_payments += (total - refunded_amount) if scenario == "refund" else (
-                        money("0") if scenario == "credit" else total
+                    day_payments += (
+                        (total - refunded_amount)
+                        if scenario == "refund"
+                        else (money("0") if scenario == "credit" else total)
                     )
 
             daily[merchant_id][day] = {
@@ -338,7 +342,9 @@ async def seed_settlements_and_reconciliation(db, daily: dict) -> None:
                     note = "系统订单比渠道到账多 3.50 元，疑似一笔微信支付延迟到账"
                 else:
                     payment_total = agg["payments"]
-                    diff_amount = (agg["sales"] - payment_total - agg["credit"]).quantize(Decimal("0.01"))
+                    diff_amount = (agg["sales"] - payment_total - agg["credit"]).quantize(
+                        Decimal("0.01")
+                    )
                     status = "balanced"
                     note = None
 

@@ -12,12 +12,12 @@
     </view>
     <view class="hero-figures">
       <view class="hero-figure">
-        <text class="hf-num">{{totalCategories}}</text>
-        <text class="hf-unit">记录品类</text>
+        <text class="hf-num">{{inStockCount}}</text>
+        <text class="hf-unit">当前在售</text>
       </view>
       <view class="hero-figure sub">
-        <text class="hf-num sm">{{inStockCount}}</text>
-        <text class="hf-unit">当前有库存</text>
+        <text class="hf-num sm">{{totalCategories}}</text>
+        <text class="hf-unit">记录品类</text>
       </view>
     </view>
     <view class="hero-strip">
@@ -39,6 +39,15 @@
     <view class="skeleton-block card-line"></view>
     <view class="skeleton-block card-line short"></view>
   </view>
+
+  <block wx:elif="{{loadError}}">
+    <view class="empty-state surface">
+      <mascot size="md" mood="think"/>
+      <text>库存加载失败</text>
+      <text class="data-note">请检查网络后重试</text>
+      <button class="btn-primary" bindtap="manualRefresh">重新加载</button>
+    </view>
+  </block>
 
   <block wx:else>
     <!-- 小智洞察 -->
@@ -95,29 +104,7 @@
       </view>
     </view>
 
-    <!-- 库存健康概览 -->
-    <view class="block">
-      <view class="section-head"><text class="section-title">库存数量概览</text><text class="section-caption">不跨单位相加</text></view>
-      <view class="health-grid">
-        <view class="health-item good">
-          <view class="health-icon"><icon name="check" size="sm" color="var(--green-600)"></icon></view>
-          <text class="health-num">{{healthyCount}}</text>
-          <text class="health-label">数量高于提示线</text>
-        </view>
-        <view class="health-item warn">
-          <view class="health-icon"><icon name="leaf" size="sm" color="var(--corn)"></icon></view>
-          <text class="health-num">{{attentionCount}}</text>
-          <text class="health-label">余量较少</text>
-        </view>
-        <view class="health-item empty">
-          <view class="health-icon"><icon name="cart" size="sm" color="var(--red)"></icon></view>
-          <text class="health-num">{{emptyCount}}</text>
-          <text class="health-label">已经售罄</text>
-        </view>
-      </view>
-    </view>
-
-    <!-- 不再展示跨单位的库存排行榜：斤、件、箱不能直接比较 -->
+    <!-- 库存状态计数已在 Hero 呈现，不再重复展示"库存数量概览"，页面直接进入商品清单 -->
 
     <!-- 全部商品 -->
     <view class="block">
@@ -178,7 +165,7 @@
                 <text class="qty-unit">{{item.unit}}</text>
               </view>
             </view>
-            <view class="stock-caption stock-caption-simple"><text>{{item.status_hint}}</text></view>
+            <view class="stock-caption stock-caption-simple" wx:if="{{item.status !== 'healthy'}}"><text>{{item.status_hint}}</text></view>
             <view class="card-action-row" wx:if="{{item.status !== 'healthy'}}">
               <text class="card-action-btn" data-name="{{item.display_name}}" catchtap="onRestockTap">补货</text>
               <text class="card-action-btn warn" wx:if="{{item.status === 'empty'}}" data-name="{{item.display_name}}" catchtap="onRestockTap">立即补货</text>

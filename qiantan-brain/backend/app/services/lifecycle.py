@@ -51,6 +51,9 @@ def calc_batch_status(
             "message": "未知品类",
         }
 
+    # purchase_date 与 utc_now() 同为 naive UTC（V2-C2 收口：DB DateTime 列
+    # 无 tzinfo，SQLite/PG 读回均 naive；utc_now() 也返回 naive），直接相减。
+    # 传入 aware 值属于调用方违约（上游 inventory/twin 传的都是列读回值）。
     hours_elapsed = (utc_now() - purchase_date).total_seconds() / 3600
     stages = lifecycle.get("lifecycle_stages", {})
 

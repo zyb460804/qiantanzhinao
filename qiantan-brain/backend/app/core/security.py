@@ -209,7 +209,13 @@ async def revoke_token(db: AsyncSession, jti: str, expires_at=None) -> None:
     （naive TIMESTAMP 列），asyncpg/PostgreSQL 会抛 DataError，导致 logout 500、
     jti 未入吊销表 → 令牌在剩余有效期内继续可用。现与 admin_security.revoke_admin_token
     对齐，归一化为 naive UTC datetime。
+
+    修复（F3 并发同 jti 二次 INSERT 500）：AuthRevokedToken.jti 是 primary key，
+    并发 /refresh（或 logout 重放）同 token 时两次 INSERT 同 jti → IntegrityError → 500。
+    改为幂等：捕获 IntegrityError 后 rollback，不阻断上层流程（吊销语义已达成）。
     """
+    from sqlalchemy.exc import IntegrityError
+
     from app.models.auth import AuthRevokedToken
 
     if isinstance(expires_at, (int, float)):
@@ -217,7 +223,11 @@ async def revoke_token(db: AsyncSession, jti: str, expires_at=None) -> None:
     if isinstance(expires_at, datetime) and expires_at.tzinfo is not None:
         expires_at = expires_at.astimezone(UTC).replace(tzinfo=None)
     db.add(AuthRevokedToken(jti=jti, expires_at=expires_at))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # jti 已存在（并发 refresh / 重复 logout），吊销语义已达成，幂等返回
+        await db.rollback()
 
 
 def merchant_id_from_token(token: str) -> uuid.UUID:

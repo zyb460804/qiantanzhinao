@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.admin_permissions import ADMIN_MANAGE, require_admin_permission
 from app.core.admin_security import get_current_admin, hash_password, validate_password_bytes
 from app.core.audit import log_action
+from app.core.password_policy import validate_password
 from app.database import get_db
 from app.models.saas import PlatformAdmin
 
@@ -41,6 +42,15 @@ class AdminCreate(BaseModel):
     # bcrypt 只处理前 72 字节，按字节数二次校验（max_length 限的是字符数）
     _password_bytes = field_validator("password")(validate_password_bytes)
 
+    @field_validator("password")
+    @classmethod
+    def _password_strength(cls, value: str) -> str:
+        """密码策略：至少 8 位且含大小写字母、数字与特殊字符。"""
+        ok, message = validate_password(value)
+        if not ok:
+            raise ValueError(message)
+        return value
+
 
 class AdminUpdate(BaseModel):
     name: str | None = None
@@ -51,7 +61,13 @@ class AdminUpdate(BaseModel):
     @field_validator("password")
     @classmethod
     def _password_bytes(cls, v: str | None) -> str | None:
-        return validate_password_bytes(v) if v is not None else None
+        if v is None:
+            return None
+        validate_password_bytes(v)
+        ok, message = validate_password(v)
+        if not ok:
+            raise ValueError(message)
+        return v
 
 
 def _serialize(admin: PlatformAdmin) -> AdminInfo:

@@ -1,8 +1,12 @@
 """add missing device and dead_letter tables
 
 Revision ID: m4b5c6d7e8f9
-Revises: l3f4a5b6c7d8
+Revises: m4g5b6c7d8e9
 Create Date: 2026-07-27
+
+双头修复（CRITICAL）：本迁移与 m4g5b6c7d8e9 原本都指向 l3f4a5b6c7d8，
+`alembic upgrade head` 抛 MultipleHeads 阻断部署。两者建的对象互不重叠，
+故线性化为 l3f4a5b6c7d8 -> m4g5b6c7d8e9 -> 本迁移。
 
 修复（审计 P1-2）：以下 4 张表在 models/ 中定义且被线上代码引用（edge.py /
 admin/operations.py / health_monitor.py / offline_sync.py），但从未出现在任何
@@ -17,7 +21,7 @@ from alembic import op
 
 
 revision: str = "m4b5c6d7e8f9"
-down_revision: str | None = "l3f4a5b6c7d8"
+down_revision: str | None = "m4g5b6c7d8e9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

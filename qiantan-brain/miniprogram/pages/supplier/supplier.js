@@ -24,7 +24,7 @@ Page({
   stopMaskTap: function () {},
 
   data: {
-    skinClass: '', loading: true, loadingMore: false, submitting: false,
+    skinClass: '', loading: true, loadingMore: false, submitting: false, loadError: false,
 
     // 供应商列表（分页）
     suppliers: [], searchKeyword: '',
@@ -49,6 +49,14 @@ Page({
 
     // 黑名单确认
     showBlacklistConfirm: false, blacklistTarget: null,
+
+    // 供应商比价
+    showCompare: false,
+    compareSkus: [], compareSkuKeyword: '', filteredCompareSkus: [],
+    compareSkuId: '', compareSkuName: '',
+    compareLoading: false, compareResult: null,
+    compareRecommend: null, compareRecommendLoading: false,
+    compareSort: 'value', compareError: '',
   },
 
   onLoad: function () {
@@ -74,11 +82,15 @@ Page({
 
   // ── 数据加载（分页）──────────────────────────────────
 
+  retrySuppliers: function () {
+    this.loadSuppliers(false);
+  },
+
   loadSuppliers: function (append) {
     var self = this;
     var offset = append ? this.data.supplierOffset : 0;
     if (!append) {
-      this.setData({ loading: true, suppliers: [], supplierOffset: 0 });
+      this.setData({ loading: true, suppliers: [], supplierOffset: 0, loadError: false });
     } else {
       this.setData({ loadingMore: true });
     }
@@ -126,10 +138,10 @@ Page({
         supplierOffset: offset + items.length,
         totalCount: totalCount, avgScore: avgScore,
         blacklistedCount: blacklistedCount,
-        loading: false, loadingMore: false
+        loading: false, loadingMore: false, loadError: false
       });
     }).catch(function () {
-      self.setData({ loading: false, loadingMore: false });
+      self.setData({ loading: false, loadingMore: false, loadError: true, suppliers: [], supplierTotal: 0 });
       if (!append) wx.showToast({ title: '供应商列表加载失败', icon: 'none' });
     });
   },
@@ -467,6 +479,167 @@ Page({
           wx.showToast({ title: '解除失败', icon: 'none' });
         });
       }
+    });
+  },
+
+  // ── 供应商比价 ────────────────────────────────────────
+
+  openCompare: function () {
+    var self = this;
+    if (this._compareSkuTimer) clearTimeout(this._compareSkuTimer);
+    this._compareSeq = (this._compareSeq || 0) + 1;
+    this.setData({
+      showCompare: true,
+      compareSkus: [], compareSkuKeyword: '', filteredCompareSkus: [],
+      compareSkuId: '', compareSkuName: '',
+      compareLoading: true, compareResult: null,
+      compareRecommend: null, compareRecommendLoading: false,
+      compareSort: 'value', compareError: '',
+    });
+    app.request({ url: '/catalog/skus', data: { limit: 200 } }).then(function (data) {
+      var skus = (data || []).map(function (s) {
+        return { sku_id: s.sku_id, name: s.name, _initial: (s.name || '商').slice(0, 1) };
+      });
+      var kw = (self.data.compareSkuKeyword || '').toLowerCase();
+      var filtered = kw ? skus.filter(function (s) {
+        return (s.name || '').toLowerCase().indexOf(kw) !== -1;
+      }) : skus;
+      self.setData({ compareSkus: skus, filteredCompareSkus: filtered, compareLoading: false });
+    }).catch(function () {
+      self.setData({ compareError: '商品列表加载失败', compareLoading: false });
+      wx.showToast({ title: '商品列表加载失败', icon: 'none' });
+    });
+  },
+
+  closeCompare: function () {
+    if (this._compareSkuTimer) clearTimeout(this._compareSkuTimer);
+    this.setData({ showCompare: false });
+  },
+
+  resetCompareSku: function () {
+    if (this._compareSkuTimer) clearTimeout(this._compareSkuTimer);
+    this._compareSeq = (this._compareSeq || 0) + 1;
+    this.setData({
+      compareSkuId: '', compareSkuName: '',
+      compareSkuKeyword: '', filteredCompareSkus: this.data.compareSkus,
+      compareLoading: false, compareResult: null, compareRecommend: null,
+      compareRecommendLoading: false,
+      compareSort: 'value', compareError: '',
+    });
+  },
+
+  onCompareSkuSearch: function (e) {
+    var kw = (e.detail.value || '').trim();
+    this.setData({ compareSkuKeyword: kw });
+    if (this._compareSkuTimer) clearTimeout(this._compareSkuTimer);
+    var self = this;
+    this._compareSkuTimer = setTimeout(function () {
+      var k = (self.data.compareSkuKeyword || '').toLowerCase();
+      var filtered = self.data.compareSkus.filter(function (s) {
+        return !k || (s.name || '').toLowerCase().indexOf(k) !== -1;
+      });
+      self.setData({ filteredCompareSkus: filtered });
+    }, 300);
+  },
+
+  pickCompareSku: function (e) {
+    var id = e.currentTarget.dataset.id;
+    var name = e.currentTarget.dataset.name;
+    this.setData({
+      compareSkuId: id, compareSkuName: name,
+      compareResult: null, compareRecommend: null,
+      compareRecommendLoading: false,
+      compareSort: 'value', compareError: '',
+    });
+    this.loadCompare(id);
+  },
+
+  loadCompare: function (skuId) {
+    var self = this;
+    var id = skuId || this.data.compareSkuId;
+    if (!id) return;
+    var seq = (this._compareSeq || 0) + 1;
+    this._compareSeq = seq;
+    this.setData({ compareLoading: true, compareError: '' });
+    app.request({
+      url: '/catalog/suppliers/compare',
+      data: { sku_id: id, sort_by: this.data.compareSort },
+    }).then(function (data) {
+      if (self._compareSeq !== seq) return;
+      var d = data || {};
+      var suppliers = (d.suppliers || []).map(function (s) {
+        return {
+          supplier_id: s.supplier_id,
+          supplier_name: s.supplier_name,
+          last_price: s.last_price,
+          min_order_qty: s.min_order_qty,
+          composite_score: s.composite_score,
+          value_score: s.value_score,
+          is_best: !!s.is_best,
+          lead_time_hours: s.lead_time_hours,
+          shortage_rate: s.shortage_rate,
+          return_rate: s.return_rate,
+          quality_issue_rate: s.quality_issue_rate,
+          on_time_rate: s.on_time_rate,
+          default_credit_days: s.default_credit_days,
+          total_orders: s.total_orders || 0,
+          current_balance: money(s.current_balance),
+          _scoreColor: scoreColor(s.composite_score),
+          _leadTimeDisplay: s.lead_time_hours ? (s.lead_time_hours >= 24 ? (s.lead_time_hours / 24).toFixed(1) + '天' : s.lead_time_hours + '小时') : '',
+        };
+      });
+      self.setData({
+        compareSkuId: d.sku_id || id,
+        compareSkuName: d.sku_name || self.data.compareSkuName,
+        compareResult: {
+          sku_id: d.sku_id,
+          sku_name: d.sku_name,
+          canonical_unit: d.canonical_unit || '',
+          suppliers: suppliers,
+          total: d.total || suppliers.length,
+        },
+        compareLoading: false,
+      });
+    }).catch(function (err) {
+      if (self._compareSeq !== seq) return;
+      var msg = (err.body && err.body.detail) || '比价加载失败';
+      self.setData({ compareLoading: false, compareError: msg });
+      wx.showToast({ title: msg, icon: 'none' });
+    });
+  },
+
+  switchCompareSort: function (e) {
+    var sort = e.currentTarget.dataset.sort;
+    if (!sort || sort === this.data.compareSort) return;
+    this.setData({ compareSort: sort, compareError: '' });
+    this.loadCompare();
+  },
+
+  loadCompareRecommend: function () {
+    var self = this;
+    var id = this.data.compareSkuId;
+    if (!id || this.data.compareRecommendLoading) return;
+    this.setData({ compareRecommendLoading: true, compareError: '' });
+    app.request({
+      url: '/catalog/suppliers/recommend?sku_id=' + id + '&urgency=normal',
+      method: 'POST',
+      data: {},
+    }).then(function (data) {
+      if (self.data.compareSkuId !== id) return;
+      var d = data || {};
+      self.setData({
+        compareRecommend: {
+          recommendation: d.recommendation || null,
+          alternatives: d.alternatives || [],
+          total_candidates: d.total_candidates || 0,
+        },
+        compareRecommendLoading: false,
+      });
+    }).catch(function (err) {
+      if (self.data.compareSkuId !== id) return;
+      var msg = (err.body && err.body.detail) || '智能推荐加载失败';
+      self.setData({ compareRecommendLoading: false, compareError: msg });
+      wx.showToast({ title: msg, icon: 'none' });
     });
   },
 

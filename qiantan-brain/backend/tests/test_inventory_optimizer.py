@@ -9,9 +9,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
+
 from app.services.inventory_optimizer import (
     PERISHABLE_HALF_LIFE,
     SERVICE_LEVEL_Z,
@@ -449,7 +451,9 @@ class TestNewsvendorPoisson:
         from app.services.inventory_optimizer import newsvendor_normal, newsvendor_poisson
 
         # 日均3单，标准差≈√3≈1.7
-        r_poisson = newsvendor_poisson(selling_price=10, unit_cost=4, salvage_value=0, mean_demand=3)
+        r_poisson = newsvendor_poisson(
+            selling_price=10, unit_cost=4, salvage_value=0, mean_demand=3
+        )
         r_normal = newsvendor_normal(selling_price=10, unit_cost=4, salvage_value=0,
                                      mean_demand=3, std_demand=1.7)
         # 两者都在合理范围内

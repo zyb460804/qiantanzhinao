@@ -7,7 +7,7 @@ import hashlib
 import io
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, TypedDict
 
@@ -378,8 +378,15 @@ async def reconcile_task(
     *,
     fee_rate: Decimal,
 ) -> ReconciliationResult:
-    day_start = datetime.combine(task.date, time.min)
-    day_end = datetime.combine(task.date, time.max)
+    # F3: 日结窗口按本地日界（CST UTC+8）切——Payment.created_at 以 UTC 存储，
+    # 把本地 task.date 的 00:00~23:59 转成 UTC 后再去比对。Payment.created_at
+    # 列为 naive DateTime（SQLite server_default now() 返回 UTC），所以转完
+    # 再 strip tzinfo，避免 aware 与 naive 混比。
+    cst = timezone(timedelta(hours=8))
+    day_start = (
+        datetime.combine(task.date, time.min, tzinfo=cst).astimezone(UTC).replace(tzinfo=None)
+    )
+    day_end = datetime.combine(task.date, time.max, tzinfo=cst).astimezone(UTC).replace(tzinfo=None)
     payment_rows = (
         await db.execute(
             select(Payment, SaleOrder.order_no)

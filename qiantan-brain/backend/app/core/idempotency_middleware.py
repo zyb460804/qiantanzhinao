@@ -24,6 +24,18 @@ from app.models.idempotency import IdempotencyRecord
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 _KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 _MAX_BODY_BYTES = 10 * 1024 * 1024
+# 敏感响应路径：响应体包含 JWT/令牌等凭据，不允许明文写入幂等表。
+# 这些路径仍保留幂等记录（用于并发冲突检测），但 response_body 不缓存明文。
+_SENSITIVE_NO_BODY_PATHS = {
+    "/api/v1/auth/wechat-login",
+    "/api/v1/auth/refresh",
+    "/api/v1/staff/login",
+    "/api/admin/login",
+}
+
+
+def _is_sensitive_no_body_path(path: str) -> bool:
+    return path.rstrip("/") in _SENSITIVE_NO_BODY_PATHS
 
 
 @asynccontextmanager
@@ -229,13 +241,26 @@ class IdempotencyMiddleware:
                 if name.lower() == b"content-type":
                     content_type = value.decode("latin-1")
                     break
+            status_code = int(start["status"])
             async with _request_session(scope) as db:
                 stored = await db.get(IdempotencyRecord, record.id)
                 if stored is not None:
-                    stored.status_code = int(start["status"])
-                    stored.content_type = content_type
-                    stored.response_body = response_body.decode("utf-8", errors="replace")
-                    await db.commit()
+                    if 200 <= status_code < 300:
+                        # 修复（F2）：仅在 2xx 下持久化缓存。
+                        # 4xx/5xx 删除 IdempotencyRecord，客户端可用同键重试。
+                        stored.status_code = status_code
+                        stored.content_type = content_type
+                        if _is_sensitive_no_body_path(scope["path"]):
+                            # 修复（审计 R6）：登录/换发令牌响应包含 JWT，只保留
+                            # 状态码/类型/哈希，不落明文响应体。
+                            stored.response_body = None
+                        else:
+                            stored.response_body = response_body.decode("utf-8", errors="replace")
+                        await db.commit()
+                    else:
+                        # 非 2xx：删除记录允许重试（不缓存失败响应）
+                        await db.delete(stored)
+                        await db.commit()
 
         for message in messages:
             await send(message)

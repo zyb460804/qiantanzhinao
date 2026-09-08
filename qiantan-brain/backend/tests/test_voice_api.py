@@ -181,15 +181,24 @@ class TestVoiceLogs:
         assert logs[0]["asr_text"] == "进了土豆20斤"
 
     async def test_today_count_is_exact(self, client):
-        """Today count is calculated independently from pagination limit."""
+        """Today count is calculated independently from pagination limit.
+
+        UI 口径修复后只统计 confirmed —— 解析后需确认才计数。
+        """
         for text in ("进了土豆20斤", "进了白菜10斤"):
-            await client.post(
+            parsed = await client.post(
                 "/api/v1/voice/parse-text",
                 json={
                     "merchant_id": TEST_MERCHANT_ID,
                     "text": text,
                 },
             )
+            event = parsed.json()["data"].get("parsed") or parsed.json()["data"].get("event")
+            assert (
+                await client.post(
+                    "/api/v1/voice/confirm", json={"voice_log_id": event["voice_log_id"]}
+                )
+            ).status_code == 200
 
         resp = await client.get(
             "/api/v1/voice/today-count",

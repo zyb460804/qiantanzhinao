@@ -1,11 +1,16 @@
 """通用 API 响应信封 — 所有路由统一使用，替代 response_model=dict。"""
 
-from typing import Any, Generic, TypeVar
+from decimal import Decimal
+from typing import Annotated, Any, Generic, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PlainSerializer
 
 
 T = TypeVar("T")
+
+#: Decimal 字段类型——Pydantic v2 默认把 Decimal 序列化为 JSON 字符串，
+#: 前端不兼容。用 PlainSerializer 强制输出为 float number，保持前端兼容。
+DecimalNum = Annotated[Decimal, PlainSerializer(lambda x: float(x), return_type=float)]
 
 
 class ApiResponse(BaseModel, Generic[T]):

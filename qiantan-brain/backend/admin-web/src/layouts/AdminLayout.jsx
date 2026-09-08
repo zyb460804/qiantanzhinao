@@ -11,7 +11,6 @@ import {
   AuditOutlined,
   RocketOutlined,
   BulbOutlined,
-  CameraOutlined,
   SafetyOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -38,36 +37,85 @@ function getInitialDarkMode() {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
 }
 
-const menuItems = [
-  { key: '/dashboard', label: '数据看板', icon: <DashboardOutlined />, permission: PERMISSIONS.DASHBOARD_READ },
+const menuGroups = [
   {
-    key: '/monitoring',
-    label: '运维监控',
-    icon: <FundProjectionScreenOutlined />,
-    permission: PERMISSIONS.DASHBOARD_READ,
+    key: 'business',
+    label: '经营',
+    icon: <DashboardOutlined />,
+    children: [
+      { key: '/dashboard', label: '数据看板', icon: <DashboardOutlined />, permission: PERMISSIONS.DASHBOARD_READ },
+      { key: '/usage', label: '用量监控', icon: <BarChartOutlined />, permission: PERMISSIONS.USAGE_READ },
+    ],
   },
-  { key: '/tenants', label: '租户管理', icon: <TeamOutlined />, permission: PERMISSIONS.TENANT_READ },
-  { key: '/plans', label: '套餐管理', icon: <AppstoreOutlined />, permission: PERMISSIONS.PLAN_READ },
   {
-    key: '/subscriptions',
-    label: '订阅管理',
+    key: 'customers',
+    label: '客户',
+    icon: <TeamOutlined />,
+    children: [
+      { key: '/tenants', label: '租户管理', icon: <TeamOutlined />, permission: PERMISSIONS.TENANT_READ },
+      { key: '/onboarding', label: '接入向导', icon: <RocketOutlined />, permission: PERMISSIONS.TENANT_CREATE },
+    ],
+  },
+  {
+    key: 'commercial',
+    label: '商业化',
     icon: <TransactionOutlined />,
-    permission: PERMISSIONS.SUBSCRIPTION_READ,
+    children: [
+      { key: '/plans', label: '套餐管理', icon: <AppstoreOutlined />, permission: PERMISSIONS.PLAN_READ },
+      {
+        key: '/subscriptions',
+        label: '订阅管理',
+        icon: <TransactionOutlined />,
+        permission: PERMISSIONS.SUBSCRIPTION_READ,
+      },
+      { key: '/invoices', label: '发票管理', icon: <FileTextOutlined />, permission: PERMISSIONS.INVOICE_READ },
+    ],
   },
-  { key: '/invoices', label: '发票管理', icon: <FileTextOutlined />, permission: PERMISSIONS.INVOICE_READ },
-  { key: '/usage', label: '用量监控', icon: <BarChartOutlined />, permission: PERMISSIONS.USAGE_READ },
-  { key: '/audit', label: '审计日志', icon: <AuditOutlined />, permission: PERMISSIONS.AUDIT_READ },
-  { key: '/onboarding', label: '接入向导', icon: <RocketOutlined />, permission: PERMISSIONS.TENANT_CREATE },
-  { key: '/ai-ops', label: 'AI 运营', icon: <BulbOutlined />, permission: PERMISSIONS.AI_ACTION_READ },
-  { key: '/devices', label: '设备监控', icon: <CameraOutlined />, permission: PERMISSIONS.DASHBOARD_READ },
-  { key: '/admins', label: '管理员', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_MANAGE },
+  {
+    key: 'ops',
+    label: '运维',
+    icon: <FundProjectionScreenOutlined />,
+    children: [
+      {
+        key: '/monitoring',
+        label: '运维监控',
+        icon: <FundProjectionScreenOutlined />,
+        permission: PERMISSIONS.DASHBOARD_READ,
+      },
+    ],
+  },
+  {
+    key: 'ai',
+    label: 'AI',
+    icon: <BulbOutlined />,
+    children: [{ key: '/ai-ops', label: 'AI 运营', icon: <BulbOutlined />, permission: PERMISSIONS.AI_ACTION_READ }],
+  },
+  {
+    key: 'risk',
+    label: '风控',
+    icon: <AuditOutlined />,
+    children: [{ key: '/audit', label: '审计日志', icon: <AuditOutlined />, permission: PERMISSIONS.AUDIT_READ }],
+  },
+  {
+    key: 'system',
+    label: '系统',
+    icon: <SafetyOutlined />,
+    children: [{ key: '/admins', label: '管理员', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_MANAGE }],
+  },
 ]
 
 const brandTokens = antdTokens
 
 function getSelectedMenuKey(pathname, items) {
-  const matched = items.find((item) => pathname === item.key || pathname.startsWith(`${item.key}/`))
-  return matched?.key || '/dashboard'
+  for (const item of items) {
+    if (item.children) {
+      const matched = getSelectedMenuKey(pathname, item.children)
+      if (matched) return matched
+    } else if (pathname === item.key || pathname.startsWith(`${item.key}/`)) {
+      return item.key
+    }
+  }
+  return '/dashboard'
 }
 
 export default function AdminLayout() {
@@ -110,7 +158,14 @@ export default function AdminLayout() {
 
   if (!admin) return null
 
-  const visibleMenuItems = menuItems.filter((item) => hasPermission(item.permission, admin.role, admin.permissions))
+  const visibleMenuItems = menuGroups
+    .map((group) => ({
+      ...group,
+      children: group.children.filter((item) =>
+        hasPermission(item.permission, admin.role, admin.permissions),
+      ),
+    }))
+    .filter((group) => group.children.length > 0)
 
   const avatarMenu = {
     items: [

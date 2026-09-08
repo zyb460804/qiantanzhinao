@@ -6,12 +6,20 @@
 - require_permission 依赖：路由级权限执行
 """
 
+import hmac
+import re
 import uuid
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.rate_limiter import (
+    check_rate_limit,
+    clear_attempts,
+    record_failed_attempt,
+)
 from app.core.security import create_access_token, get_current_merchant
 from app.database import get_db
 from app.models.merchant import Merchant
@@ -20,6 +28,28 @@ from app.schemas.common import AnyResponse
 
 
 router = APIRouter(prefix="/api/v1/staff", tags=["staff"])
+
+# P1-4：PIN 格式约束（服务端强制；前端原有 4-6 位只是客户端校验）
+_PIN_PATTERN = re.compile(r"^\d{4,6}$")
+
+
+def _hash_pin(pin: str) -> str:
+    """PIN → bcrypt 哈希。"""
+    return bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+
+
+def _is_hashed(stored: str | None) -> bool:
+    return bool(stored) and stored.startswith("$2")  # bcrypt 前缀
+
+
+def _normalize_and_validate_pin(pin: str | None) -> str | None:
+    """入参校验：None/'' → None（清空）；否则必须 4-6 位数字，返回哈希。"""
+    if pin is None or pin == "":
+        return None
+    pin = str(pin).strip()
+    if not _PIN_PATTERN.fullmatch(pin):
+        raise HTTPException(status_code=422, detail="PIN 必须是 4-6 位数字")
+    return _hash_pin(pin)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -78,6 +108,10 @@ def require_permission(permission: str):
                 if staff and staff.merchant_id == merchant.id and staff.is_active:
                     role = staff.role
                     staff_id = sid
+                else:
+                    # 修复（F1）：token 携带 staff_id 但员工已停用/不存在/不属于此商户 → 拒绝。
+                    # 原实现仅不进入 if 分支，role 仍保持 token 中的角色，权限残留。
+                    raise HTTPException(status_code=403, detail="员工账号已停用或不存在")
             except (ValueError, TypeError):
                 pass
 
@@ -95,6 +129,10 @@ def require_permission(permission: str):
                     pass
 
         perms = ROLE_PERMISSIONS.get(role, set())
+        # 租户/平台管理员虽然不在 staff 的 ROLE_PERMISSIONS 中，但按安全要求
+        # 可以管理员工（尤其是授予 market_admin 角色）。
+        if role in ("tenant_admin", "platform_admin") and permission == "manage_staff":
+            perms = {permission}
         if permission not in perms:
             raise HTTPException(
                 status_code=403,
@@ -129,6 +167,7 @@ async def list_roles():
 @router.post("/login", response_model=AnyResponse)
 async def staff_login(
     body: dict,
+    request: Request,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -137,6 +176,17 @@ async def staff_login(
     商户（owner）已登录状态下，员工输入 PIN 切换身份。前端拿到 staff token
     后替换 owner token，后续请求的 require_permission 会从 token 读
     role/staff_id 执行权限拦截。
+
+    修复（审计 C-6/H2）：
+      - 接入登录限流（staff_id 作为 key，5 次失败锁 15 分钟），防止 PIN 暴力破解。
+      - PIN 比较改为 hmac.compare_digest 常量时间比较，杜绝时序侧信道。
+
+    修复（F2 限流投毒 DoS）：
+      - 限流 key 改为 f"{merchant.id}:{staff_id}"。原 key 仅用 staff_id（全局），
+        恶意 owner 可对任意员工 UUID 发 10 次错 PIN 把该员工在所有商户下锁定 1 小时。
+        加 merchant_id 前缀后，限流维度与归属校验保持一致。
+      - 顺序调整：先做 staff 存在性 + 归属校验（404），通过后才进入限流/PIN 校验。
+        避免攻击者用 404 探测的方式把不存在的 staff_id 计入失败次数。
     """
     staff_id = body.get("staff_id")
     pin_code = body.get("pin_code")
@@ -146,13 +196,44 @@ async def staff_login(
         sid = uuid.UUID(str(staff_id))
     except (ValueError, TypeError) as err:
         raise HTTPException(status_code=400, detail="staff_id 格式无效") from err
+    # 限流 key 加 merchant_id 前缀，防止跨商户投毒锁定他人员工
+    rl_key = f"{merchant.id}:{sid}"
+    # 先做归属校验：员工不存在/不属于此商户 → 404，不计入限流（避免 404 探测投毒）
     staff = await db.get(StaffMember, sid)
     if not staff or staff.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="员工不存在")
+    # 通过归属校验后再检查限流（C-6）：超限抛 429
+    await check_rate_limit(request, rl_key)
     if not staff.is_active:
+        await record_failed_attempt(request, rl_key)
         raise HTTPException(status_code=403, detail="员工已停用")
-    if not staff.pin_code or staff.pin_code != str(pin_code):
+    # 应用层断言（V3-H1）：owner 只能由商户本人（merchants）承载，员工表
+    # 不允许 owner 行 —— create/update 已禁、迁移 n6d7e8f9a0b1 清理存量、
+    # seed 不再生成。此处兜底：未来任何写入路径复活 role='owner' 员工行，
+    # 也绝不为其签发带 owner 全权限的员工 token。
+    if staff.role == "owner":
+        raise HTTPException(status_code=403, detail="owner 角色不允许员工登录")
+    # 常量时间比较（H2）：避免时序侧信道泄露正确 PIN 的前缀
+    # P1-4：存量兼容 —— 哈希行走 bcrypt 校验；旧明文行走 compare_digest，
+    # 命中后即时透明升级为 bcrypt 哈希落库（无需管理员介入迁移）。
+    submitted = str(pin_code)
+    pin_ok = False
+    if staff.pin_code:
+        if _is_hashed(staff.pin_code):
+            try:
+                pin_ok = bcrypt.checkpw(submitted.encode("utf-8"), staff.pin_code.encode("ascii"))
+            except ValueError:
+                pin_ok = False
+        else:
+            pin_ok = hmac.compare_digest(staff.pin_code, submitted)
+            if pin_ok:
+                staff.pin_code = _hash_pin(submitted)
+                await db.commit()
+    if not pin_ok:
+        await record_failed_attempt(request, rl_key)
         raise HTTPException(status_code=401, detail="PIN 码错误")
+    # 登录成功，清除该限流 key 的失败记录
+    await clear_attempts(request, rl_key)
     token = create_access_token(merchant.id, role=staff.role, staff_id=staff.id)
     return {
         "code": 0,
@@ -202,6 +283,7 @@ async def create_staff(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("manage_staff")),
 ):
     name = (body.get("name") or "").strip()
     role = body.get("role", "cashier")
@@ -209,13 +291,21 @@ async def create_staff(
         raise HTTPException(status_code=400, detail="姓名不能为空")
     if role not in ROLE_PERMISSIONS:
         raise HTTPException(status_code=400, detail=f"无效角色: {role}")
+    # 安全（垂直提权修复）：owner 只能是商户本人，不允许经员工体系创建
+    if role == "owner":
+        raise HTTPException(status_code=400, detail="不允许创建 owner 角色的员工")
+    # 安全（审计 R1）：market_admin 属于管理员角色，仅租户/平台管理员可授予；
+    # owner 等普通商户操作者只能创建 manager/cashier/purchaser/stocker 等普通员工。
+    if role == "market_admin" and _perm.role not in ("tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅租户/平台管理员可创建市场管理员")
 
     s = StaffMember(
         merchant_id=merchant.id,
         name=name,
         phone=body.get("phone"),
         role=role,
-        pin_code=body.get("pin_code"),
+        # P1-4：服务端校验 4-6 位数字并 bcrypt 哈希落库（不再明文）
+        pin_code=_normalize_and_validate_pin(body.get("pin_code")),
     )
     db.add(s)
     await db.commit()
@@ -229,6 +319,7 @@ async def update_staff(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("manage_staff")),
 ):
     """更新员工字段。
 
@@ -247,10 +338,21 @@ async def update_staff(
             value = body[f]
             if value == "" and f != "pin_code":
                 continue
-            setattr(s, f, value if value != "" else None)
+            if f == "pin_code":
+                # P1-4：更新 PIN 同样走服务端校验 + bcrypt 哈希
+                setattr(s, f, _normalize_and_validate_pin(value))
+            else:
+                setattr(s, f, value)
     if "role" in body:
         if body["role"] not in ROLE_PERMISSIONS:
             raise HTTPException(status_code=400, detail="无效角色")
+        # 安全（垂直提权修复）：禁止把员工（含自己）提升为 owner —— owner 只能是商户本人
+        if body["role"] == "owner":
+            raise HTTPException(status_code=400, detail="不允许将员工角色修改为 owner")
+        # 安全（审计 R1）：市场管理员角色仅租户/平台管理员可授予，普通操作者不能
+        # 把已有员工（或自己）提升为 market_admin。
+        if body["role"] == "market_admin" and _perm.role not in ("tenant_admin", "platform_admin"):
+            raise HTTPException(status_code=403, detail="仅租户/平台管理员可授予市场管理员角色")
         s.role = body["role"]
     if "is_active" in body:
         s.is_active = bool(body["is_active"])
@@ -263,6 +365,7 @@ async def deactivate_staff(
     staff_id: uuid.UUID,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    _perm=Depends(require_permission("manage_staff")),
 ):
     s = await db.get(StaffMember, staff_id)
     if not s or s.merchant_id != merchant.id:

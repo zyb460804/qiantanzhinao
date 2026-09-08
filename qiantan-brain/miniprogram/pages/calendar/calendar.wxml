@@ -9,7 +9,7 @@
 
   <!-- 错误态 -->
   <view class="empty-state surface" wx:elif="{{hasError}}">
-    <mascot size="md" mood="worry"/>
+    <mascot size="md" mood="think"/>
     <text>节气数据加载失败</text>
     <button class="btn-outline" bindtap="retry">重新加载</button>
   </view>
@@ -43,11 +43,11 @@
   <view class="section-head"><text class="section-title">本节气经营要点</text><text class="section-caption">{{solarTerm}}·{{termRange}}</text></view>
   <view class="term-card">
     <view class="term-head">
-      <view class="term-badge"><icon name="leaf" size="40" color="var(--green-800)" /></view>
+      <view class="term-badge"><icon name="leaf" size="md" color="var(--green-800)" /></view>
       <view class="term-meta"><text class="term-name">{{solarTerm}}</text><text class="term-range">{{termRange}} · 当令：{{inSeason}}</text></view>
     </view>
     <view class="term-row" wx:for="{{termAdvice}}" wx:key="label">
-      <view class="term-ic {{item.tone}}"><icon name="{{item.icon}}" size="34" color="{{item.tone==='warn' ? 'var(--corn)' : item.tone==='hot' ? 'var(--red)' : 'var(--green-800)'}}" /></view>
+      <view class="term-ic {{item.tone}}"><icon name="{{item.icon}}" size="sm" color="{{item.tone==='warn' ? 'var(--corn)' : item.tone==='hot' ? 'var(--red)' : 'var(--green-800)'}}" /></view>
       <view class="term-body"><text class="term-label">{{item.label}}</text><text class="term-text">{{item.text}}</text></view>
     </view>
   </view>
@@ -61,7 +61,7 @@
         <text class="plan-weather">{{item.weather}} · {{item.temp}}</text>
         <text class="plan-tip">{{item.tip}}</text>
       </view>
-      <icon name="{{item.hot ? 'spark' : 'leaf'}}" size="36" color="{{item.hot ? 'var(--red)' : 'var(--green-700)'}}" />
+      <icon name="{{item.hot ? 'spark' : 'leaf'}}" size="sm" color="{{item.hot ? 'var(--red)' : 'var(--green-700)'}}" />
     </view>
   </view>
   </block>

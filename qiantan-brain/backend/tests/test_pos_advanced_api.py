@@ -5,6 +5,7 @@ Covers the P1 gaps identified in the project quality audit (§6, §5.7).
 
 from __future__ import annotations
 
+import json
 import uuid
 from decimal import Decimal
 
@@ -257,6 +258,35 @@ class TestHoldResumeCancel:
         cancel = await client.delete(f"/api/v1/pos/orders/{order_id}")
         assert cancel.status_code in (400, 409)
 
+    async def test_cancel_after_resume_cannot_overwrite_paid_status(self, client, db_session):
+        """LOW(a)：挂单被取单支付后，取消请求必须 409 且不得覆写 paid 状态.
+
+        回归并发竞态：取消方与 resume 支付竞态时，无 FOR UPDATE + 锁后状态重检
+        会把已支付单覆写成 cancelled。
+        """
+        await _seed_stock(db_session, quantity=10)
+        hold = await client.post(
+            "/api/v1/pos/orders/hold",
+            json={
+                "items": [{"product_id": 1, "quantity": 2, "unit": "斤", "unit_price": 5.0}],
+                "client_id": "cancel-after-resume-001",
+            },
+        )
+        order_id = hold.json()["data"]["order_id"]
+        resume = await client.post(
+            f"/api/v1/pos/orders/{order_id}/resume",
+            json={"payment_method": "cash"},
+        )
+        assert resume.status_code == 200
+        assert resume.json()["data"]["status"] == "paid"
+
+        cancel = await client.delete(f"/api/v1/pos/orders/{order_id}")
+        assert cancel.status_code == 409
+        async with db_session() as session:
+            order = await session.get(SaleOrder, uuid.UUID(order_id))
+            assert order.status == "paid"  # 未被覆写
+            assert order.paid_amount == Decimal("10")
+
     async def test_hold_does_not_consume_stock(self, client, db_session):
         """挂单时先不扣库存 — 取单(resume)时才扣，防止挂单霸占库存."""
         await _seed_stock(db_session, quantity=5)
@@ -382,9 +412,11 @@ class TestFullRefund:
             },
         )
         assert refund.status_code == 200
-        # Verify order is fully refunded
+        assert refund.json()["data"]["new_status"] == "refunded"
+        # Verify order is fully refunded and the receivable is fully reversed
         async with db_session() as session:
             from app.models.accounts import CustomerReceivable
+            from app.services.accounts_service import get_customer_balance
 
             entries = (
                 (
@@ -399,8 +431,29 @@ class TestFullRefund:
                 .scalars()
                 .all()
             )
-            # At minimum the charge entry exists
-            assert len(entries) >= 1
+            # charge 产生应收，退款整单冲减应收
+            assert [(entry.direction, float(entry.amount)) for entry in entries] == [
+                ("charge", 7.0),
+                ("repay", 7.0),
+            ]
+            balance = await get_customer_balance(
+                session, uuid.UUID(TEST_MERCHANT_ID), "赵记面馆"
+            )
+            assert balance == Decimal("0")
+            credit_refunds = (
+                (
+                    await session.execute(
+                        select(Payment).where(
+                            Payment.order_id == uuid.UUID(order_id),
+                            Payment.method == "credit",
+                            Payment.status == "refunded",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert [float(p.amount) for p in credit_refunds] == [-7.0]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -636,8 +689,12 @@ async def test_resume_credit_requires_customer_name(client, db_session):
         },
     )
 
-    assert response.status_code == 400
-    assert "客户" in response.json()["detail"]
+    # P2-4：赊账缺客户名的校验上移到 schema validator → 422（此前 handler 400）
+    assert response.status_code == 422
+    body = response.json()
+    detail = body.get("detail")
+    msg = detail if isinstance(detail, str) else json.dumps(detail, ensure_ascii=False)
+    assert "客户" in msg
 
 
 @pytest.mark.asyncio

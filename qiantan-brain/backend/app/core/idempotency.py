@@ -111,3 +111,15 @@ class ConflictError(Exception):
         self.key = key
         self.message = message
         super().__init__(message)
+
+
+def short_idem_key(prefix: str, *parts: object) -> str:
+    """共享幂等键压缩：长源串超出 VARCHAR(64) 列宽时 PG 会直接拒写 INSERT。
+
+    对 parts 拼接取 sha256 并截断（总长 ≤ 64）：同一源串确定性同键，
+    不同源串碰撞概率可忽略；prefix 保留语义便于排查。
+    purchase/pos/operations 的幂等键统一走此处（第四轮验证 CRITICAL-1/2 修复）。
+    """
+    digest_len = max(8, 63 - len(prefix))
+    digest = hashlib.sha256(":".join(map(str, parts)).encode()).hexdigest()[:digest_len]
+    return f"{prefix}:{digest}"

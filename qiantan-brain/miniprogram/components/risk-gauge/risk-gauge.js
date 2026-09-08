@@ -57,7 +57,7 @@ Component({
       });
       var average = Math.round(values.reduce(function (sum, value) { return sum + value; }, 0) / values.length);
       var color = average >= 65 ? '#c8392b' : (average >= 35 ? '#c8902a' : '#2a6b3c');
-      var fillColor = average >= 65 ? 'rgba(217,82,74,.16)' : (average >= 35 ? 'rgba(243,168,59,.18)' : 'rgba(23,92,69,.16)');
+      var fillColor = average >= 65 ? 'rgba(200,57,43,.16)' : (average >= 35 ? 'rgba(200,144,42,.18)' : 'rgba(42,107,60,.16)');
 
       ctx.clearRect(0, 0, w, h);
       var cx = w / 2;
@@ -75,9 +75,9 @@ Component({
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
         ctx.closePath();
-        ctx.fillStyle = ring % 2 === 0 ? 'rgba(23,92,69,.018)' : 'rgba(23,92,69,.035)';
+        ctx.fillStyle = ring % 2 === 0 ? 'rgba(42,107,60,.02)' : 'rgba(42,107,60,.04)';
         ctx.fill();
-        ctx.strokeStyle = ring === 4 ? '#C9D8CF' : '#E0E8E2';
+        ctx.strokeStyle = ring === 4 ? '#E1E4E1' : '#EEF0ED';
         ctx.lineWidth = ring === 4 ? 1.2 : 1;
         ctx.stroke();
       }
@@ -87,7 +87,7 @@ Component({
         ctx.beginPath();
         ctx.moveTo(cx, cy);
         ctx.lineTo(cx + Math.cos(axisAngle) * radius, cy + Math.sin(axisAngle) * radius);
-        ctx.strokeStyle = '#DFE8E1';
+        ctx.strokeStyle = '#E1E4E1';
         ctx.lineWidth = 1;
         ctx.stroke();
       }
@@ -129,19 +129,19 @@ Component({
         else if (Math.cos(labelAngle) < -.35) ctx.textAlign = 'right';
         else ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#263B31';
+        ctx.fillStyle = '#1A1F1C';
         ctx.font = '600 12px sans-serif';
         ctx.fillText(axes[m].name, lx, ly - 7);
-        ctx.fillStyle = '#7B8780';
+        ctx.fillStyle = '#8C9590';
         ctx.font = '11px sans-serif';
         ctx.fillText(Math.round(values[m]) + ' 分', lx, ly + 8);
       }
 
       ctx.beginPath();
       ctx.arc(cx, cy, 28, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,254,250,.94)';
+      ctx.fillStyle = 'rgba(255,255,255,.94)';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(23,92,69,.09)';
+      ctx.strokeStyle = 'rgba(42,107,60,.09)';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.textAlign = 'center';
@@ -149,7 +149,7 @@ Component({
       ctx.fillStyle = color;
       ctx.font = '700 17px sans-serif';
       ctx.fillText(average + '', cx, cy - 5);
-      ctx.fillStyle = '#7B8780';
+      ctx.fillStyle = '#8C9590';
       ctx.font = '9px sans-serif';
       ctx.fillText('综合风险', cx, cy + 11);
     },

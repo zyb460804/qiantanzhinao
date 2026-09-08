@@ -154,8 +154,8 @@ function drawLineChart(ctx, w, h, data, opts) {
   // 区域填充 (仅第一条左轴序列)
   if (count > 1 && fillArea) {
     var gradient = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
-    gradient.addColorStop(0, fillArea.gradientFrom || 'rgba(23,92,69,.20)');
-    gradient.addColorStop(1, fillArea.gradientTo || 'rgba(23,92,69,0)');
+    gradient.addColorStop(0, fillArea.gradientFrom || 'rgba(42,107,60,.20)');
+    gradient.addColorStop(1, fillArea.gradientTo || 'rgba(42,107,60,0)');
     ctx.beginPath();
     drawData.forEach(function (d, i) {
       var x = pointX(i);

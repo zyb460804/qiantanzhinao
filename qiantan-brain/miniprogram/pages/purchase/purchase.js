@@ -110,10 +110,9 @@ Page({
       self.setData({ suppliers: items.map(function (s) {
         return { supplier_id: s.supplier_id, supplier_name: s.name, balance: s.current_balance || 0 };
       }) });
-    }).catch(function (err) {
+    }).catch(function () {
       // 供应商列表失败不弹 toast（次要数据），但在打开付款/选择弹窗时
       // 若列表为空会触发空态提示，用户感知到失败后可重试。
-      console.warn('loadSuppliers failed', err);
     });
   },
 
@@ -221,7 +220,12 @@ Page({
     this.setData({ submitting: true });
     app.request({ url: '/purchase/from-advice', method: 'POST', data: { recommendation_ids: [] } })
       .then(function () { self.setData({ submitting: false }); wx.showToast({ title: '已生成采购清单', icon: 'success' }); self.loadList(); })
-      .catch(function () { self.setData({ submitting: false }); });
+      .catch(function (err) {
+        self.setData({ submitting: false });
+        // H2：区分网络/业务错误，写操作失败不再静默
+        var isNet = err && err.type === 'network_error';
+        wx.showToast({ title: isNet ? '网络异常，请检查网络后重试' : ((err.body && err.body.detail) || '生成采购清单失败'), icon: 'none' });
+      });
   },
 
   // ── 手动录入 ──────────────────────────────────────────
@@ -301,7 +305,12 @@ Page({
             self.setData({ submitting: false });
             wx.showToast({ title: '采购单已确认', icon: 'success' });
             self.loadList();
-          }).catch(function () { self.setData({ submitting: false }); });
+          }).catch(function (err) {
+            self.setData({ submitting: false });
+            // H2：区分网络/业务错误，下单失败不再静默
+            var isNet = err && err.type === 'network_error';
+            wx.showToast({ title: isNet ? '网络异常，请检查网络后重试' : ((err.body && err.body.detail) || '确认下单失败'), icon: 'none' });
+          });
       },
     });
   },
@@ -544,7 +553,12 @@ Page({
     this.setData({ submitting: true });
     app.request({ url: '/purchase/' + this.data.listData.list_id + '/confirm', method: 'POST', data: {} })
       .then(function (data) { self.setData({ submitting: false, confirmed: true, confirmResult: data }); })
-      .catch(function () { self.setData({ submitting: false }); });
+      .catch(function (err) {
+        self.setData({ submitting: false });
+        // H2：区分网络/业务错误，确认入库失败不再静默
+        var isNet = err && err.type === 'network_error';
+        wx.showToast({ title: isNet ? '网络异常，请检查网络后重试' : ((err.body && err.body.detail) || '确认入库失败'), icon: 'none' });
+      });
   },
 
   // ── 供应商付款 ────────────────────────────────────────

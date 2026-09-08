@@ -59,6 +59,16 @@ async def _submit_all_snapshot_items(client, start_data, overrides=None):
     return responses
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _seed_book_inventory(db_session):
+    """P2-2 修复后盘点只为「有账面流水」的品项生成待盘项 —— 每个用例先给商品1入一笔账（10斤）。"""
+    async with db_session() as session:
+        await _create_inventory_record(
+            session, uuid.UUID(TEST_MERCHANT_ID), TEST_PRODUCT_ID,
+            "purchase", quantity=10, total_amount=20.0,
+        )
+
+
 # ------------------------------------------------------------------
 # POST /api/v1/inventory/stocktake/start
 # ------------------------------------------------------------------
@@ -75,10 +85,10 @@ async def test_start_stocktake(client, db_session):
     assert data["code"] == 0
     assert "session_id" in data["data"]
     assert "items" in data["data"]
-    # 4 seeded products, all with book_qty = 0
-    assert len(data["data"]["items"]) == 4
+    # P2-2：只为有账面流水的品项生成待盘项（商品1 入过账 10 斤）
+    assert len(data["data"]["items"]) == 1
     for item in data["data"]["items"]:
-        assert item["book_qty"] == 0
+        assert item["book_qty"] == 10
 
 
 async def test_start_stocktake_duplicate(client, db_session):
@@ -152,10 +162,10 @@ async def test_submit_item(client, db_session):
     assert resp.status_code == 200
     data = resp.json()
     assert data["code"] == 0
-    # book_qty = 0 (no inventory), actual = 5 → variance = 5
-    assert data["data"]["book_qty"] == 0
+    # book_qty = 10（夹具入账），actual = 5 → variance = -5
+    assert data["data"]["book_qty"] == 10
     assert data["data"]["actual_qty"] == 5
-    assert data["data"]["variance"] == 5
+    assert data["data"]["variance"] == -5
 
 
 # ------------------------------------------------------------------
@@ -172,7 +182,7 @@ async def test_complete_stocktake(client, db_session):
     start_data = start_resp.json()["data"]
     session_id = start_data["session_id"]
 
-    # Submit every snapshot line; product 1 has a variance (盘盈).
+    # Submit every snapshot line; product 1 has a variance (盘亏: 账面10 实盘5).
     await _submit_all_snapshot_items(client, start_data, {1: 5})
 
     resp = await client.post(f"/api/v1/inventory/stocktake/{session_id}/complete", json={})
@@ -181,7 +191,7 @@ async def test_complete_stocktake(client, db_session):
     assert data["code"] == 0
     adjustments = data["data"]["adjustments"]
     assert len(adjustments) == 1
-    assert adjustments[0]["variance"] == 5
+    assert adjustments[0]["variance"] == -5
     assert adjustments[0]["product_id"] == 1
 
     # Verify adjustment record in DB
@@ -198,7 +208,7 @@ async def test_complete_stocktake(client, db_session):
         )
         records = result.scalars().all()
         assert len(records) == 1
-        assert float(records[0].quantity) == 5
+        assert float(records[0].quantity) == -5
 
 
 async def test_complete_empty_stocktake(client, db_session):
@@ -302,25 +312,25 @@ async def test_stocktake_with_actual_inventory(client, db_session):
     start_data = start_resp.json()["data"]
     session_id = start_data["session_id"]
 
-    # Verify book qty = 7
+    # Verify book qty = 10(夹具) + 10 - 3 = 17
     items = start_data["items"]
     item1 = next(i for i in items if i["product_id"] == 1)
-    assert item1["book_qty"] == 7
+    assert item1["book_qty"] == 17
 
-    # Actual count = 5 → 盘亏 (variance = -2); other products match book qty.
+    # Actual count = 5 → 盘亏 (variance = -12); other products match book qty.
     responses = await _submit_all_snapshot_items(client, start_data, {1: 5})
     submit_resp = next(
         response for response in responses if response.json()["data"]["product_id"] == 1
     )
-    assert submit_resp.json()["data"]["variance"] == -2
+    assert submit_resp.json()["data"]["variance"] == -12
 
     # Complete — adjustment record with negative quantity
     complete_resp = await client.post(f"/api/v1/inventory/stocktake/{session_id}/complete", json={})
     assert complete_resp.status_code == 200
     adjustments = complete_resp.json()["data"]["adjustments"]
     assert len(adjustments) == 1
-    assert adjustments[0]["variance"] == -2
-    assert complete_resp.json()["data"]["total_variance"] == -2
+    assert adjustments[0]["variance"] == -12
+    assert complete_resp.json()["data"]["total_variance"] == -12
 
 
 async def test_current_stocktake_restores_snapshot_and_submitted_progress(client, db_session):
@@ -340,7 +350,7 @@ async def test_current_stocktake_restores_snapshot_and_submitted_progress(client
     product = next(item for item in current["items"] if item["product_id"] == 1)
     assert product["submitted"] is True
     assert product["actual_qty"] == 3
-    assert product["book_qty"] == 0
+    assert product["book_qty"] == 10
 
 
 async def test_stocktake_uses_start_time_book_snapshot(client, db_session):
@@ -361,11 +371,17 @@ async def test_stocktake_uses_start_time_book_snapshot(client, db_session):
         json={"product_id": 1, "actual_qty": 10},
     )
     assert response.status_code == 200
-    assert response.json()["data"]["book_qty"] == 10
-    assert response.json()["data"]["variance"] == 0
+    # 夹具 10 + 本用例 10 = 账面 20（start 后的 -4 不影响快照）
+    assert response.json()["data"]["book_qty"] == 20
+    assert response.json()["data"]["variance"] == -10
 
 
 async def test_complete_rejects_partially_counted_snapshot(client, db_session):
+    mid = uuid.UUID(TEST_MERCHANT_ID)
+    # 快照需要 ≥2 项才能验证「部分录入被拒」（夹具只入账了商品1）
+    async with db_session() as session:
+        await _create_inventory_record(session, mid, 2, "purchase", quantity=1, total_amount=1.0)
+
     start_resp = await client.post("/api/v1/inventory/stocktake/start", json={})
     start_data = start_resp.json()["data"]
     session_id = start_data["session_id"]
@@ -417,7 +433,7 @@ async def test_complete_repairs_legacy_missing_variance(client, db_session):
         f"/api/v1/inventory/stocktake/{session_id}/complete", json={}
     )
     assert complete.status_code == 200, complete.text
-    assert complete.json()["data"]["total_variance"] == 2
+    assert complete.json()["data"]["total_variance"] == -8
 
     async with db_session() as session:
         repaired = (await session.execute(
@@ -426,4 +442,4 @@ async def test_complete_repairs_legacy_missing_variance(client, db_session):
                 StocktakeItem.product_id == 1,
             )
         )).scalar_one()
-        assert float(repaired.variance) == 2
+        assert float(repaired.variance) == -8

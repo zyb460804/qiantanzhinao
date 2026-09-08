@@ -57,7 +57,9 @@ class InventoryRecord(Base):
     # --- 修改追踪（编辑已确认记录时生成冲正记录） ---
     original_record_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)  # 指向被修正的原记录
     is_correction: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
 
 
 class CurrentInventory(Base):

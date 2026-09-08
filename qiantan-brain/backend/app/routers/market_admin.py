@@ -3,23 +3,53 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_merchant
+from app.core.timezone import utc_now
 from app.database import get_db
 from app.models.market import (
     Market,
     MarketComplaint,
     MarketInspection,
     MarketMerchant,
-    MarketNotice,
 )
 from app.models.merchant import Merchant
 from app.schemas.common import AnyResponse
 
 
 router = APIRouter(prefix="/api/v1/market-admin", tags=["market-admin"])
+
+
+class CreateInspectionRequest(BaseModel):
+    market_id: uuid.UUID
+    inspector: str
+    inspection_type: str = "food_safety"
+    result: str = "pass"
+    notes: str | None = None
+    photos: str | None = None
+    merchant_id: uuid.UUID | None = None
+
+
+class CreateComplaintRequest(BaseModel):
+    market_id: uuid.UUID
+    complaint_type: str
+    description: str
+    complainant: str | None = None
+    merchant_id: uuid.UUID | None = None
+
+
+class ResolveComplaintRequest(BaseModel):
+    resolution: str = ""
+
+
+async def _require_market_admin_role(merchant: Merchant) -> None:
+    """校验当前操作者具备市场/租户/平台管理员角色。"""
+    role = getattr(merchant, "_token_role", None) or "owner"
+    if role not in ("market_admin", "tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅市场/租户管理员可操作")
 
 
 # ═══ 市场 ═══
@@ -92,8 +122,13 @@ async def create_market(
       1. 新增 platform_admin / market_admin 角色与登录链路
       2. 通过 OAuth/邀请码校验后才能创建市场
     """
-    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
-        raise HTTPException(status_code=403, detail="仅平台管理员可创建市场")
+    # 修复（审计 C-3）：角色从 token claim 读取（_token_role），不再依赖 DB 列。
+    # wechat_login 硬编码 role="owner"，原 getattr(merchant, "role", ...) 对所有
+    # 微信登录用户恒为 "owner" → 等价于无权限校验。摊主不是市场管理员，故将
+    # "owner" 从允许角色中移除。
+    role = getattr(merchant, "_token_role", None) or "owner"
+    if role not in ("market_admin", "tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅市场/租户管理员可操作")
     m = Market(name=body["name"], address=body.get("address"), contact=body.get("contact"))
     db.add(m)
     await db.commit()
@@ -139,11 +174,24 @@ async def register_merchant(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    # 仅 owner/tenant_admin 可登记商户入场（审计 P0-1：原实现任意商户可塞任意商户进任意市场）
-    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
-        raise HTTPException(status_code=403, detail="仅管理员可登记商户入场")
+    # 修复（审计 C-3）：角色从 token claim 读取，owner 不在允许列表中。
+    role = getattr(merchant, "_token_role", None) or "owner"
+    if role not in ("market_admin", "tenant_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="仅市场/租户管理员可操作")
     market_id = uuid.UUID(body["market_id"])
     await _require_market_member(db, merchant.id, market_id)
+    # 修复（审计 C-10）：跨租户保护 — 目标商户必须与操作者同租户。
+    # 原实现允许 market_admin 把任意租户的商户塞进自己市场，破坏 SaaS 行级隔离。
+    target = await db.get(Merchant, uuid.UUID(body["merchant_id"]))
+    if target is None:
+        raise HTTPException(status_code=404, detail="目标商户不存在")
+    # 修复（F4 双 None 误判）：原 `!=` 比较在双方 tenant_id 均为 None 时返回 False
+    # （None == None 为 True），校验通过。存量数据 tenant_id 可为 None，破坏隔离。
+    # 改为 fail-closed：任一方为 None 即拒绝。
+    merchant_tid = getattr(merchant, "tenant_id", None)
+    target_tid = getattr(target, "tenant_id", None)
+    if merchant_tid is None or target_tid is None or merchant_tid != target_tid:
+        raise HTTPException(status_code=403, detail="跨租户操作禁止")
     mm = MarketMerchant(
         market_id=uuid.UUID(body["market_id"]),
         merchant_id=uuid.UUID(body["merchant_id"]),
@@ -198,23 +246,27 @@ async def list_inspections(
 
 @router.post("/inspections", response_model=AnyResponse)
 async def create_inspection(
-    body: dict,
+    body: CreateInspectionRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    market_id = uuid.UUID(body["market_id"])
+    # 修复（审计 R1）：写巡检必须具有市场/租户/平台管理员角色。
+    await _require_market_admin_role(merchant)
+    market_id = body.market_id
     # 校验当前商户属于该市场（审计 P1-权限语义错位）
     await _require_market_member(db, merchant.id, market_id)
+    # 修复（审计 R1）：若指定目标商户，必须校验其属于同一市场。
+    if body.merchant_id is not None:
+        await _require_market_member(db, body.merchant_id, market_id)
     i = MarketInspection(
         market_id=market_id,
-        inspector=body["inspector"],
-        inspection_type=body.get("inspection_type", "food_safety"),
-        result=body.get("result", "pass"),
-        notes=body.get("notes"),
-        photos=body.get("photos"),
+        inspector=body.inspector,
+        inspection_type=body.inspection_type,
+        result=body.result,
+        notes=body.notes,
+        photos=body.photos,
+        merchant_id=body.merchant_id,
     )
-    if body.get("merchant_id"):
-        i.merchant_id = uuid.UUID(body["merchant_id"])
     db.add(i)
     await db.commit()
     return {"code": 0, "data": {"id": str(i.id), "result": i.result}}
@@ -266,21 +318,25 @@ async def list_complaints(
 
 @router.post("/complaints", response_model=AnyResponse)
 async def create_complaint(
-    body: dict,
+    body: CreateComplaintRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    market_id = uuid.UUID(body["market_id"])
+    # 修复（审计 R1）：写投诉必须具有市场/租户/平台管理员角色。
+    await _require_market_admin_role(merchant)
+    market_id = body.market_id
     # 校验当前商户属于该市场（审计 P1-权限语义错位）
     await _require_market_member(db, merchant.id, market_id)
+    # 修复（审计 R1）：若指定被投诉商户，必须校验其属于同一市场。
+    if body.merchant_id is not None:
+        await _require_market_member(db, body.merchant_id, market_id)
     c = MarketComplaint(
         market_id=market_id,
-        complainant=body.get("complainant"),
-        complaint_type=body["complaint_type"],
-        description=body["description"],
+        complainant=body.complainant,
+        complaint_type=body.complaint_type,
+        description=body.description,
+        merchant_id=body.merchant_id,
     )
-    if body.get("merchant_id"):
-        c.merchant_id = uuid.UUID(body["merchant_id"])
     db.add(c)
     await db.commit()
     return {"code": 0, "data": {"id": str(c.id), "status": "open"}}
@@ -289,78 +345,19 @@ async def create_complaint(
 @router.put("/complaints/{complaint_id}/resolve", response_model=AnyResponse)
 async def resolve_complaint(
     complaint_id: uuid.UUID,
-    body: dict,
+    body: ResolveComplaintRequest,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 修复（审计 R1）：处置投诉必须具有市场/租户/平台管理员角色。
+    await _require_market_admin_role(merchant)
     c = await db.get(MarketComplaint, complaint_id)
     if not c:
         raise HTTPException(status_code=404, detail="投诉不存在")
     # 校验当前商户属于投诉所在市场（审计 P0-1：原实现任意商户可处置他人投诉）
     await _require_market_member(db, merchant.id, c.market_id)
     c.status = "resolved"
-    c.resolution = body.get("resolution", "")
-    c.resolved_at = None  # use server time
+    c.resolution = body.resolution
+    c.resolved_at = utc_now()
     await db.commit()
     return {"code": 0, "message": "投诉已处理"}
-
-
-# ═══ 通知 ═══
-
-
-@router.get("/notices", response_model=AnyResponse)
-async def list_notices(
-    market_id: uuid.UUID,
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    # 校验当前商户属于该市场（审计 P0-1）
-    await _require_market_member(db, merchant.id, market_id)
-    rows = (
-        (
-            await db.execute(
-                select(MarketNotice)
-                .where(MarketNotice.market_id == market_id, MarketNotice.is_active.is_(True))
-                .order_by(MarketNotice.created_at.desc())
-                .limit(20)
-            )
-        )
-        .scalars()
-        .all()
-    )  # noqa: E712
-    return {
-        "code": 0,
-        "data": [
-            {
-                "id": str(n.id),
-                "title": n.title,
-                "content": n.content,
-                "notice_type": n.notice_type,
-                "created_at": n.created_at.isoformat() if n.created_at else None,
-            }
-            for n in rows
-        ],
-    }
-
-
-@router.post("/notices", response_model=AnyResponse)
-async def create_notice(
-    body: dict,
-    merchant: Merchant = Depends(get_current_merchant),
-    db: AsyncSession = Depends(get_db),
-):
-    # 仅 owner/tenant_admin 可发布公告，且须属于该市场
-    # （审计 P0-1：原实现任意商户可向任意市场发布公告）
-    if getattr(merchant, "role", None) not in ("owner", "tenant_admin"):
-        raise HTTPException(status_code=403, detail="仅管理员可发布公告")
-    market_id = uuid.UUID(body["market_id"])
-    await _require_market_member(db, merchant.id, market_id)
-    n = MarketNotice(
-        market_id=market_id,
-        title=body["title"],
-        content=body["content"],
-        notice_type=body.get("notice_type", "info"),
-    )
-    db.add(n)
-    await db.commit()
-    return {"code": 0, "data": {"id": str(n.id), "title": n.title}}

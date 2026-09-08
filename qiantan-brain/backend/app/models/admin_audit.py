@@ -27,7 +27,9 @@ class AdminAuditLog(Base):
     detail: Mapped[str | None] = mapped_column(sa.Text)
     ip_address: Mapped[str | None] = mapped_column(sa.String(45))
     user_agent: Mapped[str | None] = mapped_column(sa.Text)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), nullable=False
+    )
 
     __table_args__ = (
         sa.Index("ix_admin_audit_logs_action", "action"),

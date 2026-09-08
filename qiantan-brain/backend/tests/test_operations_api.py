@@ -391,19 +391,67 @@ class TestUnauthenticated:
 
 
 class TestExport:
-    async def test_export_sales_csv(self, client):
+    """导出端点统一 JSON 信封 {code:0, data:{rows, csv, filename}} 契约。"""
+
+    async def test_export_sales_envelope(self, client):
         res = await client.get("/api/v1/ops/export/sales?start_date=2026-01-01&end_date=2026-07-12")
         assert res.status_code == 200
-        assert "text/csv" in res.headers.get("content-type", "")
+        assert "text/csv" not in res.headers.get("content-type", "")
+        body = res.json()
+        assert body["code"] == 0
+        assert body["data"]["csv"].startswith("\ufeff")
+        assert body["data"]["filename"].endswith(".csv")
 
-    async def test_export_inventory_csv(self, client):
+    async def test_export_inventory_envelope(self, client):
         res = await client.get("/api/v1/ops/export/inventory")
         assert res.status_code == 200
+        body = res.json()
+        assert body["code"] == 0
+        assert "csv" in body["data"]
 
-    async def test_export_waste_csv(self, client):
+    async def test_export_waste_envelope(self, client):
         res = await client.get("/api/v1/ops/export/waste?start_date=2026-01-01&end_date=2026-07-12")
         assert res.status_code == 200
+        body = res.json()
+        assert body["code"] == 0
+        assert "csv" in body["data"]
 
-    async def test_export_accounts_csv(self, client):
+    async def test_export_accounts_envelope(self, client, db_session):
+        """往来账导出必须与其余导出一致（JSON 信封），否则小程序 JSON.parse 必挂。"""
+        from app.models.accounts import CustomerReceivable, SupplierPayable
+        from app.models.catalog import Supplier
+
+        mid = uuid.UUID(TEST_MERCHANT_ID)
+        async with db_session() as db:
+            sup = Supplier(id=uuid.uuid4(), merchant_id=mid, name="测试供应商")
+            db.add(sup)
+            db.add(
+                SupplierPayable(
+                    merchant_id=mid,
+                    supplier_id=sup.id,
+                    direction="purchase",
+                    amount=Decimal("100.00"),
+                )
+            )
+            db.add(
+                CustomerReceivable(
+                    merchant_id=mid,
+                    customer_name="测试客户",
+                    direction="charge",
+                    amount=Decimal("50.00"),
+                )
+            )
+            await db.commit()
+
         res = await client.get("/api/v1/ops/export/accounts")
         assert res.status_code == 200
+        assert "text/csv" not in res.headers.get("content-type", "")
+        body = res.json()
+        assert body["code"] == 0
+        assert body["data"]["filename"] == "accounts.csv"
+        csv_text = body["data"]["csv"]
+        assert csv_text.startswith("\ufeff")
+        assert "供应商应付" in csv_text
+        assert "测试供应商" in csv_text
+        assert "客户应收" in csv_text
+        assert "测试客户" in csv_text

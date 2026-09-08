@@ -1,0 +1,140 @@
+<!-- 智能分析：异常检测 · 动态定价 · 报童进货建议 -->
+<view class="page-shell insight-page {{skinClass}}">
+  <view class="page-hero insight-hero">
+    <text class="eyebrow">算法能力闭环</text>
+    <text class="hero-title">智能分析</text>
+    <text class="hero-desc">异常检测 · 定价建议 · 进货量建议</text>
+  </view>
+
+  <!-- 加载骨架 -->
+  <view wx:if="{{loading}}" class="skeleton-stack">
+    <view class="sk-section"><view class="sk-line w40"></view><view class="sk-card"></view><view class="sk-card short"></view></view>
+    <view class="sk-section"><view class="sk-line w40"></view><view class="sk-card"></view><view class="sk-card short"></view></view>
+    <view class="sk-section"><view class="sk-line w40"></view><view class="sk-card"></view><view class="sk-card short"></view></view>
+  </view>
+
+  <view wx:elif="{{allFailed}}" class="empty-state surface insight-error">
+    <mascot size="md" mood="think"/>
+    <text>智能分析加载失败</text>
+    <text class="error-desc">请检查网络后重试</text>
+    <button class="retry-btn" bindtap="onRetry"><icon name="refresh" size="sm" color="var(--green-800)"/><text>重新加载</text></button>
+  </view>
+
+  <block wx:else>
+    <!-- 销量异常 -->
+    <view class="section-head">
+      <view class="section-copy">
+        <text class="section-title">销量异常</text>
+        <text class="section-caption">近 30 天波动扫描</text>
+      </view>
+      <text class="tag {{anomalyError ? 'tag-tomato' : 'tag-corn'}}">{{anomalyError ? '加载失败' : (anomaly ? anomaly.count : 0) + ' 项'}}</text>
+    </view>
+
+    <view wx:if="{{anomalyError}}" class="section-fail">
+      <text>异常检测暂不可用，请下拉刷新重试</text>
+    </view>
+    <view wx:elif="{{anomaly && anomaly.list.length}}" class="insight-list">
+      <view wx:for="{{anomaly.list}}" wx:key="key" class="insight-card">
+        <view class="card-head">
+          <text class="card-name">{{item.product_name}}</text>
+          <text class="card-value">当前 {{item.current_value}}</text>
+        </view>
+        <view wx:if="{{item.typeLabels.length}}" class="tag-row">
+          <text wx:for="{{item.typeLabels}}" wx:for-item="type" wx:key="*this" class="mini-tag tomato">{{type}}</text>
+        </view>
+        <text wx:if="{{item.summary}}" class="card-desc">{{item.summary}}</text>
+      </view>
+    </view>
+    <view wx:else class="empty-state mini">
+      <mascot size="sm" mood="idle"/>
+      <text>近 30 天未发现销量异常</text>
+    </view>
+
+    <!-- 动态定价建议 -->
+    <view class="section-head">
+      <view class="section-copy">
+        <text class="section-title">定价建议</text>
+        <text class="section-caption">近 7 天 · 均衡策略</text>
+      </view>
+      <text class="tag {{pricingError ? 'tag-tomato' : 'tag-green'}}">{{pricingError ? '加载失败' : (pricing ? pricing.count : 0) + ' 条'}}</text>
+    </view>
+
+    <view wx:if="{{pricingError}}" class="section-fail">
+      <text>定价建议暂不可用，请下拉刷新重试</text>
+    </view>
+    <view wx:elif="{{pricing && pricing.list.length}}" class="insight-list">
+      <view wx:for="{{pricing.list}}" wx:key="key" class="insight-card pricing-card">
+        <view class="card-head">
+          <text class="card-name">{{item.product_name}}</text>
+          <text class="tag {{item.urgency_label === '紧急' ? 'tag-tomato' : 'tag-corn'}}">{{item.urgency_label}}</text>
+        </view>
+        <view class="price-line">
+          <text class="price-old">¥{{item.original_price_text}}</text>
+          <text class="price-arrow">→</text>
+          <text class="price-new">¥{{item.recommended_price_text}}</text>
+          <text class="discount-badge">-{{item.discount_pct}}%</text>
+        </view>
+        <view class="meta-row">
+          <text>策略 {{item.strategy_label}}</text>
+          <text>库存 {{item.current_qty}}</text>
+          <text>日预测 {{item.daily_forecast}}</text>
+        </view>
+        <text wx:if="{{item.reason}}" class="card-desc">{{item.reason}}</text>
+        <view class="foot-note">
+          <text>预期收入 ¥{{item.expected_revenue}}</text>
+          <text>预期损耗 {{item.expected_waste_pct}}%</text>
+        </view>
+        <view class="card-action-row">
+          <button class="btn-sm btn-secondary" bindtap="goInventory">去处理</button>
+        </view>
+      </view>
+    </view>
+    <view wx:else class="empty-state mini">
+      <mascot size="sm" mood="idle"/>
+      <text>暂无定价建议</text>
+    </view>
+
+    <!-- 报童进货建议 -->
+    <view class="section-head">
+      <view class="section-copy">
+        <text class="section-title">进货量建议</text>
+        <text class="section-caption">近 14 天需求估算</text>
+      </view>
+      <text class="tag {{newsvendorError ? 'tag-tomato' : 'tag-green'}}">{{newsvendorError ? '加载失败' : (newsvendor ? newsvendor.count : 0) + ' 条'}}</text>
+    </view>
+
+    <view wx:if="{{newsvendorError}}" class="section-fail">
+      <text>进货建议暂不可用，请下拉刷新重试</text>
+    </view>
+    <view wx:elif="{{newsvendor && newsvendor.list.length}}" class="insight-list">
+      <view wx:for="{{newsvendor.list}}" wx:key="key" class="insight-card">
+        <view class="card-head">
+          <text class="card-name">{{item.product_name}}</text>
+          <text class="tag tag-green">损耗 {{item.waste_rate_pct}}%</text>
+        </view>
+        <view class="qty-grid">
+          <view class="qty-cell">
+            <text class="qty-label">日均需求</text>
+            <text class="qty-num">{{item.mean_demand}}</text>
+          </view>
+          <view class="qty-cell">
+            <text class="qty-label">建议进货</text>
+            <text class="qty-num strong">{{item.optimal_quantity}}</text>
+          </view>
+          <view class="qty-cell">
+            <text class="qty-label">售价/成本</text>
+            <text class="qty-num">¥{{item.selling_price_text}} / ¥{{item.unit_cost_text}}</text>
+          </view>
+        </view>
+        <text wx:if="{{item.suggestion}}" class="card-desc">{{item.suggestion}}</text>
+        <view class="card-action-row">
+          <button class="btn-sm btn-secondary" bindtap="goPurchase">去采购</button>
+        </view>
+      </view>
+    </view>
+    <view wx:else class="empty-state mini">
+      <mascot size="sm" mood="idle"/>
+      <text>暂无进货量建议</text>
+    </view>
+  </block>
+</view>

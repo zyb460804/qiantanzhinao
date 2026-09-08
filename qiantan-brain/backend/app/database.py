@@ -39,6 +39,8 @@ class Base(DeclarativeBase):
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
+        # 租户隔离由应用层 WHERE 过滤保证；core/rls.py 已删除
+        # （无迁移支持、表名与真实 schema 不匹配）。
         try:
             yield session
         finally:

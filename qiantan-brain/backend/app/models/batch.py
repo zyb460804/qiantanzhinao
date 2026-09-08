@@ -23,6 +23,13 @@ from app.database import Base
 
 class BatchLifecycle(Base):
     __tablename__ = "batch_lifecycles"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "status IN ('pending_acceptance','sellable','near_expiry','locked',"
+            "'recalled','destroyed','removed','sold_out','wasted','returned')",
+            name="ck_batch_lifecycle_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

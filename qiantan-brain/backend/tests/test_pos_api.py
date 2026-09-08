@@ -156,8 +156,8 @@ async def test_daily_settlement_breaks_down_payment_channels_and_recloses(client
     settle_date = local_now().date().isoformat()
     first = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
     second = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
-    assert first.status_code == 200 and second.status_code == 200
-    data = second.json()["data"]
+    assert first.status_code == 200
+    data = first.json()["data"]
     assert data["order_count"] == 2
     assert data["total_sales"] == 14.0
     assert data["cash_amount"] == 7.0
@@ -165,11 +165,27 @@ async def test_daily_settlement_breaks_down_payment_channels_and_recloses(client
     assert data["estimated_cogs"] == 8.0
     assert data["estimated_gross_profit"] == 6.0
     assert data["diff_amount"] == 0.0
+    # F2: 重复关闭应被拒绝
+    assert second.status_code == 409
+
+    # P1-3 闭环：重开日结 → 状态 open → 可补录 → 重新 close 覆盖统计
+    reopen = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/reopen")
+    assert reopen.status_code == 200
+    assert reopen.json()["data"]["status"] == "open"
+    # 重开后可再下补录单（此前会被「日结已关闭」拦截）
+    extra = await client.post("/api/v1/pos/orders", json=_order_payload("pos-settle-reopen-001"))
+    assert extra.status_code == 200
+    reclose = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
+    assert reclose.status_code == 200
+    assert reclose.json()["data"]["order_count"] == 3
+    # 幂等：对 open 状态重复 reopen 也成功
+    reopen_again = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/reopen")
+    assert reopen_again.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_daily_settlement_without_business_data_returns_decimal_zeroes(client):
-    settle_date = (utc_now().date() + timedelta(days=30)).isoformat()
+    settle_date = (utc_now().date() - timedelta(days=30)).isoformat()
     response = await client.post(f"/api/v1/pos/daily-settlement/{settle_date}/close")
     assert response.status_code == 200
     data = response.json()["data"]

@@ -49,7 +49,7 @@
 .ledger-sub-label {
   display: block; margin-top: 4rpx;
   color: rgba(255, 255, 255, 0.6);
-  font-size: 21rpx;
+  font-size: 22rpx;
 }
 
 
@@ -72,72 +72,28 @@
   display: flex; align-items: center; justify-content: center;
   width: 34rpx; height: 34rpx;
   color: var(--green-700); background: var(--green-50);
-  border-radius: var(--r-sm); font-size: 17rpx; font-weight: 800;
+  border-radius: var(--r-sm); font-size: 22rpx; font-weight: 800;
 }
 
 /* ---------- 卡片通用 ---------- */
-.chart-card, .category-card, .day-list, .risk-card {
+.chart-card, .risk-card {
   padding: 26rpx; background: var(--paper);
   border-radius: var(--r-lg); box-shadow: var(--shadow);
 }
-.category-card, .day-list, .risk-card { margin-top: 18rpx; }
+.risk-card { margin-top: 18rpx; }
 
-/* ---------- 品类条形 ---------- */
-.category-row { padding: 15rpx 0; }
-.category-head {
-  display: flex; justify-content: space-between; margin-bottom: 9rpx;
-  color: var(--ink-2); font-size: var(--fs-sm);
+/* v5.0 排版重设计：品类图删除重复条形区后，单位说明直接跟在图表下方 */
+.dashboard-page .data-note {
+  display: block; margin: 14rpx 6rpx 0;
+  color: var(--muted); font-size: 22rpx; line-height: 1.5;
 }
-.category-head text:last-child { color: var(--green-700); font-weight: 700; }
+
+/* ---------- 风险条形 ---------- */
 .bar-track {
   flex: 1; height: 11rpx; overflow: hidden;
   background: var(--line-soft); border-radius: var(--r-pill);
 }
 .bar-fill { height: 100%; background: var(--green-700); border-radius: var(--r-pill); }
-
-/* ---------- 图例 ---------- */
-.chart-legend {
-  display: flex; justify-content: flex-end; gap: 24rpx;
-  color: var(--muted); font-size: 19rpx;
-}
-.chart-legend text::before {
-  content: ""; display: inline-block;
-  width: 16rpx; height: 5rpx; margin-right: 8rpx;
-  vertical-align: middle; border-radius: var(--r-pill);
-}
-.chart-legend .revenue::before { background: var(--green-800); }
-.chart-legend .profit::before { background: var(--corn); }
-.chart-legend .aov::before { background: var(--info); }
-.business-chart { width: 100%; height: 370rpx; margin-top: 8rpx; }
-
-/* ---------- 分段选项 ---------- */
-.segmented {
-  display: flex; padding: 8rpx;
-  background: var(--paper-2); border-radius: var(--r-md);
-  margin-top: 18rpx;
-}
-.seg {
-  flex: 1; text-align: center; padding: 17rpx 0;
-  color: var(--muted); font-size: var(--fs-sm); font-weight: 650;
-  border-radius: var(--r-sm);
-}
-.seg.active {
-  color: var(--green-700); background: var(--paper);
-  box-shadow: 0 4rpx 12rpx rgba(0, 30, 15, 0.06);
-}
-
-/* ---------- 每日列表 ---------- */
-.day-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 20rpx 0; border-bottom: 1rpx solid var(--line);
-}
-.day-row:last-child { border-bottom: 0; }
-.day-date { color: var(--ink); font-size: var(--fs-sm); font-weight: 700; }
-.day-money {
-  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 14rpx;
-  color: var(--ink-2); font-size: 20rpx;
-}
-.day-money .aov { color: var(--info); font-weight: 600; }
 
 /* ---------- 存货剩余天数表 ---------- */
 .heatmap-card {
@@ -152,23 +108,23 @@
 }
 .heatmap-col-head {
   text-align: center; color: var(--muted);
-  font-size: 19rpx; padding-bottom: 6rpx;
+  font-size: 22rpx; padding-bottom: 6rpx;
 }
 .heatmap-corner { }
 .heatmap-row { margin-top: 10rpx; }
 .heatmap-row-name {
   display: flex; align-items: center;
-  color: var(--ink-2); font-size: 21rpx; font-weight: 650;
+  color: var(--ink-2); font-size: 22rpx; font-weight: 650;
 }
 .heatmap-cell {
   display: flex; align-items: center; justify-content: center;
   min-height: 64rpx; border-radius: var(--r-sm);
-  color: #fff; font-size: 20rpx; font-weight: 700;
+  color: #fff; font-size: 22rpx; font-weight: 700;
 }
 .heatmap-cell text { color: inherit; }
 .heatmap-legend {
   display: flex; flex-wrap: wrap; gap: 24rpx;
-  margin-top: 18rpx; color: var(--muted); font-size: 19rpx;
+  margin-top: 18rpx; color: var(--muted); font-size: 22rpx;
 }
 .heatmap-legend .hl::before {
   content: ""; display: inline-block;
@@ -193,13 +149,13 @@
 .risk-mark {
   display: flex; align-items: center; justify-content: center;
   width: 38rpx; height: 38rpx;
-  border-radius: var(--r-sm); font-size: 17rpx; font-weight: 800;
+  border-radius: var(--r-sm); font-size: 22rpx; font-weight: 800;
 }
 .risk-mark.amber { color: var(--corn-ink); background: var(--corn-soft); }
 .risk-mark.blue { color: var(--info-ink); background: var(--info-soft); }
 .risk-mark.red-bg { color: var(--tomato-ink); background: var(--tomato-soft); }
 .risk-mark.green { color: var(--green-700); background: var(--green-50); }
-.risk-mark.corn { color: var(--corn-ink); background: #f6e6bf; }
+.risk-mark.corn { color: var(--corn-ink); background: var(--corn-soft); }
 .risk-mark.violet { color: var(--grape-ink); background: var(--grape-soft); }
 .bar-fill.amber { background: var(--corn); }
 .bar-fill.blue { background: var(--info); }

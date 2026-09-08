@@ -1,7 +1,8 @@
 """种子分片：员工 + 盘点。
 
-- 员工（staff_members）：每摊 3-4 人，覆盖 owner/manager/cashier/purchaser/stocker，
-  演示多角色权限矩阵。
+- 员工（staff_members）：每摊 3-4 人，覆盖 manager/cashier/purchaser/stocker，
+  演示多角色权限矩阵。owner 只能由商户本人承载，员工表不再生成 owner 行
+  （V3-H1：staff_login 对 role='owner' 员工直接 403）。
 - 盘点（stocktake_sessions + stocktake_items）：每摊 3 次历史盘点，
   含盘亏/盘盈/称重误差，演示库存校正闭环。
 
@@ -10,6 +11,7 @@
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -20,8 +22,6 @@ from app.models.staff import StaffMember
 from app.models.stocktake import StocktakeItem, StocktakeSession
 from scripts.seed_data.common import (
     MERCHANTS,
-    PRODUCTS_BY_ID,
-    date_ago,
     days_ago,
     make_rng,
     money,
@@ -31,15 +31,22 @@ from scripts.seed_data.common import (
 
 
 async def seed_staff(db) -> None:
-    """每摊 3-4 名员工。"""
+    """每摊 3-4 名员工。
+
+    PIN 用 secrets 随机生成（V3-H1：原 1000/2111/4333 线性可预测，撞库
+    即可登录任意种子员工）。随机 PIN 仅在首次创建时打印一次，重跑种子
+    对已有员工不重置 PIN。
+    """
     from scripts.seed_data.common import STAFF_BY_MERCHANT
 
     n = 0
+    created_pins: list[tuple[str, str]] = []
     for merchant_id, staff_list in STAFF_BY_MERCHANT.items():
         for idx, s in enumerate(staff_list):
             sid = staff_uuid(merchant_id, idx)
             if await db.get(StaffMember, sid) is not None:
                 continue
+            pin = f"{secrets.randbelow(10000):04d}"
             db.add(
                 StaffMember(
                     id=sid,
@@ -48,12 +55,17 @@ async def seed_staff(db) -> None:
                     phone=s.phone,
                     role=s.role,
                     is_active=True,
-                    pin_code=f"{1000 + idx * 1111}"[:4],
+                    pin_code=pin,
                 )
             )
+            created_pins.append((s.name, pin))
             n += 1
     await db.flush()
     print(f"  [+] 员工: {n} 名")
+    if created_pins:
+        print("  [!] 员工 PIN 已随机生成（仅本次展示，请立即转交对应员工，重跑不重置）:")
+        for name, pin in created_pins:
+            print(f"      {name}: {pin}")
 
 
 async def seed_stocktake(db) -> None:
@@ -110,7 +122,11 @@ async def seed_stocktake(db) -> None:
                 total_book += book
                 total_actual += actual
                 total_var += variance
-                total_loss += (variance * prod.default_price * Decimal("-1")).quantize(Decimal("0.01")) if variance < 0 else money("0")
+                total_loss += (
+                    (variance * prod.default_price * Decimal("-1")).quantize(Decimal("0.01"))
+                    if variance < 0
+                    else money("0")
+                )
 
                 reason = None
                 if variance < -2:

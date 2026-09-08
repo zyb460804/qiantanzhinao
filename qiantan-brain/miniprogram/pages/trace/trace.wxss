@@ -15,13 +15,13 @@
 
 /* Banner */
 .trace-banner { display:flex; flex-direction:column; align-items:center; padding:40rpx 32rpx; }
-.trace-banner.green { background:linear-gradient(135deg,#d4edda,#c3e6cb); }
-.trace-banner.amber { background:linear-gradient(135deg,#fff3cd,#ffeaa7); }
-.trace-banner.red { background:linear-gradient(135deg,#f8d7da,#f5c6cb); }
+.trace-banner.green { background:var(--green-50); }
+.trace-banner.amber { background:var(--corn-soft); }
+.trace-banner.red { background:var(--tomato-soft); }
 .trace-banner.muted { background:var(--line); }
 .banner-icon { font-size:52rpx; font-weight:900; margin-bottom:8rpx; }
 .banner-label { font-size:36rpx; font-weight:800; color:var(--ink); }
-.banner-warn { margin-top:8rpx; font-size:24rpx; color:#c93a30; font-weight:700; }
+.banner-warn { margin-top:8rpx; font-size:24rpx; color:var(--tomato); font-weight:700; }
 
 /* Info card */
 .trace-card { margin:20rpx 28rpx; padding:24rpx 28rpx; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
@@ -31,7 +31,7 @@
 .trace-key { font-size:24rpx; color:var(--muted); flex:0 0 140rpx; }
 .trace-val { font-size:24rpx; color:var(--ink); text-align:right; flex:1; word-break:break-all; }
 .text-green { color:var(--green-700); font-weight:700; }
-.text-red { color:#c93a30; font-weight:700; }
+.text-red { color:var(--tomato); font-weight:700; }
 .certs { display:flex; flex-wrap:wrap; gap:8rpx; justify-content:flex-end; }
 .cert-tag { padding:4rpx 14rpx; font-size:20rpx; color:var(--green-800); background:var(--green-50); border-radius:8rpx; }
 
@@ -123,7 +123,7 @@
 .qr-image { width: 360rpx; height: 360rpx; border-radius: 12rpx; border: 2rpx solid var(--line); }
 .qr-code-text { font-size: 22rpx; font-family: monospace; color: var(--green-800); word-break: break-all; text-align: center; }
 .qr-actions { display: flex; flex-wrap: wrap; gap: 12rpx; justify-content: center; margin-top: 8rpx; }
-.qr-hint { font-size: 20rpx; color: var(--muted); text-align: center; }
+.qr-hint { font-size: 22rpx; color: var(--muted); text-align: center; }
 .btn-primary {
   font-size: 26rpx; padding: 14rpx 32rpx; border-radius: 12rpx;
   background: var(--green-700); color: #fff; border: none; line-height: 1.4;

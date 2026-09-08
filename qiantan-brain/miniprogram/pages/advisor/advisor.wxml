@@ -79,8 +79,9 @@
         <view wx:for="{{item.basis}}" wx:key="factor" wx:for-item="b" class="basis-line"><text class="basis-factor">{{b.factor}}</text><text class="basis-value {{b.impact === '+' ? 'green' : b.impact === '-' ? 'red' : ''}}">{{b.value}}</text></view>
       </view>
       <view class="risk-note" wx:if="{{item.risk_warning}}"><text class="risk-symbol">!</text><text>{{item.risk_warning}}</text></view>
-      <!-- 反馈按钮：去 emoji，纯文字（v4.0） -->
-      <view class="advice-feedback">
+      <!-- 反馈按钮：去 emoji，纯文字（v4.0）。
+           onboarding 引导卡（is_onboarding）无 recommendation_id，点了无效 → 不渲染 -->
+      <view class="advice-feedback" wx:if="{{!item.is_onboarding}}">
         <text class="fb-label">这条建议有用吗？</text>
         <text class="fb-btn {{feedbackMap[item.recommendation_id] === 'helpful' ? 'active' : ''}}" data-id="{{item.recommendation_id || recommendationIds[index]}}" data-type="helpful" bindtap="onFeedback">有用</text>
         <text class="fb-btn {{feedbackMap[item.recommendation_id] === 'not_helpful' ? 'active' : ''}}" data-id="{{item.recommendation_id || recommendationIds[index]}}" data-type="not_helpful" bindtap="onFeedback">没用</text>
