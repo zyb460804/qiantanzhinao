@@ -16,6 +16,7 @@ class AuditLog(Base):
     """
 
     __tablename__ = "audit_logs"
+    __table_args__ = {"comment": "商户数据变更审计日志：create/edit/void 操作前后快照，只增不改"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

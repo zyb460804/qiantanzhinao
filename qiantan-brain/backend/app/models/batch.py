@@ -29,6 +29,7 @@ class BatchLifecycle(Base):
             "'recalled','destroyed','removed','sold_out','wasted','returned')",
             name="ck_batch_lifecycle_status",
         ),
+        {"comment": "批次生命周期表（一批一码追溯）：状态机+临期促销+锁定召回+二维码数据"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)

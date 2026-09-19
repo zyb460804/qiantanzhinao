@@ -30,6 +30,19 @@ from app.schemas.common import AnyResponse
 from app.services.supplier_scoring import calculate_supplier_score
 
 
+# 摊主可读名称里的危险字符（存储型 XSS 的根因：名称会回流到 Web 管理端/
+# 导出/追溯二维码等消费端）。创建/更新时统一剥离，而非期望每个消费端转义。
+_DISPLAY_NAME_BAD_CHARS = str.maketrans("", "", "<>\"'`")
+
+
+def _sanitize_display_name(raw) -> str:
+    """剥离名称中的脚本/标签字符并压平空白；全空则返回空串由调用方拒绝。"""
+    import re as _re
+
+    name = str(raw or "").translate(_DISPLAY_NAME_BAD_CHARS)
+    return _re.sub(r"\s+", " ", name).strip()
+
+
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
 
 # P2-9：新商户单位字典为空时的内置常用单位兜底（只读引导，unit_id 为空表示未建档）。
@@ -133,7 +146,7 @@ async def create_sku(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    name = (body.get("name") or "").strip()
+    name = _sanitize_display_name(body.get("name"))
     if not name:
         raise HTTPException(status_code=400, detail="商品名称不能为空")
     # P2-1 修复：名称长度上限（此前 200 字名称可直接落库撑爆列表/卡片）。
@@ -181,9 +194,11 @@ async def update_sku(
     sku = await db.get(ProductSKU, sku_id)
     if not sku or sku.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="SKU不存在")
-    for field in ("name", "category_group", "canonical_unit"):
+    for field in ("category_group", "canonical_unit"):
         if field in body:
             setattr(sku, field, body[field])
+    if "name" in body:
+        sku.name = _sanitize_display_name(body["name"])
     # P2-1：更新路径同样限制名称长度
     if sku.name and len(sku.name) > 50:
         raise HTTPException(status_code=422, detail="商品名称不能超过 50 个字")
@@ -985,9 +1000,11 @@ async def create_supplier(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    name = (body.get("name") or "").strip()
+    name = _sanitize_display_name(body.get("name"))
     if not name:
         raise HTTPException(status_code=400, detail="供应商名称不能为空")
+    if len(name) > 50:
+        raise HTTPException(status_code=422, detail="供应商名称不能超过 50 个字")
     s = Supplier(
         merchant_id=merchant.id,
         name=name,
@@ -1014,9 +1031,16 @@ async def update_supplier(
     s = await db.get(Supplier, supplier_id)
     if not s or s.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="供应商不存在")
-    for f in ("name", "contact", "address", "business_category"):
+    for f in ("contact", "address", "business_category"):
         if f in body:
             setattr(s, f, body[f])
+    if "name" in body:
+        new_name = _sanitize_display_name(body["name"])
+        if not new_name:
+            raise HTTPException(status_code=422, detail="供应商名称不能为空")
+        if len(new_name) > 50:
+            raise HTTPException(status_code=422, detail="供应商名称不能超过 50 个字")
+        s.name = new_name
     if "min_order_qty" in body:
         s.min_order_qty = Decimal(str(body["min_order_qty"]))
     if "lead_time_hours" in body:

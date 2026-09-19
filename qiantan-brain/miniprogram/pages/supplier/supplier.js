@@ -311,7 +311,7 @@ Page({
       title: '停用供应商',
       content: '确认停用「' + name + '」？停用后不会出现在采购等选择列表中。',
       confirmText: '确认停用',
-      confirmColor: '#c8392b',
+      confirmColor: '#d93a2b',
       success: function (r) {
         if (!r.confirm) return;
         app.request({ url: '/catalog/suppliers/' + id, method: 'DELETE' }).then(function () {

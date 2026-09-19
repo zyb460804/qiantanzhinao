@@ -18,6 +18,7 @@ class InventoryRecord(Base):
             "idempotency_key",
             name="uq_inventory_idempotency_per_merchant",
         ),
+        {"comment": "库存流水账：入库/出库/报损/盘点调整每一笔，含幂等键、撤销与冲正，余额靠聚合"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
@@ -66,6 +67,7 @@ class CurrentInventory(Base):
     """Summarized view of current stock per product. Refreshed by trigger/logic."""
 
     __tablename__ = "current_inventory"
+    __table_args__ = {"comment": "当前库存汇总：按商户×商品聚合的现存量与移动均价，由流水刷新"}
 
     merchant_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
     product_id: Mapped[int] = mapped_column(sa.Integer, primary_key=True)

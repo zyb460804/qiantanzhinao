@@ -1,8 +1,7 @@
 /**
- * 决策沙盘页 — What-if 模拟 + 三种方案对比柱状图
+ * 决策沙盘页 — What-if 模拟 + 三种方案对比（纯 CSS 横条）
  */
 var app = getApp();
-var Chart = require('../../utils/chart');
 
 Page({
   data: {
@@ -21,8 +20,8 @@ Page({
     result: null,
     simError: false, // P0-2 UI 面：试算失败展示持久错误态（toast 易逝，用户会反复点击）
 
-    // ECharts
-    chartInstance: null,
+    // 方案对比横条（纯 CSS）
+    schemeBars: [],
     skinClass: '',
   },
 
@@ -210,21 +209,31 @@ Page({
     wx.navigateTo({ url: '/pages/purchase/purchase' });
   },
 
-  // ── 图表渲染 (Canvas-based fallback) ─────────────────
+  // ── 方案净收益横条（纯 CSS，替代原 canvas 柱图） ─────────────────
 
   renderChart: function () {
-    var result = this.data.result;
-    if (!result || !result.multi) return;
+    var multi = this.data.result && this.data.result.multi;
+    if (!multi || !multi.length) return;
 
-    var self = this;
-    Chart.initCanvas(this, '#sandboxCanvas').then(function (c) {
-      if (!c) return;
-      Chart.drawBarChart(c.ctx, c.width, c.height, result.multi, {
-        valueKey: 'net_profit',
-        labelKey: 'name',
-        subKey: 'purchase_qty',
-        subSuffix: '斤',
-      });
+    var maxAbs = 0;
+    var bestIdx = 0;
+    multi.forEach(function (m, i) {
+      var v = Number(m.net_profit) || 0;
+      maxAbs = Math.max(maxAbs, Math.abs(v));
+      if (v > (Number(multi[bestIdx].net_profit) || 0)) bestIdx = i;
     });
+    if (maxAbs <= 0) maxAbs = 1;
+
+    var bars = multi.map(function (m, i) {
+      var v = Number(m.net_profit) || 0;
+      return {
+        name: m.name || ('方案' + (i + 1)),
+        pct: Math.max(2, Math.round(Math.abs(v) / maxAbs * 100)),
+        neg: v < 0,
+        isBest: i === bestIdx && v > 0,
+        text: (v < 0 ? '-¥' : '¥') + Math.abs(v).toFixed(0),
+      };
+    });
+    this.setData({ schemeBars: bars });
   },
 });

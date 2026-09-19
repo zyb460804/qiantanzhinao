@@ -54,7 +54,16 @@
 
   <view wx:if="{{activeTab === 'risk'}}">
     <view class="section-head"><text class="section-title">经营风险</text><text class="section-caption">分越高越要紧</text></view>
-    <view class="chart-card"><risk-gauge risks="{{riskGaugeData}}" /></view>
+    <!-- 综合风险圆环（纯 CSS conic，无 canvas——原生组件真机同层渲染失败会浮层错位） -->
+    <view class="risk-ring-card">
+      <view class="risk-ring" style="background:conic-gradient({{riskRingColor}} {{dashboard.risk_score || 0}}%, var(--paper-3) 0)">
+        <view class="risk-ring-hole"><text class="risk-ring-num">{{dashboard.risk_score || 0}}</text><text class="risk-ring-unit">综合风险</text></view>
+      </view>
+      <view class="risk-ring-copy">
+        <text class="t-card-title">{{riskRingLabel}}</text>
+        <text class="t-caption" style="margin-top:6rpx;">分越低越安心；下面是各维度明细，点条目可看当天建议。</text>
+      </view>
+    </view>
     <view class="risk-card" wx:if="{{riskMirror}}">
       <view class="risk-row"><view class="risk-name"><text class="risk-mark amber">库</text><text>库存风险</text></view><view class="bar-track"><view class="bar-fill amber" style="width:{{riskMirror.inventory_risk}}%"></view></view><text class="risk-score">{{riskMirror.inventory_risk}}</text></view>
       <view class="risk-row"><view class="risk-name"><text class="risk-mark blue">天</text><text>天气风险</text></view><view class="bar-track"><view class="bar-fill blue" style="width:{{riskMirror.weather_risk}}%"></view></view><text class="risk-score">{{riskMirror.weather_risk}}</text></view>

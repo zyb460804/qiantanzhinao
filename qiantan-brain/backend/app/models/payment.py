@@ -35,6 +35,7 @@ class PaymentChannel(Base):
 
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "channel", name="uq_channel_per_merchant"),
+        {"comment": "支付渠道配置：微信/支付宝子商户号与费率（只存引用，不存密钥）"},
     )
 
 
@@ -66,6 +67,7 @@ class ReconciliationTask(Base):
 
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "channel", "date", name="uq_recon_per_day_channel"),
+        {"comment": "每日渠道对账任务：系统订单 vs 渠道账单的总额、笔数与差异汇总"},
     )
 
 
@@ -73,6 +75,7 @@ class ReconciliationDifference(Base):
     """单条对账差异明细。"""
 
     __tablename__ = "reconciliation_differences"
+    __table_args__ = {"comment": "对账差异明细：系统单边/渠道单边/金额不符/重复收款逐条登记处理"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(
@@ -131,6 +134,7 @@ class ChannelBillImport(Base):
             "file_hash",
             name="uq_channel_bill_import_file",
         ),
+        {"comment": "渠道账单导入批次：按文件哈希去重的不可变导入记录"},
     )
 
 
@@ -189,4 +193,5 @@ class ChannelBillEntry(Base):
             "task_id",
             "match_status",
         ),
+        {"comment": "渠道账单流水行：标准化收退款明细及其与系统支付的对账匹配状态"},
     )

@@ -26,6 +26,7 @@ class MediaFile(Base):
         sa.UniqueConstraint(
             "merchant_id", "idempotency_key", name="uq_media_idempotency_per_merchant"
         ),
+        {"comment": "上传媒体文件登记：业务凭证归类、保留期限与断点续传幂等"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)

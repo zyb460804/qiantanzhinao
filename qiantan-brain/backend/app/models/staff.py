@@ -85,6 +85,7 @@ class StaffMember(Base):
 
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "phone", name="uq_staff_phone_per_merchant"),
+        {"comment": "员工档案：角色权限、启用状态与 PIN bcrypt 哈希（登录用）"},
     )
 
 
@@ -92,6 +93,7 @@ class SensitiveOperation(Base):
     """Audit log extension for sensitive operations requiring authorization."""
 
     __tablename__ = "sensitive_operations"
+    __table_args__ = {"comment": "敏感操作审计：改价/退款/删除等需授权操作的前后快照与授权人"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

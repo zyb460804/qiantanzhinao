@@ -26,6 +26,15 @@
 .report-row .ok { color:var(--green-700); }
 .report-sub { display:block; margin-top:20rpx; color:var(--muted); font-size:22rpx; font-weight:700; }
 .report-breakdown { margin-top:8rpx; }
+/* 月度收支横条（纯 CSS，替代原 canvas 柱图） */
+.fin-bars { margin-top:22rpx; padding-top:20rpx; border-top:1rpx solid var(--line-soft); display:flex; flex-direction:column; gap:16rpx; }
+.fin-bar-row { display:flex; align-items:center; gap:16rpx; }
+.fin-bar-name { flex:0 0 72rpx; color:var(--ink-2); font-size:23rpx; }
+.fin-bar-track { flex:1; height:14rpx; overflow:hidden; background:var(--paper-3); border-radius:var(--r-pill); }
+.fin-bar-fill { height:100%; border-radius:var(--r-pill); background:var(--green-700); transition:width var(--dur-slow) var(--ease-expo); }
+.fin-bar-fill.is-neg { background:var(--tomato); }
+.fin-bar-val { flex:0 0 auto; min-width:150rpx; text-align:right; font-family:var(--font-num); font-size:22rpx; font-weight:700; color:var(--ink); font-variant-numeric:tabular-nums; }
+.fin-bar-val.is-neg { color:var(--tomato); }
 .month-input { width:200rpx; text-align:center; margin-bottom:16rpx; }
 .picker-mask { position:fixed; inset:0; z-index:100; display:flex; align-items:flex-end; justify-content:center; background:rgba(0,0,0,.4); }
 .picker-sheet { width:100%; max-width:640rpx; max-height:1200rpx; overflow-y:auto; padding:36rpx 28rpx 52rpx; background:var(--paper); border-radius:32rpx 32rpx 0 0; }

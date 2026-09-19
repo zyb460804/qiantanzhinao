@@ -41,4 +41,5 @@ class DeadLetterEvent(Base):
     __table_args__ = (
         sa.Index("ix_dead_letter_events_merchant_id", "merchant_id"),
         sa.Index("ix_dead_letter_events_status", "status"),
+        {"comment": "同步死信队列：处理失败的离线事件，按重试策略自动重试或人工处理"},
     )

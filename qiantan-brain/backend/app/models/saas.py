@@ -32,6 +32,7 @@ class Tenant(Base):
     """
 
     __tablename__ = "tenants"
+    __table_args__ = {"comment": "SaaS 租户/组织：下辖多个商户的顶层实体，绑定套餐与试用到期"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(sa.String(100), nullable=False)
@@ -64,6 +65,7 @@ class Plan(Base):
     """
 
     __tablename__ = "plans"
+    __table_args__ = {"comment": "订阅套餐定义：free/pro/enterprise 的价格、配额上限与功能开关"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     # 套餐代码: free / pro / enterprise
@@ -139,6 +141,7 @@ class Subscription(Base):
             sqlite_where=sa.text("status IN ('trialing', 'active', 'past_due')"),
             postgresql_where=sa.text("status IN ('trialing', 'active', 'past_due')"),
         ),
+        {"comment": "租户订阅：计费周期与状态流（trialing→active→past_due→canceled/expired）"},
     )
 
 
@@ -197,6 +200,7 @@ class Invoice(Base):
             "period_start",
             name="uq_invoice_subscription_period",
         ),
+        {"comment": "SaaS 账单：每订阅每计费周期唯一，含明细行、到期日与支付回执"},
     )
 
 
@@ -228,6 +232,11 @@ class UsageRecord(Base):
             "recorded_date",
             name="uq_usage_per_tenant_metric_date",
         ),
+        {
+            "comment": (
+                "用量计量：租户×指标×日的聚合值（API 调用/存储/商户数/语音时长），用于配额计费"
+            ),
+        },
     )
 
 
@@ -239,6 +248,7 @@ class ApiKey(Base):
     """
 
     __tablename__ = "api_keys"
+    __table_args__ = {"comment": "租户 API 密钥：只存 SHA-256 哈希与展示前缀，支持权限范围与过期"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -272,6 +282,7 @@ class PlatformAdmin(Base):
     """
 
     __tablename__ = "platform_admins"
+    __table_args__ = {"comment": "平台管理员账号：Web 管理后台登录，不归属任何租户、全局权限"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(sa.String(200), unique=True, nullable=False)

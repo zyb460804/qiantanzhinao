@@ -13,7 +13,10 @@ class MerchantFeedback(Base):
     """Store user feedback from the "我的" page."""
 
     __tablename__ = "merchant_feedback"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = {
+        "extend_existing": True,
+        "comment": "商户反馈：小程序「我的」页提交的意见与问题",
+    }
 
     id: Mapped[_uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=_uuid.uuid4)
     merchant_id: Mapped[_uuid.UUID] = mapped_column(

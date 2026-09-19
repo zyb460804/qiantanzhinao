@@ -1,6 +1,5 @@
 /** 财务 v3.2 — 费用、月报、发票与支付渠道对账 */
 var app = getApp();
-var Chart = require('../../utils/chart');
 
 function localDate(d) {
   d = d || new Date();
@@ -19,6 +18,7 @@ Page({
     expFilterPeriod: 'current', expFilterCategory: 'all',
     // 月报
     month: localMonth(), monthlyReport: null, reportLoading: false,
+    financeBars: [],
     // 发票
     invoices: [], showInvForm: false, expenseSubmitting: false, invoiceSubmitting: false,
     invForm: { invoice_number: '', supplier_name: '', amount: '', invoice_date: '' },
@@ -206,26 +206,27 @@ Page({
     this.loadReport();
   },
 
-  // 绘制月度收支柱状图(收入/采购/毛利/费用/净利润)
+  // 月度收支横条数据（纯 CSS 渲染，替代原 canvas 柱图）
   drawReportChart: function (report) {
-    var data = [
+    var rows = [
       { name: '收入', amount: Number(report.revenue) || 0 },
-      { name: '采购', amount: -(Number(report.purchase_cost) || 0) },
+      { name: '采购', amount: Number(report.purchase_cost) || 0 },
       { name: '毛利', amount: Number(report.gross_profit) || 0 },
-      { name: '费用', amount: -(Number(report.expenses) || 0) },
+      { name: '费用', amount: Number(report.expenses) || 0 },
       { name: '净利', amount: Number(report.net_profit) || 0 },
     ];
-    var self = this;
-    Chart.initCanvas(this, '#reportChart').then(function (canvas) {
-      if (!canvas) return;
-      Chart.drawBarChart(canvas.ctx, canvas.width, canvas.height, data, {
-        valueKey: 'amount',
-        labelKey: 'name',
-        colors: ['#357d48', '#c8392b', '#1a4528', '#c8902a', '#357d48'],
-        unitPrefix: '¥',
-        recommendLabel: '最优',
-      });
+    var maxAbs = 0;
+    rows.forEach(function (r) { maxAbs = Math.max(maxAbs, Math.abs(r.amount)); });
+    if (maxAbs <= 0) maxAbs = 1;
+    var bars = rows.map(function (r) {
+      return {
+        name: r.name,
+        pct: Math.max(2, Math.round(Math.abs(r.amount) / maxAbs * 100)),
+        neg: r.amount < 0,
+        text: (r.amount < 0 ? '-¥' : '¥') + Math.abs(r.amount).toFixed(2),
+      };
     });
+    this.setData({ financeBars: bars });
   },
 
   // ── 发票 ──

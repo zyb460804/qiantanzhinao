@@ -36,8 +36,17 @@
 .legend-item::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 16rpx; height: 16rpx; border-radius: 50%; }
 .legend-revenue::before { background: var(--green-600); }
 .legend-profit::before { background: var(--corn); }
-.legend-aov::before { background: var(--blue, #2E7DD1); }
-.trend-canvas { width: 100%; height: 360rpx; }
+/* 趋势分组柱（纯 CSS，替代原 canvas 折线） */
+.trend-chart { display: flex; align-items: stretch; gap: 8rpx; height: 320rpx; padding-top: 8rpx; }
+.trend-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
+.trend-bars { flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 6rpx; }
+.trend-bar { width: 26rpx; border-radius: 6rpx 6rpx 0 0; transition: height var(--dur-slow) var(--ease-expo); }
+.trend-bar.is-rev { background: var(--green-600); }
+.trend-bar.is-prof { background: var(--corn); }
+.trend-col-label {
+  flex: 0 0 auto; text-align: center; color: var(--muted); font-size: 18rpx;
+  font-family: var(--font-num); overflow: hidden; white-space: nowrap;
+}
 
 /* 销量排行榜 */
 .rank-card { padding: 8rpx 24rpx; }
@@ -63,8 +72,7 @@
 .waste-row:last-child { border-bottom: none; }
 .waste-mark { width: 48rpx; height: 48rpx; border-radius: 14rpx; background: var(--corn-soft); color: var(--corn-ink); font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
 .waste-info { flex: 1; display: flex; flex-direction: column; gap: 4rpx; min-width: 0; }
-.waste-name { font-size: 28rpx; font-weight: 700; color: var(--ink); }
-.waste-detail { font-size: 22rpx; color: var(--muted); }
+/* 文字改用 app.wxss 的 .t-card-title / .t-caption（v5.2 排版词汇表） */
 
 /* AI 总结 */
 .ai-card { padding: 24rpx; display: flex; flex-direction: column; gap: 20rpx; }

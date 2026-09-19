@@ -341,6 +341,11 @@ def _detect_event_type(text: str) -> str:
     for kw in SALE_KEYWORDS:
         if kw in text:
             return "sale"
+    # 兜底修复：含「卖/出售」但没带「了」（如「卖白菜100斤200块」）此前会落到
+    # unknown → 默认进货，把销售额记成进货成本。裸「卖」在摊主话术里是报销售。
+    # 注意顺序：WASTE_KEYWORDS（含「不能卖了」）在上面已先命中。
+    if "卖" in text or "出售" in text:
+        return "sale"
     return "unknown"
 
 
@@ -380,9 +385,13 @@ def _extract_unit_price(text: str) -> tuple[float | None, list[tuple[int, int]]]
     跨度用于把「X元一斤」里的数量/金额从总量候选中剔除。
     """
     pats = [
-        rf"(\d+(?:\.\d+)?)\s*[元块]钱?\s*[一每1]\s*(?:{_QTY_UNITS})",
-        rf"[一每1]\s*(?:{_QTY_UNITS})\s*(\d+(?:\.\d+)?)\s*[元块]",
+        rf"(\d+(?:\.\d+)?)\s*[元块]钱?\s*[一每]\s*(?:{_QTY_UNITS})",
+        rf"[一每]\s*(?:{_QTY_UNITS})\s*(\d+(?:\.\d+)?)\s*[元块]",
     ]
+    # 修复：第二个模式原本写作 [一每1]——「卖了白菜1斤2块」里的「1斤2块」
+    # 被误判成单价短语（一斤2块），数量与总额双双被剔除 → 无法直接确认。
+    # 阿拉伯数字「1斤N块」在记账话术里是「数量1斤、总额N块」，只把中文
+    # 「一/每」开头的短语当作单价引用。
     value: float | None = None
     spans: list[tuple[int, int]] = []
     for pat in pats:

@@ -70,6 +70,8 @@
 .date-row { display:flex; align-items:center; gap:12rpx; }
 .date-sep { color:var(--muted); }
 .export-btns { display:grid; grid-template-columns:1fr 1fr; gap:12rpx; margin-top:20rpx; }
+/* 原生 button 真机上会撑破 1fr 轨道：显式限宽并允许收缩 */
+.export-btns .btn-secondary { width:100%; min-width:0; max-width:100%; }
 
 .link { color:var(--green-800); font-weight:700; }
 .empty-state { padding:38rpx; text-align:center; color:var(--muted); font-size:24rpx; }

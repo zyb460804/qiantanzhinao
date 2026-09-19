@@ -91,15 +91,15 @@
       <view class="quick-action-row">
         <view class="quick-action-card" wx:if="{{emptyCount > 0}}" bindtap="navigateToPurchase">
           <view class="qa-glyph warn">补</view>
-          <view class="qa-copy"><text class="qa-title">{{emptyCount}} 项售罄</text><text class="qa-desc">去采购补货 ›</text></view>
+          <view class="qa-copy"><text class="t-card-title">{{emptyCount}} 项售罄</text><text class="qa-desc">去采购补货 ›</text></view>
         </view>
         <view class="quick-action-card" wx:if="{{attentionCount > 0}}" bindtap="navigateToPurchase">
           <view class="qa-glyph warn">补</view>
-          <view class="qa-copy"><text class="qa-title">{{attentionCount}} 项余量较少</text><text class="qa-desc">安排补货 ›</text></view>
+          <view class="qa-copy"><text class="t-card-title">{{attentionCount}} 项余量较少</text><text class="qa-desc">安排补货 ›</text></view>
         </view>
         <view class="quick-action-card" wx:if="{{expiringCount > 0}}" bindtap="navigateToClearance">
           <view class="qa-glyph danger">清</view>
-          <view class="qa-copy"><text class="qa-title">{{expiringCount}} 项临期</text><text class="qa-desc">降价清货 ›</text></view>
+          <view class="qa-copy"><text class="t-card-title">{{expiringCount}} 项临期</text><text class="qa-desc">降价清货 ›</text></view>
         </view>
       </view>
     </view>
@@ -115,10 +115,10 @@
 
       <!-- 搜索 + 筛选 + 排序工具栏 -->
       <view class="inv-tools" wx:if="{{inventoryItems.length > 0}}">
-        <view class="search-box">
+        <view class="ui-search">
           <icon name="search" size="sm" color="var(--muted)"></icon>
-          <input value="{{searchKeyword}}" placeholder="搜索商品名称" confirm-type="search" bindinput="onSearchInput" />
-          <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="clearSearch">×</text>
+          <input class="ui-search-input" value="{{searchKeyword}}" placeholder="搜索商品名称" placeholder-style="color:var(--muted)" confirm-type="search" bindinput="onSearchInput" />
+          <text wx:if="{{searchKeyword}}" class="ui-search-cancel" bindtap="clearSearch">清除</text>
         </view>
         <scroll-view scroll-x class="filter-scroll" show-scrollbar="{{false}}">
           <view class="filter-list">

@@ -34,6 +34,7 @@ class SaleOrder(Base):
             "'held','cancelled','partial_refund','refunded')",
             name="ck_sale_order_status",
         ),
+        {"comment": "POS 销售订单：零售/赊销/挂单/退款状态机，含离线幂等 client_id"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
@@ -69,6 +70,7 @@ class SaleOrderItem(Base):
     """销售订单行项目。"""
 
     __tablename__ = "sale_order_items"
+    __table_args__ = {"comment": "销售订单行项目：数量/单价/FIFO 成本，支持单品退款与回库"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     order_id: Mapped[uuid.UUID] = mapped_column(
@@ -107,6 +109,7 @@ class Payment(Base):
             "status IN ('success','failed','refunded')",
             name="ck_payment_status",
         ),
+        {"comment": "支付流水：现金/微信/支付宝/卡/赊账，支持组合支付与退款关联订单"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
@@ -158,7 +161,10 @@ class DailySettlement(Base):
     )
     closed_at: Mapped[datetime | None] = mapped_column(sa.DateTime)
 
-    __table_args__ = (sa.UniqueConstraint("merchant_id", "date", name="uq_settlement_per_day"),)
+    __table_args__ = (
+        sa.UniqueConstraint("merchant_id", "date", name="uq_settlement_per_day"),
+        {"comment": "每日日结：按渠道收款汇总与销售-实收差异，关闭时保存统计快照"},
+    )
 
 
 class Reconciliation(Base):
@@ -183,4 +189,7 @@ class Reconciliation(Base):
         sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
-    __table_args__ = (sa.UniqueConstraint("merchant_id", "date", name="uq_reconciliation_per_day"),)
+    __table_args__ = (
+        sa.UniqueConstraint("merchant_id", "date", name="uq_reconciliation_per_day"),
+        {"comment": "日结对账记录：销售总额 vs 支付总额 vs 库存消耗成本的每日核对"},
+    )

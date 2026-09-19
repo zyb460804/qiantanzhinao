@@ -123,6 +123,8 @@ App({
     }
     this.globalData.reduceMotion = wx.getStorageSync(KEYS.REDUCE_MOTION) === true;
     this.globalData.skin = this.getSkinByHour(new Date().getHours());
+    // 恢复持久化主题时，同步原生导航栏/tab 栏配色
+    this.applyChromeTheme(this.globalData.theme);
 
     // 同步减少动效到 stream-text 模块
     try { require('./utils/stream-text').setReduceMotion(this.globalData.reduceMotion); } catch (e) {}
@@ -512,13 +514,38 @@ App({
   },
 
   /**
-   * 设置全局主题（light/dark），同时持久化。
+   * 设置全局主题（light/dark），同时持久化，并同步原生导航栏/底部 tab 栏。
    * @param {string} theme - 'light' | 'dark'
    */
   setTheme: function (theme) {
     if (theme !== 'light' && theme !== 'dark') return;
     this.globalData.theme = theme;
     wx.setStorageSync(this._storageKeys.THEME, theme);
+    this.applyChromeTheme(theme);
+  },
+
+  /**
+   * 把 light/dark 主题同步到「系统级 chrome」——原生导航栏与底部 tab 栏。
+   * 页面内容色由 .ui-dark 令牌负责，这里负责页面 css 够不到的部分。
+   * 调用点：onLaunch（恢复持久化主题时）与 setTheme（切换时）。
+   */
+  applyChromeTheme: function (theme) {
+    var dark = theme === 'dark';
+    try {
+      wx.setNavigationBarColor({
+        frontColor: dark ? '#ffffff' : '#000000',
+        backgroundColor: dark ? '#182019' : '#ffffff',
+        fail: function () {},
+      });
+    } catch (e) {}
+    try {
+      wx.setTabBarStyle({
+        backgroundColor: dark ? '#182019' : '#ffffff',
+        color: dark ? '#6e7870' : '#87918a',
+        selectedColor: dark ? '#57c17c' : '#1b7a44',
+        borderStyle: dark ? 'black' : 'white',
+      });
+    } catch (e) {}
   },
 
   /**

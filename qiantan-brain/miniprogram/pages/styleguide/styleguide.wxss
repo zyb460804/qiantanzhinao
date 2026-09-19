@@ -35,3 +35,6 @@
 /* 小智 */
 .sg-mascot-row { display: flex; justify-content: space-around; align-items: flex-end; gap: var(--s-3); padding: var(--s-3) 0; }
 .sg-mascot-cell { display: flex; flex-direction: column; align-items: center; gap: 12rpx; color: var(--muted); font-size: var(--fs-xs); }
+
+/* v5.0 演示：seg-tabs 需要容器提供下边线（app.wxss 的 .seg-tabs 自带外边距，这里就地包裹） */
+.sg-seg-tabs-demo { display: flex; margin: 0 -8rpx; border-bottom: 1rpx solid var(--line); }

@@ -38,4 +38,5 @@ class IdempotencyRecord(Base):
         ),
         sa.Index("ix_idempotency_records_key", "idempotency_key"),
         sa.Index("ix_idempotency_records_tenant", "tenant_id"),
+        {"comment": "接口幂等记录：同租户+操作+幂等键缓存响应，重放请求直接返回原结果"},
     )

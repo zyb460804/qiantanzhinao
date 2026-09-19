@@ -70,8 +70,14 @@
       <view class="report-row total"><text>毛利</text><text>¥{{fmt.fixed(monthlyReport.gross_profit,2)}}</text></view>
       <view class="report-row"><text>费用</text><text>¥{{fmt.fixed(monthlyReport.expenses,2)}}</text></view>
       <view class="report-row total net"><text>净利润</text><text>¥{{fmt.fixed(monthlyReport.net_profit,2)}}</text></view>
-      <!-- 月度收支柱状图 -->
-      <canvas type="2d" id="reportChart" class="report-chart" style="width:100%;height:240px;"></canvas>
+      <!-- 月度收支横条（纯 CSS，替代 canvas 柱图） -->
+      <view class="fin-bars" wx:if="{{financeBars.length}}">
+        <view wx:for="{{financeBars}}" wx:key="name" class="fin-bar-row">
+          <text class="fin-bar-name">{{item.name}}</text>
+          <view class="fin-bar-track"><view class="fin-bar-fill {{item.neg ? 'is-neg' : ''}}" style="width:{{item.pct}}%"></view></view>
+          <text class="fin-bar-val {{item.neg ? 'is-neg' : ''}}">{{item.text}}</text>
+        </view>
+      </view>
       <view wx:if="{{monthlyReport.expense_breakdown && monthlyReport.expense_breakdown.length}}" class="report-breakdown">
         <text class="report-sub">费用明细</text>
         <view wx:for="{{monthlyReport.expense_breakdown}}" wx:key="category" class="report-row sm"><text>{{item.category==='rent'?'租金':item.category==='utility'?'水电':item.category==='labor'?'人工':item.category==='fee'?'手续费':'其他'}}</text><text>¥{{fmt.fixed(item.amount,2)}}</text></view>

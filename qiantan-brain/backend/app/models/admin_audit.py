@@ -34,4 +34,5 @@ class AdminAuditLog(Base):
     __table_args__ = (
         sa.Index("ix_admin_audit_logs_action", "action"),
         sa.Index("ix_admin_audit_logs_created_at", "created_at"),
+        {"comment": "平台管理员操作审计日志：登录及租户/套餐/计费等后台操作留痕"},
     )

@@ -26,4 +26,7 @@ class EnvironmentRecord(Base):
     special_event: Mapped[str | None] = mapped_column(sa.String(100))
     fetched_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now())
 
-    __table_args__ = (sa.UniqueConstraint("date", "city"),)
+    __table_args__ = (
+        sa.UniqueConstraint("date", "city"),
+        {"comment": "环境与日历记录：温度/天气/降雨/节假日，销量预测的外部因子（每日每城一条）"},
+    )

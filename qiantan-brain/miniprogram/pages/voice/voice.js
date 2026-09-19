@@ -400,6 +400,9 @@ Page({
         }
       } else {
         wx.showToast({ title: '记账成功', icon: 'success' });
+        // 修复：单条确认后同步刷新「今日已记 N」与最近记录列表，
+        // 否则摊主看到 toast 但列表仍是旧数据，以为没点上。
+        self.loadTodayCount();
         self.resetToIdle();
       }
     }).catch(function (err) {
@@ -688,7 +691,7 @@ Page({
     var logId = e.currentTarget.dataset.id;
     if (!logId) return;
     wx.showModal({
-      title: '撤销确认', content: '撤销后库存和批次将自动回滚，确定撤销吗？', confirmColor: '#c8392b',
+      title: '撤销确认', content: '撤销后库存和批次将自动回滚，确定撤销吗？', confirmColor: '#d93a2b',
       success: function (res) {
         if (res.confirm) {
           app.request({ url: '/voice/' + logId + '/void', method: 'POST', data: { reason: '用户手动撤销' } })

@@ -11,6 +11,7 @@ from app.database import Base
 
 class VoiceLog(Base):
     __tablename__ = "voice_logs"
+    __table_args__ = {"comment": "语音记账日志：原始语音地址、ASR 文本、解析出的事件与确认状态"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

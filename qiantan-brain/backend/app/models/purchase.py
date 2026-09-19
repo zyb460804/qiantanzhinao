@@ -34,6 +34,7 @@ class PurchaseList(Base):
             "payment_status IN ('unpaid','partial','credit','paid')",
             name="ck_purchase_list_payment_status",
         ),
+        {"comment": "采购单：AI 建议→确认→到货验收→入库→完成的闭环状态机与付款状态"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
@@ -65,6 +66,7 @@ class PurchaseItem(Base):
     """Individual line item in a purchase list — 含到货验收明细."""
 
     __tablename__ = "purchase_items"
+    __table_args__ = {"comment": "采购明细：下单量/实收量、毛重皮重净重、缺斤破损退货与验收结果"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     list_id: Mapped[uuid.UUID] = mapped_column(

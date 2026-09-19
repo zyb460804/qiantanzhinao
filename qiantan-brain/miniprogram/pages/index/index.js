@@ -11,9 +11,10 @@ Page({
     merchantName: '', skin: 'noon', greeting: '你好',
     showSkeleton: false, loadError: false, staleData: false,
     todayRevenue: 0, todayCost: 0, todayProfit: 0, riskScore: 0,
-    riskLevel: '低风险', riskColor: '#357d48',
+    riskLevel: '低风险', riskColor: '#1b7a44',
     expiringCount: 0, inventoryCategoryCount: 0, inStockCount: 0, lowStockCount: 0,
     weather: null, recentRecords: [],
+    weekBars: [], weekSum: '', weekAvg: '',
     todayTasks: [{ id: 'steady', tone: 'good', glyph: '稳',
       title: '当前没有紧急待办', desc: '经营状态平稳，可以查看今日建议安排下一轮进货。',
       action: '看建议', route: 'advisor' }],
@@ -50,6 +51,7 @@ Page({
 
     this.loadWeather();
     this._loadYdayTrend();
+    this._loadWeekTrend();
   },
 
   onReady: function () {
@@ -77,6 +79,7 @@ Page({
     this._fetchRemote(true, function () { wx.stopPullDownRefresh(); });
     this.loadWeather();
     this._loadYdayTrend();
+    this._loadWeekTrend();
   },
 
   /* ── 较昨日趋势（昨日营收来自 /reports/daily，与"我的"页同源）── */
@@ -107,6 +110,31 @@ Page({
     }
     this.setData(patch);
   },
+
+  /* ── 近 7 日营业额趋势（/reports/trends，与报告页同源；缺失时整卡隐藏）── */
+
+  _loadWeekTrend: function () {
+    var self = this;
+    app.request({ url: '/reports/trends', data: { days: 7 } }).then(function (list) {
+      var rows = Array.isArray(list) ? list : [];
+      var revs = rows.map(function (r) { return Math.max(0, Number(r.revenue) || 0); });
+      if (!revs.length) { self.setData({ weekBars: [] }); return; }
+      var max = Math.max.apply(null, revs.concat([1]));
+      var sum = revs.reduce(function (a, b) { return a + b; }, 0);
+      self.setData({
+        weekBars: revs.map(function (v) { return Math.max(8, Math.round(v / max * 100)); }),
+        weekSum: self._fmtMoney(sum),
+        weekAvg: self._fmtMoney(sum / revs.length),
+      });
+    }).catch(function () { /* 趋势缺失不影响首屏其余内容 */ });
+  },
+
+  _fmtMoney: function (n) {
+    var v = Math.round(Number(n) || 0).toString();
+    return v.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  },
+
+  navigateToReport: function () { wx.navigateTo({ url: '/pages/report/report' }); },
 
   applySkin: function (skin) {
     if (skin !== 'morning' && skin !== 'evening') skin = 'noon';
@@ -281,9 +309,9 @@ Page({
   _updateRiskLevel: function () {
     var s = this.data.riskScore;
     var level = '', color = '';
-    if (s <= 30) { level = '低风险'; color = '#357d48'; }
-    else if (s <= 60) { level = '中等风险'; color = '#c8902a'; }
-    else { level = '高风险'; color = '#c8392b'; }
+    if (s <= 30) { level = '低风险'; color = '#1b7a44'; }
+    else if (s <= 60) { level = '中等风险'; color = '#d99a26'; }
+    else { level = '高风险'; color = '#d93a2b'; }
     this.setData({ riskLevel: level, riskColor: color });
   },
 

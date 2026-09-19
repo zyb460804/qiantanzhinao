@@ -11,6 +11,7 @@ from app.database import Base
 
 class MerchantPreference(Base):
     __tablename__ = "merchant_preferences"
+    __table_args__ = {"comment": "商户偏好设置：风险偏好、语音方言、常用商品与个性化画像数据"}
 
     id: Mapped[int] = mapped_column(sa.Integer, primary_key=True, autoincrement=True)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

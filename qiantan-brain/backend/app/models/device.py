@@ -39,6 +39,7 @@ class Device(Base):
 
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "serial_number", name="uq_device_serial_per_merchant"),
+        {"comment": "IoT 设备注册表：智能秤/摄像头/电子价签/打印机，商户内序列号唯一"},
     )
 
 
@@ -70,6 +71,7 @@ class PriceDisplay(Base):
 
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "sku_id", name="uq_price_display_per_sku"),
+        {"comment": "电子价签/顾客价目屏同步状态：当前价、价格来源与同步结果"},
     )
 
 
@@ -77,6 +79,7 @@ class DeviceFirmware(Base):
     """OTA firmware / 模型版本管理."""
 
     __tablename__ = "device_firmwares"
+    __table_args__ = {"comment": "设备固件 OTA 版本管理：文件哈希、灰度发布比例、变更日志"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     device_type: Mapped[str] = mapped_column(sa.String(30), nullable=False)  # scale/camera/esl/all
@@ -111,7 +114,10 @@ class DeviceModelVersion(Base):
     )
 
     # 对齐 m4b5c6d7e8f9 建库迁移已建的索引（ORM 未声明导致 alembic 漂移）。
-    __table_args__ = (sa.Index("ix_device_model_versions_device_id", "device_id"),)
+    __table_args__ = (
+        sa.Index("ix_device_model_versions_device_id", "device_id"),
+        {"comment": "设备端模型版本上报：视觉/语音模型在设备上的实际运行版本"},
+    )
 
 
 class DeviceRemoteLog(Base):
@@ -132,4 +138,7 @@ class DeviceRemoteLog(Base):
     )
 
     # 对齐 m4b5c6d7e8f9 建库迁移已建的索引（ORM 未声明导致 alembic 漂移）。
-    __table_args__ = (sa.Index("ix_device_remote_logs_device_id", "device_id"),)
+    __table_args__ = (
+        sa.Index("ix_device_remote_logs_device_id", "device_id"),
+        {"comment": "设备远程日志收集：DEBUG/INFO/WARN/ERROR 级别日志上报与排查"},
+    )

@@ -11,6 +11,7 @@ from app.database import Base
 
 class Merchant(Base):
     __tablename__ = "merchants"
+    __table_args__ = {"comment": "商户（摊主）账号：多租户归属、微信 openid 绑定与全局角色"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(sa.String(100), nullable=False)

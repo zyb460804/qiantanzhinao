@@ -176,10 +176,10 @@
 .skel-line:not(:first-child) { margin-top:18rpx; }
 
 .tag-muted { color:var(--muted); background:var(--paper-2); }
-.tag-blue { color:#1a6fb5; background:#e6f2fa; }
+.tag-blue { color:var(--info-ink); background:var(--info-soft); }
 .tag-red { color:var(--tomato); background:var(--tomato-soft); }
 .tag-amber { color:var(--corn-ink); background:var(--corn-soft); }
-.tag-green { color:#1a4528; background:rgba(0,133,86,.10); }
+.tag-green { color:var(--green-800); background:var(--green-50); }
 
 @keyframes shimmer { 0% { background-position:100% 0; } 100% { background-position:-100% 0; } }
 @keyframes fade-in { from { opacity:0; } to { opacity:1; } }

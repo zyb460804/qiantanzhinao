@@ -44,6 +44,7 @@ class SupplierPayable(Base):
             "direction IN ('purchase','payment')",
             name="ck_supplier_payable_direction",
         ),
+        {"comment": "供应商应付账款流水：进货记应付、付款记核销，欠款余额由流水聚合得出"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
@@ -88,6 +89,7 @@ class CustomerReceivable(Base):
             "direction IN ('charge','repay')",
             name="ck_customer_receivable_direction",
         ),
+        {"comment": "客户应收账款流水：赊账记应收、回款记核销（饭店/食堂等赊账客户）"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
@@ -119,6 +121,7 @@ class CustomerCreditProfile(Base):
         sa.UniqueConstraint(
             "merchant_id", "customer_name", name="uq_customer_profile_per_merchant"
         ),
+        {"comment": "客户信用档案：信用额度、默认账期、停赊标记（余额由应收流水聚合）"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)

@@ -226,7 +226,7 @@ var BAR_PAD = { top: 34, right: 18, bottom: 58, left: 40 };
  * @param {string} opts.labelKey        - 标签字段名 (默认 'name')
  * @param {string} opts.subKey          - 副标签字段名 (如 'purchase_qty')
  * @param {string} opts.subSuffix       - 副标签后缀 (如 '斤')
- * @param {Array}  opts.colors          - 颜色数组 (默认 ['#4ED9A6','#2a6b3c','#c8902a'])
+ * @param {Array}  opts.colors          - 颜色数组 (默认 ['#34a85e','#1b7a44','#d99a26'])
  * @param {number} opts.bestIndex       - 推荐方案索引 (自动计算最大值)
  * @param {string} opts.unitPrefix      - 值前缀 (默认 '¥')
  * @param {string} opts.recommendLabel  - 推荐标签文字 (默认 '推荐')
@@ -240,7 +240,7 @@ function drawBarChart(ctx, w, h, data, opts) {
   var labelKey = opts.labelKey || 'name';
   var subKey = opts.subKey || '';
   var subSuffix = opts.subSuffix || '';
-  var colors = opts.colors || ['#4ED9A6', '#2a6b3c', '#c8902a'];
+  var colors = opts.colors || ['#34a85e', '#1b7a44', '#d99a26'];
   var unitPrefix = opts.unitPrefix !== undefined ? opts.unitPrefix : '¥';
   var recommendLabel = opts.recommendLabel || '推荐';
 
@@ -305,7 +305,7 @@ function drawBarChart(ctx, w, h, data, opts) {
     var actualH = Math.abs(value) / maxAbs * chartH / 2;
     var visualH = Math.max(actualH, 3);
     var y = value >= 0 ? zeroY - visualH : zeroY;
-    var color = value < 0 ? '#c8392b' : colors[i % colors.length];
+    var color = value < 0 ? '#d93a2b' : colors[i % colors.length];
 
     roundedBar(x, y, barW, visualH, 8);
     ctx.fillStyle = color;
@@ -324,9 +324,9 @@ function drawBarChart(ctx, w, h, data, opts) {
     if (i === bestIndex) {
       var pillY = Math.max(2, valueY - 25);
       roundedBar(centerX - 18, pillY, 36, 17, 8.5);
-      ctx.fillStyle = '#E7F1EB';
+      ctx.fillStyle = '#DDF4E3';
       ctx.fill();
-      ctx.fillStyle = '#2a6b3c';
+      ctx.fillStyle = '#1b7a44';
       ctx.font = '700 9px sans-serif';
       ctx.textBaseline = 'middle';
       ctx.fillText(recommendLabel, centerX, pillY + 8.5);

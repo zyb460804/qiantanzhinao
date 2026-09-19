@@ -56,8 +56,8 @@ Component({
         return Math.max(0, Math.min(100, Number(risks[axis.key]) || 0));
       });
       var average = Math.round(values.reduce(function (sum, value) { return sum + value; }, 0) / values.length);
-      var color = average >= 65 ? '#c8392b' : (average >= 35 ? '#c8902a' : '#2a6b3c');
-      var fillColor = average >= 65 ? 'rgba(200,57,43,.16)' : (average >= 35 ? 'rgba(200,144,42,.18)' : 'rgba(42,107,60,.16)');
+      var color = average >= 65 ? '#d93a2b' : (average >= 35 ? '#d99a26' : '#1b7a44');
+      var fillColor = average >= 65 ? 'rgba(217,58,43,.16)' : (average >= 35 ? 'rgba(217,154,38,.18)' : 'rgba(27,122,68,.16)');
 
       ctx.clearRect(0, 0, w, h);
       var cx = w / 2;

@@ -1,14 +1,14 @@
 <view class="page-shell skin-{{skin}} {{dark ? 'ui-dark' : ''}} {{reduce ? 'reduce-motion' : ''}}">
   <view class="skin-ambient-layer"></view>
 
-  <!-- 头部 -->
-  <view class="sg-hero page-hero ">
-    <view class="row" style="gap:20rpx;position:relative;z-index:2;">
-      <mascot size="md" mood="idle" />
+  <!-- 头部：灯箱招牌 -->
+  <view class="page-hero rise sg-hero">
+    <view class="row" style="gap:20rpx;">
+      <mascot size="md" mood="cheer" />
       <view>
         <text class="eyebrow">千摊智脑 · 设计系统</text>
-        <text class="hero-title">地基 v2.2</text>
-        <text class="hero-desc">市井烟火 × 生鲜元气 — 当前皮肤：{{skinLabel[skin]}}{{dark ? ' · 深色' : ''}}</text>
+        <text class="hero-title">鲜 · 晨光菜市 v5.0</text>
+        <text class="hero-desc">青菜绿 × 价签红 × 麦穗金 — 当前皮肤：{{skinLabel[skin]}}{{dark ? ' · 深色' : ''}}</text>
       </view>
     </view>
   </view>
@@ -28,23 +28,23 @@
   </view>
 
   <!-- 色彩 -->
-  <view class="section-head"><text class="section-title">色彩</text></view>
-  <view class="card card--flush">
-    <view class="sg-swatch-head">生鲜叶绿（主导）</view>
+  <view class="section-head"><text class="section-title">色彩</text><text class="section-caption">鲜青菜绿 · 主导</text></view>
+  <view class="card card--flush stagger--on">
+    <view class="sg-swatch-head">青菜绿（品牌）</view>
     <view class="sg-swatches">
       <view wx:for="{{greens}}" wx:key="*this" class="sg-swatch">
         <view class="sg-swatch-color" style="background:var(--{{item}})"></view>
         <text class="sg-swatch-name">{{item}}</text>
       </view>
     </view>
-    <view class="sg-swatch-head">点缀 · 番茄红 / 玉米金</view>
+    <view class="sg-swatch-head">点缀 · 价签红 / 麦穗金</view>
     <view class="sg-swatches">
       <view class="sg-swatch"><view class="sg-swatch-color" style="background:var(--tomato)"></view><text class="sg-swatch-name">tomato</text></view>
       <view class="sg-swatch"><view class="sg-swatch-color" style="background:var(--tomato-soft)"></view><text class="sg-swatch-name">tomato-soft</text></view>
       <view class="sg-swatch"><view class="sg-swatch-color" style="background:var(--corn)"></view><text class="sg-swatch-name">corn</text></view>
       <view class="sg-swatch"><view class="sg-swatch-color" style="background:var(--corn-soft)"></view><text class="sg-swatch-name">corn-soft</text></view>
     </view>
-    <view class="sg-swatch-head">暖纸中性</view>
+    <view class="sg-swatch-head">白瓷中性</view>
     <view class="sg-swatches">
       <view class="sg-swatch" wx:for="{{neutrals}}" wx:key="*this">
         <view class="sg-swatch-color" style="background:var(--{{item}});border:1rpx solid var(--line)"></view>
@@ -53,17 +53,20 @@
     </view>
   </view>
 
-  <!-- 字体 -->
-  <view class="section-head"><text class="section-title">字体</text></view>
-  <view class="card">
-    <view class="sg-type-row"><text class="sg-type-label">展示体</text><text class="sg-type-display">得意黑 Smiley Sans</text></view>
-    <view class="sg-type-row"><text class="sg-type-label">数字体</text><text class="sg-type-num">¥1,280.50</text></view>
-    <view class="sg-type-row"><text class="sg-type-label">正文</text><text class="sg-type-body">老张菜摊 · 今日营业额节节高</text></view>
+  <!-- 字体 / 排版词汇表 -->
+  <view class="section-head"><text class="section-title">字体 · 排版词汇表</text><text class="section-caption">用角色表达文字，不手写字号</text></view>
+  <view class="card stagger--on">
+    <view class="sg-type-row"><text class="sg-type-label">t-overline</text><text class="t-overline">今日经营 · 午市</text></view>
+    <view class="sg-type-row"><text class="sg-type-label">t-title</text><text class="t-title">近 7 日营业额趋势</text></view>
+    <view class="sg-type-row"><text class="sg-type-label">t-card-title</text><text class="t-card-title">西红柿 · 今日批次</text></view>
+    <view class="sg-type-row"><text class="sg-type-label">t-num-xl</text><text class="t-num-xl">¥ 1,280.50</text></view>
+    <view class="sg-type-row"><text class="sg-type-label">t-body</text><text class="t-body">西红柿剩 2.4 斤，建议降 0.5 元清货，下午补 20 斤。</text></view>
+    <view class="sg-type-row"><text class="sg-type-label">t-caption</text><text class="t-caption">不同商品单位不可直接相加，按品类展示。</text></view>
   </view>
 
   <!-- 间距 / 圆角 -->
   <view class="section-head"><text class="section-title">间距 & 圆角</text></view>
-  <view class="card">
+  <view class="card stagger--on">
     <view class="sg-space-row" wx:for="{{['s-1','s-2','s-3','s-4','s-6','s-8']}}" wx:key="*this">
       <text class="sg-space-name">{{item}}</text>
       <view class="sg-space-bar" style="width:var(--{{item}})"></view>
@@ -77,35 +80,146 @@
     </view>
   </view>
 
-  <!-- 组件 -->
-  <view class="section-head"><text class="section-title">组件</text></view>
-  <view class="card">
-    <view class="sg-sub">按钮</view>
+  <!-- 按钮 -->
+  <view class="section-head"><text class="section-title">按钮</text><text class="section-caption">胶囊 · 主按钮带内高光与辉光</text></view>
+  <view class="card stagger--on">
     <view class="btn-row" style="margin-bottom:16rpx;">
-      <view class="btn-primary">主按钮</view>
-      <view class="btn-tomato">语音记账</view>
+      <view class="btn-primary btn--sheen">记一笔</view>
+      <view class="btn-tomato">报损</view>
     </view>
-    <view class="btn-row">
+    <view class="btn-row" style="margin-bottom:16rpx;">
       <view class="btn-secondary">次按钮</view>
       <view class="btn-ghost">幽灵</view>
     </view>
+    <view class="btn-row" style="margin-bottom:16rpx;">
+      <view class="btn-outline">描边</view>
+      <view class="btn-link">文字按钮 ›</view>
+    </view>
+    <view class="row" style="gap:16rpx;">
+      <view class="btn-sm btn-primary">小按钮</view>
+      <view class="btn-icon"><icon name="plus" size="sm" /></view>
+      <view class="btn-primary" style="opacity:.5;">禁用态</view>
+    </view>
   </view>
 
-  <view class="card">
-    <view class="sg-sub">标签 / 芯片 / KPI</view>
+  <!-- 徽章 / 标签 / 印章 -->
+  <view class="section-head"><text class="section-title">徽章 · 标签 · 印章</text></view>
+  <view class="card stagger--on">
+    <view class="sg-sub">tag（软底）</view>
     <view class="row" style="gap:12rpx;flex-wrap:wrap;margin-bottom:16rpx;">
       <view class="tag tag-green">生鲜</view>
       <view class="tag tag-tomato">语音</view>
       <view class="tag tag-corn">利润</view>
-      <view class="chip chip--on"><icon name="leaf" size="sm" color="var(--green-700)"/> 时令</view>
+      <view class="tag tag-ink">备注</view>
     </view>
-    <view class="row-between">
-      <view class="kpi"><text class="kpi-value is-green">¥1,280</text><text class="kpi-label">今日营业额</text></view>
-      <view class="kpi" style="text-align:right;"><text class="kpi-value is-tomato">¥320</text><text class="kpi-label">净利润</text></view>
+    <view class="sg-sub">badge（实心计数）</view>
+    <view class="row" style="gap:12rpx;flex-wrap:wrap;margin-bottom:16rpx;">
+      <view class="badge">3</view>
+      <view class="badge badge-tomato">12</view>
+      <view class="badge badge-corn">新</view>
+      <view class="badge badge-outline">0</view>
+    </view>
+    <view class="sg-sub">chip / pill</view>
+    <view class="row" style="gap:12rpx;flex-wrap:wrap;margin-bottom:16rpx;">
+      <view class="chip chip--on">时令</view>
+      <view class="chip">全部</view>
+      <view class="pill pill-soft">午市 · 采购中</view>
+    </view>
+    <view class="sg-sub">stamp（价签红印）</view>
+    <view class="row" style="gap:16rpx;">
+      <view class="stamp">已核销</view>
+      <view class="stamp" style="color:var(--green-700);">今日已结</view>
     </view>
   </view>
 
-  <view class="card insight">
+  <!-- 数据展示 -->
+  <view class="section-head"><text class="section-title">数据展示</text><text class="section-caption">stat 卡 + mini 趋势柱 + 进度条</text></view>
+  <view class="btn-row stagger--on">
+    <view class="stat-card" style="flex:1;">
+      <text class="stat-title">近 7 日营业额</text>
+      <text class="stat-value">¥9,412</text>
+      <view class="mini-bars">
+        <view wx:for="{{barsA}}" wx:key="index" style="height:{{item}}%;" class="{{index === barsA.length - 1 ? 'is-hi' : ''}}"></view>
+      </view>
+      <text class="stat-note">较上周 +12.4%</text>
+    </view>
+    <view class="stat-card" style="flex:1;">
+      <text class="stat-title">损耗占比</text>
+      <text class="stat-value" style="color:var(--tomato);">3.2%</text>
+      <view class="mini-bars mini-bars--tomato">
+        <view wx:for="{{barsB}}" wx:key="index" style="height:{{item}}%;"></view>
+      </view>
+      <text class="stat-note">目标 3% 以内</text>
+    </view>
+  </view>
+  <view class="card stagger--on">
+    <view class="row-between" style="margin-bottom:10rpx;"><text class="sg-sub" style="margin-bottom:0;">今日目标 ¥2,000</text><text class="num strong">68%</text></view>
+    <view class="progress"><view class="progress-bar" style="width:68%"></view></view>
+    <view class="row-between" style="margin:20rpx 0 10rpx;"><text class="sg-sub" style="margin-bottom:0;">损耗预警</text><text class="num strong" style="color:var(--tomato);">82%</text></view>
+    <view class="progress progress--striped"><view class="progress-bar progress-bar--tomato" style="width:82%"></view></view>
+  </view>
+
+  <!-- 分段选项卡 & 开关 -->
+  <view class="section-head"><text class="section-title">选项卡 · 开关</text></view>
+  <view class="card stagger--on">
+    <view class="sg-sub">seg（胶囊容器式）</view>
+    <view class="seg" style="margin-bottom:20rpx;">
+      <view class="seg-item {{segIdx===0?'is-active':''}}" bindtap="setSeg" data-i="0">日</view>
+      <view class="seg-item {{segIdx===1?'is-active':''}}" bindtap="setSeg" data-i="1">周</view>
+      <view class="seg-item {{segIdx===2?'is-active':''}}" bindtap="setSeg" data-i="2">月</view>
+    </view>
+    <view class="sg-sub">seg-tabs（下划线式）</view>
+    <view class="sg-seg-tabs-demo">
+      <view class="seg-tab is-active">在售</view>
+      <view class="seg-tab">临期</view>
+      <view class="seg-tab">售罄</view>
+    </view>
+    <view class="divider"></view>
+    <view class="row-between" style="padding:8rpx 0;">
+      <view><text class="strong">语音记账完成后自动汇总</text><text class="muted-text" style="display:block;font-size:var(--fs-xs);margin-top:4rpx;">每天 21:30 生成日结小票</text></view>
+      <view class="switch {{switchA?'is-on':''}}" bindtap="toggleSwitch" data-k="switchA"></view>
+    </view>
+    <view class="row-between" style="padding:8rpx 0;">
+      <view><text class="strong">临期商品自动降价提醒</text><text class="muted-text" style="display:block;font-size:var(--fs-xs);margin-top:4rpx;">提前 1 天推送</text></view>
+      <view class="switch {{switchB?'is-on':''}}" bindtap="toggleSwitch" data-k="switchB"></view>
+    </view>
+  </view>
+
+  <!-- 表单 -->
+  <view class="section-head"><text class="section-title">表单</text></view>
+  <view class="card stagger--on">
+    <view class="form-field" style="margin-bottom:20rpx;">
+      <view class="form-label">商品名称<text class="required">*</text></view>
+      <input class="form-input" placeholder="例如：西红柿" placeholder-style="color:var(--muted)" />
+      <text class="form-hint">支持语音输入，说"西红柿 3 斤"即可</text>
+    </view>
+    <view class="form-field">
+      <view class="form-label">进货价<text class="required">*</text></view>
+      <view class="form-picker num">¥ 2.80 / 斤 ›</view>
+    </view>
+  </view>
+
+  <!-- 列表 -->
+  <view class="section-head"><text class="section-title">列表</text></view>
+  <view class="list stagger--on">
+    <view class="list-item list-item--tap"><view class="avatar avatar--green" style="width:64rpx;height:64rpx;font-size:26rpx;">西</view><view class="grow"><text class="strong">西红柿 · 3 批次</text><text class="muted-text" style="display:block;font-size:var(--fs-xs);margin-top:4rpx;">最新批次今天 07:20 入库</text></view><view class="badge badge-tomato">临期</view><text class="list-arrow">›</text></view>
+    <view class="list-item list-item--tap"><view class="avatar avatar--corn" style="width:64rpx;height:64rpx;font-size:26rpx;">土</view><view class="grow"><text class="strong">土豆 · 2 批次</text><text class="muted-text" style="display:block;font-size:var(--fs-xs);margin-top:4rpx;">库存充足</text></view><text class="list-arrow">›</text></view>
+    <view class="list-item list-item--tap"><view class="avatar avatar--info" style="width:64rpx;height:64rpx;font-size:26rpx;">青</view><view class="grow"><text class="strong">青椒 · 1 批次</text><text class="muted-text" style="display:block;font-size:var(--fs-xs);margin-top:4rpx;">预计明晚售罄</text></view><text class="list-arrow">›</text></view>
+  </view>
+
+  <!-- 小票卡（签名元素） -->
+  <view class="section-head"><text class="section-title">小票卡 · 印章</text><text class="section-caption">签名元素：撕边 + 虚线 + 红印</text></view>
+  <view class="card card--ticket stagger--on">
+    <view class="row-between"><text class="strong">日结小票 · 9 月 19 日</text><view class="stamp">已日结</view></view>
+    <view class="divider--dashed" style="margin:20rpx 0;"></view>
+    <view class="row-between" style="padding:6rpx 0;"><text class="muted-text">营业收入</text><text class="num strong">¥ 2,146.00</text></view>
+    <view class="row-between" style="padding:6rpx 0;"><text class="muted-text">进货成本</text><text class="num strong">¥ 1,402.50</text></view>
+    <view class="row-between" style="padding:6rpx 0;"><text class="muted-text">今日毛利</text><text class="num strong" style="color:var(--green-700);">¥ 743.50</text></view>
+  </view>
+
+  <!-- 洞察卡 -->
+  <view class="section-head"><text class="section-title">洞察卡</text></view>
+  <view class="card insight stagger--on">
     <mascot size="sm" mood="think" />
     <view class="insight-body">
       <view class="insight-title">小智今日洞察</view>
@@ -114,8 +228,167 @@
     <view class="btn-sm btn-primary insight-accept">采纳</view>
   </view>
 
-  <view class="card">
-    <view class="sg-sub">骨架屏（流光）</view>
+  <!-- 横幅 -->
+  <view class="section-head"><text class="section-title">横幅</text></view>
+  <view class="stagger--on">
+    <view class="banner banner-info">Tip：说"进了三箱西红柿"就能记一笔进货。</view>
+    <view class="banner banner-warn">明天有雨，叶菜进货建议减两成。</view>
+    <view class="banner banner-danger">2 个批次今天 20:00 前必须清货。</view>
+    <view class="banner banner-success">今日目标已达成，收摊吧！</view>
+  </view>
+
+  <!-- v5.1 搜索 & 公告 -->
+  <view class="section-head"><text class="section-title">搜索 · 公告</text><text class="section-caption">ui- 前缀扩展组件</text></view>
+  <view class="stagger--on">
+    <view class="ui-search" style="margin-bottom:16rpx;">
+      <text class="ui-search-glyph">🔍</text>
+      <input class="ui-search-input" placeholder="搜商品 / 批次 / 备注" placeholder-style="color:var(--muted)" />
+      <text class="ui-search-cancel">搜索</text>
+    </view>
+    <view class="ui-notice">
+      <text class="ui-notice-badge">快讯</text>
+      <view class="ui-notice-viewport"><text class="ui-notice-text">明天有雨，叶菜进货建议减两成 · 西红柿下午补 20 斤 · 晚市 18:00 出摊</text></view>
+      <view class="badge badge--dot is-pulse"></view>
+    </view>
+  </view>
+
+  <!-- v5.1 步骤条 -->
+  <view class="section-head"><text class="section-title">步骤条</text></view>
+  <view class="card stagger--on">
+    <view class="ui-steps">
+      <view class="ui-step is-done"><view class="ui-step-dot">✓</view>生成清单</view>
+      <view class="ui-step is-done"><view class="ui-step-dot">✓</view>确认采购</view>
+      <view class="ui-step is-current"><view class="ui-step-dot">3</view>到货验收</view>
+      <view class="ui-step"><view class="ui-step-dot">4</view>入库付款</view>
+    </view>
+  </view>
+
+  <!-- v5.1 选择控件 -->
+  <view class="section-head"><text class="section-title">复选 · 单选</text></view>
+  <view class="card stagger--on">
+    <view class="ui-check-row" bindtap="toggleCheck" data-k="checkA">
+      <view class="ui-check {{checkA?'is-on':''}}"></view>
+      <text>临期批次自动降价</text>
+      <view class="grow"></view>
+      <view class="badge">荐</view>
+    </view>
+    <view class="ui-check-row" bindtap="toggleCheck" data-k="checkB">
+      <view class="ui-check {{checkB?'is-on':''}}"></view>
+      <text>售罄商品自动隐藏</text>
+    </view>
+    <view class="divider--text">收款方式</view>
+    <view class="ui-radio-row" bindtap="setRadio" data-v="wx"><view class="ui-radio {{radioVal==='wx'?'is-on':''}}"></view><text>微信收款</text></view>
+    <view class="ui-radio-row" bindtap="setRadio" data-v="cash"><view class="ui-radio {{radioVal==='cash'?'is-on':''}}"></view><text>现金收款</text></view>
+    <view class="ui-radio-row" bindtap="setRadio" data-v="mix"><view class="ui-radio {{radioVal==='mix'?'is-on':''}}"></view><text>组合支付</text></view>
+  </view>
+
+  <!-- v5.1 数量步进 & 价签（组合行） -->
+  <view class="section-head"><text class="section-title">价签 · 步进器</text><text class="section-caption">库存行组合示例</text></view>
+  <view class="list stagger--on">
+    <view class="list-item">
+      <view class="ui-check is-on"></view>
+      <view class="grow" style="margin-left:16rpx;">
+        <text class="strong">西红柿 · 今日批次</text>
+        <view style="margin-top:6rpx;"><view class="ui-price ui-price--tomato"><text class="ui-price-sym">¥</text><text class="ui-price-int">2.8</text><text class="ui-price-unit">/斤</text></view></view>
+      </view>
+      <view class="ui-stepper">
+        <view class="ui-stepper-btn {{qty===0?'is-disabled':''}}" bindtap="qtyMinus">−</view>
+        <text class="ui-stepper-num">{{qty}}</text>
+        <view class="ui-stepper-btn" bindtap="qtyPlus">+</view>
+      </view>
+    </view>
+    <view class="list-item">
+      <view class="grow"><text class="strong">大白菜 · 昨日批次</text></view>
+      <view class="ui-price"><text class="ui-price-sym">¥</text><text class="ui-price-int">1.5</text><text class="ui-price-unit">/斤</text></view>
+    </view>
+  </view>
+
+  <!-- v5.1 折叠面板 -->
+  <view class="section-head"><text class="section-title">折叠面板</text></view>
+  <view class="ui-acc stagger--on">
+    <view class="ui-acc-item {{accOpen===0?'is-open':''}}">
+      <view class="ui-acc-head" bindtap="toggleAcc" data-i="0">怎么语音记账？<text class="ui-acc-arrow">›</text></view>
+      <view class="ui-acc-body"><view class="ui-acc-inner">在「记一笔」页按住话筒说"卖了 12 斤西红柿，3 块一斤"，系统自动识别商品、数量和金额并入库。</view></view>
+    </view>
+    <view class="ui-acc-item {{accOpen===1?'is-open':''}}">
+      <view class="ui-acc-head" bindtap="toggleAcc" data-i="1">毛利是怎么算的？<text class="ui-acc-arrow">›</text></view>
+      <view class="ui-acc-body"><view class="ui-acc-inner">毛利 = 已售商品收入 − 已售商品成本（按进货价估算），与当日进货金额分开计算，不受进货节奏影响。</view></view>
+    </view>
+    <view class="ui-acc-item {{accOpen===2?'is-open':''}}">
+      <view class="ui-acc-head" bindtap="toggleAcc" data-i="2">换手机数据会丢吗？<text class="ui-acc-arrow">›</text></view>
+      <view class="ui-acc-body"><view class="ui-acc-inner">不会。数据实时同步在云端，新手机登录同一个微信号即可继续使用。</view></view>
+    </view>
+  </view>
+
+  <!-- v5.1 时间线 -->
+  <view class="section-head"><text class="section-title">时间线</text><text class="section-caption">批次流转 · 操作记录</text></view>
+  <view class="card stagger--on">
+    <view class="ui-timeline">
+      <view class="ui-tl-item"><text class="ui-tl-time">07:20</text><view class="ui-tl-title">入库 3 箱 · 共 90 斤</view><view class="ui-tl-desc">批发商老王 · 单价 ¥2.2/斤</view></view>
+      <view class="ui-tl-item is-hi"><text class="ui-tl-time">10:35</text><view class="ui-tl-title">上架 · 定价 ¥2.8/斤</view><view class="ui-tl-desc">当前在售</view></view>
+      <view class="ui-tl-item"><text class="ui-tl-time">14:02</text><view class="ui-tl-title">售出 24 斤</view><view class="ui-tl-desc">语音记账 3 笔合并</view></view>
+    </view>
+  </view>
+
+  <!-- v5.1 表格 & 键值 -->
+  <view class="section-head"><text class="section-title">表格 · 键值对</text><text class="section-caption">对账 / 日结明细</text></view>
+  <view class="stagger--on">
+    <view class="ui-table" style="margin-bottom:20rpx;">
+      <view class="ui-tr ui-th"><text>商品</text><text>销量</text><text class="is-num">销售额</text></view>
+      <view class="ui-tr"><text>西红柿</text><text>24 斤</text><text class="is-num">¥67.20</text></view>
+      <view class="ui-tr"><text>大白菜</text><text>18 斤</text><text class="is-num">¥27.00</text></view>
+      <view class="ui-tr"><text>青椒</text><text>6 斤</text><text class="is-num is-red">¥-4.20</text></view>
+    </view>
+    <view class="card" style="margin-top:0;">
+      <view class="ui-kv"><text class="ui-kv-key">营业收入</text><text class="ui-kv-val num strong">¥ 2,146.00</text></view>
+      <view class="ui-kv"><text class="ui-kv-key">进货成本</text><text class="ui-kv-val num strong">¥ 1,402.50</text></view>
+      <view class="ui-kv"><text class="ui-kv-key">当日毛利</text><text class="ui-kv-val num strong" style="color:var(--green-700);">¥ 743.50</text></view>
+    </view>
+  </view>
+
+  <!-- v5.1 结果页 & 九宫格 -->
+  <view class="section-head"><text class="section-title">结果页 · 九宫格</text></view>
+  <view class="stagger--on">
+    <view class="card" style="margin-bottom:20rpx;">
+      <view class="ui-result" style="padding:40rpx 24rpx 8rpx;">
+        <view class="ui-result-icon">✓</view>
+        <view class="ui-result-title">今日已日结</view>
+        <view class="ui-result-desc">毛利 ¥743.50 · 已自动锁定账目</view>
+        <view class="ui-result-desc" style="margin-top:2rpx;">明早 6:30 可开始新的经营日</view>
+        <view class="ui-result-actions btn-row"><view class="btn-outline">看日结小票</view><view class="btn-primary">知道了</view></view>
+      </view>
+    </view>
+    <view class="ui-quick-grid">
+      <view class="ui-quick-cell"><text class="ui-quick-glyph">📦</text><text>进货</text></view>
+      <view class="ui-quick-cell"><text class="ui-quick-glyph">🧾</text><text>盘点</text></view>
+      <view class="ui-quick-cell"><text class="ui-quick-glyph">👥</text><text>员工</text></view>
+      <view class="ui-quick-cell"><text class="ui-quick-glyph">🚚</text><text>供应商</text></view>
+      <view class="ui-quick-cell"><text class="ui-quick-glyph">💹</text><text>报表</text></view>
+      <view class="ui-quick-cell"><text class="ui-quick-glyph">⚙️</text><text>设置</text></view>
+    </view>
+  </view>
+
+  <!-- v5.1 加载 & 杂项 -->
+  <view class="section-head"><text class="section-title">加载 · 氛围</text><text class="section-caption">spotlight 聚光 + bg-grid 网格布</text></view>
+  <view class="card card--spotlight bg-grid stagger--on" style="--spot: rgba(39, 145, 78, 0.10);">
+    <view class="row" style="gap:40rpx;margin-bottom:24rpx;">
+      <view class="ui-spinner"></view>
+      <view class="ui-dots"><view></view><view></view><view></view></view>
+      <view class="row" style="gap:10rpx;"><text class="strong">未读消息</text><view class="badge badge--dot is-pulse"></view></view>
+    </view>
+    <text class="grad-text" style="font-size:var(--fs-2xl);font-weight:800;">今日毛利 ¥743</text>
+    <view class="divider--text">或</view>
+    <view class="btn-row"><view class="btn-outline btn-block">手机号快捷登录</view></view>
+  </view>
+
+  <!-- 底部弹层 -->
+  <view class="section-head"><text class="section-title">底部弹层 Sheet</text></view>
+  <view class="card stagger--on">
+    <view class="btn-primary btn-block" bindtap="openSheet">打开 Sheet 演示</view>
+  </view>
+  <!-- 骨架屏 -->
+  <view class="section-head"><text class="section-title">骨架屏（流光）</text></view>
+  <view class="card stagger--on">
     <view class="skeleton sk-line" style="width:60%"></view>
     <view class="skeleton sk-line" style="width:90%"></view>
     <view class="skeleton sk-line" style="width:75%"></view>
@@ -123,7 +396,7 @@
 
   <!-- 图标 -->
   <view class="section-head"><text class="section-title">图标</text></view>
-  <view class="card">
+  <view class="card stagger--on">
     <view class="sg-icon-grid">
       <view class="sg-icon-cell" wx:for="{{['leaf','mic','bulb','camera','box','mirror','spark','calendar','trophy','chart','scan','check','cart','refresh','plus']}}" wx:key="*this">
         <icon name="{{item}}" size="lg" />
@@ -134,13 +407,29 @@
 
   <!-- 小智 -->
   <view class="section-head"><text class="section-title">小智 · 吉祥物</text></view>
-  <view class="card">
+  <view class="card stagger--on">
     <view class="sg-mascot-row">
-      <view class="sg-mascot-cell"><mascot size="sm" mood="idle" /><text>sm</text></view>
+      <view class="sg-mascot-cell"><mascot size="sm" mood="idle" /><text>idle</text></view>
       <view class="sg-mascot-cell"><mascot size="md" mood="think" /><text>think</text></view>
       <view class="sg-mascot-cell"><mascot size="lg" mood="cheer" /><text>cheer</text></view>
     </view>
   </view>
 
   <view style="height:40rpx;"></view>
+
+  <!-- 底部弹层（置于根视图内以继承 ui-dark 令牌；fixed 定位不受父级 padding 影响） -->
+  <view class="sheet-mask" wx:if="{{sheetOpen}}" bindtap="closeSheet">
+    <view class="sheet" catchtap="noop">
+      <view class="sheet-title">记一笔 · 选择类型</view>
+      <view class="list" style="margin-top:20rpx;">
+        <view class="list-item list-item--tap"><text style="margin-right:12rpx;">🎤</text><text class="grow strong">销售</text><text class="muted-text">卖了 12 斤西红柿</text></view>
+        <view class="list-item list-item--tap"><text style="margin-right:12rpx;">📦</text><text class="grow strong">进货</text><text class="muted-text">进了 3 箱土豆</text></view>
+        <view class="list-item list-item--tap"><text style="margin-right:12rpx;">🥀</text><text class="grow strong">报损</text><text class="muted-text">烂了 2 斤青菜</text></view>
+      </view>
+      <view class="btn-row" style="margin-top:24rpx;">
+        <view class="btn-outline" bindtap="closeSheet">取消</view>
+        <view class="btn-primary">确定</view>
+      </view>
+    </view>
+  </view>
 </view>

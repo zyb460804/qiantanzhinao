@@ -20,7 +20,7 @@
     </view>
     <view class="field-block">
       <view class="slider-head"><view><text class="field-label">计划进货量</text><text class="field-help">拖动滑块快速调整</text></view><text class="quantity-value">{{purchaseQty}}<text> 斤</text></text></view>
-      <slider min="1" max="300" value="{{purchaseQty}}" bindchange="onSliderChange" block-size="22" block-color="#2a6b3c" activeColor="#2a6b3c" backgroundColor="#e1e4e1"/>
+      <slider min="1" max="300" value="{{purchaseQty}}" bindchange="onSliderChange" block-size="22" block-color="#1b7a44" activeColor="#1b7a44" backgroundColor="#e2e6df"/>
       <view class="range-label"><text>1斤</text><text>300斤</text></view>
     </view>
     <view class="price-grid">
@@ -56,7 +56,14 @@
   <view wx:if="{{result && result.multi}}">
     <view class="section-head"><text class="section-title">三种方案对比</text><text class="section-caption">找到利润与风险平衡点</text></view>
     <view class="compare-card">
-      <canvas type="2d" id="sandboxCanvas" class="chart-canvas"></canvas>
+      <!-- 方案净收益横条（纯 CSS，替代 canvas 柱图） -->
+      <view class="scheme-bars" wx:if="{{schemeBars.length}}">
+        <view wx:for="{{schemeBars}}" wx:key="name" class="scheme-bar-row">
+          <text class="scheme-bar-name">{{item.name}}</text>
+          <view class="scheme-bar-track"><view class="scheme-bar-fill {{item.neg ? 'is-neg' : ''}} {{item.isBest ? 'is-best' : ''}}" style="width:{{item.pct}}%"></view></view>
+          <text class="scheme-bar-val {{item.neg ? 'red' : 'green'}}">{{item.text}}</text>
+        </view>
+      </view>
       <view class="compare-table">
         <view class="table-row table-head"><text>方案</text><text>进货量</text><text>净收益</text><text>损耗率</text></view>
         <view wx:for="{{result.multi}}" wx:key="name" class="table-row"><text class="scheme-name">{{item.name}}</text><text>{{item.purchase_qty}}斤</text><text class="{{item.net_profit >= 0 ? 'green' : 'red'}}">¥{{item.net_profit}}</text><text>{{fmt.percent(item.waste_rate)}}%</text></view>

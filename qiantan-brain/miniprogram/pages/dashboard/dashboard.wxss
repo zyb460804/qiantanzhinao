@@ -82,6 +82,29 @@
 }
 .risk-card { margin-top: 18rpx; }
 
+/* ---------- 综合风险圆环（纯 CSS conic，替代 canvas 雷达） ---------- */
+.risk-ring-card {
+  display: flex; align-items: center; gap: 30rpx;
+  padding: 26rpx; background: var(--paper);
+  border-radius: var(--r-lg); box-shadow: var(--shadow);
+}
+.risk-ring {
+  position: relative; flex: 0 0 auto;
+  width: 176rpx; height: 176rpx; border-radius: 50%;
+  transition: background var(--dur-slow) var(--ease-out);
+}
+.risk-ring-hole {
+  position: absolute; inset: 16rpx; border-radius: 50%;
+  background: var(--paper);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.risk-ring-num {
+  font-family: var(--font-num); font-size: 52rpx; font-weight: 800;
+  line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.risk-ring-unit { margin-top: 6rpx; color: var(--muted); font-size: 20rpx; }
+.risk-ring-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
 /* v5.0 排版重设计：品类图删除重复条形区后，单位说明直接跟在图表下方 */
 .dashboard-page .data-note {
   display: block; margin: 14rpx 6rpx 0;

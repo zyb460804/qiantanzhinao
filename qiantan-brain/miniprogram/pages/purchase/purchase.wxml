@@ -330,7 +330,7 @@
 
       <!-- 添加表单 -->
       <view class="manual-form">
-        <input class="form-input" placeholder="商品名（如：白菜）" value="{{manualName}}" data-field="name" bindinput="onManualField" />
+        <input class="form-input" placeholder="商品名（需已在商品目录中，如：白菜）" value="{{manualName}}" data-field="name" bindinput="onManualField" />
         <view class="manual-row">
           <input class="form-input flex-2" type="digit" placeholder="数量" value="{{manualQty}}" data-field="qty" bindinput="onManualField" />
           <picker mode="selector" value="{{manualUnitIdx}}" range="{{manualUnits}}" bindchange="onManualUnitChange">
@@ -338,6 +338,7 @@
           </picker>
         </view>
         <input class="form-input" type="digit" placeholder="进价/单价（可选）" value="{{manualCost}}" data-field="cost" bindinput="onManualField" />
+        <text class="form-hint">只支持商品目录里已有的商品名；新商品请先到「商品管理」添加</text>
       </view>
 
       <button class="btn-secondary-sm" bindtap="addManualItem" disabled="{{!manualName}}">+ 添加这一项</button>

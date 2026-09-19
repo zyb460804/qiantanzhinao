@@ -12,6 +12,7 @@ from app.database import Base
 
 class Recommendation(Base):
     __tablename__ = "recommendations"
+    __table_args__ = {"comment": "AI 建议记录：采购/备货建议、依据与置信度，采纳后回写实际偏差"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

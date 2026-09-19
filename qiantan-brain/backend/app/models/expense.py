@@ -18,6 +18,7 @@ class Expense(Base):
     """经营费用 — 租金、水电、人工、其他。"""
 
     __tablename__ = "expenses"
+    __table_args__ = {"comment": "经营费用：租金/水电/人工/手续费等支出流水，可关联发票"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(
@@ -61,4 +62,5 @@ class Invoice(Base):
 
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "invoice_number", name="uq_invoice_per_merchant"),
+        {"comment": "数电发票归档：发票号同商户唯一，金额/税额与影像文件地址"},
     )

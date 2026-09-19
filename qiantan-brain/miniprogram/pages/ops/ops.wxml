@@ -123,7 +123,8 @@
     <view class="section-head"><text class="section-title">数据导出</text><text class="section-caption">销售 / 库存 / 报损 / 往来账</text></view>
     <view class="export-card">
       <text class="form-label">日期范围</text>
-      <view class="date-row"><input class="form-input flex-1" type="text" placeholder="开始 YYYY-MM-DD" value="{{exportStart}}" data-field="exportStart" bindinput="onExportDate"/><text class="date-sep">—</text><input class="form-input flex-1" type="text" placeholder="结束 YYYY-MM-DD" value="{{exportEnd}}" data-field="exportEnd" bindinput="onExportDate"/></view>
+      <view class="date-row"><input class="form-input flex-1" type="text" placeholder="开始日期" placeholder-style="color:var(--muted)" value="{{exportStart}}" data-field="exportStart" bindinput="onExportDate"/><text class="date-sep">—</text><input class="form-input flex-1" type="text" placeholder="结束日期" placeholder-style="color:var(--muted)" value="{{exportEnd}}" data-field="exportEnd" bindinput="onExportDate"/></view>
+      <text class="form-hint">格式 2026-09-01 · 都不填则导出全部</text>
       <view class="export-btns">
         <button class="btn-secondary" data-type="sales" disabled="{{exporting}}" loading="{{exporting}}" bindtap="doExport">导出销售</button>
         <button class="btn-secondary" data-type="inventory" disabled="{{exporting}}" bindtap="doExport">导出库存</button>

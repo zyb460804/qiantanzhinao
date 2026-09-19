@@ -4,13 +4,13 @@
  * 数据来源:
  *   /reports/daily    — 今日经营快照 + 行动建议
  *   /reports/weekly   — 近7日汇总 + 健康评分
- *   /reports/trends   — 营业趋势折线 (支持 days 参数)
+ *   /reports/trends   — 营业趋势 (支持 days 参数)
  *
  * 图表策略:
- *   utils/chart.js 统一 Canvas 2D 折线图
+ *   纯 CSS 分组柱（_buildTrendBars），不依赖 canvas——
+ *   原生 canvas 在部分真机上同层渲染失败会浮层错位。
  */
 var app = getApp();
-var Chart = require('../../utils/chart');
 
 Page({
   data: {
@@ -19,6 +19,7 @@ Page({
     dailyData: null,
     weeklyData: null,
     trendData: [],
+    trendBars: [],           // 趋势分组柱（纯 CSS 渲染）
     canvasWidth: 0,
     canvasHeight: 0,
 
@@ -276,11 +277,30 @@ Page({
   // ── 渲染派生数据 (图表、通用派生) ─────────────────────
 
   _renderDerived: function () {
-    var self = this;
-    // 用 nextTick 确保 DOM 更新后再绘制 Canvas(替代固定延时,避免竞态)
-    wx.nextTick(function () {
-      self.drawTrendChart();
+    this._buildTrendBars();
+  },
+
+  // 趋势数据 → 纯 CSS 分组柱（营业额+毛利双柱，替代原 canvas 折线图）
+  _buildTrendBars: function () {
+    var data = this.data.trendData || [];
+    if (!data.length) { this.setData({ trendBars: [] }); return; }
+
+    var maxVal = 1;
+    data.forEach(function (d) {
+      maxVal = Math.max(maxVal, Number(d.revenue) || 0, Number(d.profit) || 0);
     });
+
+    var bars = data.map(function (d, i) {
+      var rev = Math.max(0, Number(d.revenue) || 0);
+      var prof = Math.max(0, Number(d.profit) || 0);
+      var label = String(d.date || '').slice(-5);   // 'MM-DD'；无日期退化为序号
+      return {
+        label: label || (i + 1) + '',
+        revPct: Math.max(rev > 0 ? 4 : 0, Math.round(rev / maxVal * 100)),
+        profPct: Math.max(prof > 0 ? 4 : 0, Math.round(prof / maxVal * 100)),
+      };
+    });
+    this.setData({ trendBars: bars });
   },
 
   // ── 渲染今日数据 ─────────────────────────────────────
@@ -352,27 +372,6 @@ Page({
     });
 
     this._calcMaxRankQty(w.sales_ranking || []);
-  },
-
-  // ── Canvas 趋势图绘制 ─────────────────────────────────
-
-  drawTrendChart: function () {
-    var data = this.data.trendData;
-    if (!data || data.length === 0) return;
-
-    var self = this;
-    Chart.initCanvas(this, '#trendCanvas').then(function (c) {
-      if (!c) return;
-      self.setData({ canvasWidth: c.width, canvasHeight: c.height });
-      Chart.drawLineChart(c.ctx, c.width, c.height, data, {
-        series: [
-          { key: 'revenue', color: '#2a6b3c', axis: 'left' },
-          { key: 'profit', color: '#c8902a', axis: 'left' },
-          { key: 'customer_price', color: '#2E7DD1', axis: 'right' },
-        ],
-        fillArea: { key: 'revenue', gradientFrom: 'rgba(47,158,110,.22)', gradientTo: 'rgba(47,158,110,0)' },
-      });
-    });
   },
 
   // ── 跳转语音记账 ─────────────────────────────────────

@@ -1,125 +1,131 @@
 <wxs src="/utils/format.wxs" module="fmt" />
-<!-- 我的 v3.0 — 经营快照 / 快捷操作 / 设备同步 / 工具 / 设置 / 帮助 -->
-<view class="page-shell profile-page {{skinClass}}">
+<!-- 我的 v5.2 — 快照 / 身份 / 常用功能 / 设备 / 工具 / 设置与帮助 / 关于
+     排版收敛：全页只用「hero + 分组卡」两种表面，文字走 t-* 词汇表 -->
+<view class="page-shell profile-page {{skinClass}} {{uiDark ? 'ui-dark' : ''}}">
+
   <!-- ① 经营快照 -->
-  <view class="page-hero snapshot-hero">
+  <view class="page-hero snapshot-hero rise">
     <text class="eyebrow">{{merchantName || '我的摊位'}}</text>
     <block wx:if="{{snapshotLoading}}">
       <view class="sk-bar"><view class="sk-line w60"></view><view class="sk-line w40"></view></view>
     </block>
     <block wx:elif="{{snapshotError}}">
-      <text class="hero-desc muted">数据加载失败，下拉刷新重试</text>
+      <text class="hero-desc">数据加载失败，下拉刷新重试</text>
     </block>
     <block wx:else>
       <view class="snapshot-main">
-        <text class="snapshot-revenue">¥{{todayRevenueDisplay}}</text>
-        <text class="snapshot-label" wx:if="{{todayOrders > 0}}">↑ {{dayChangePct === null ? '—' : (dayChangePct > 0 ? '+' : '') + fmt.fixed(dayChangePct, 1) + '%'}} 较昨日</text>
-        <text class="snapshot-label muted" wx:else>今天还没有记录，去记一笔吧 →</text>
+        <text class="hero-amount" style="margin-top:0;">¥{{todayRevenueDisplay}}</text>
+        <text class="hero-amount-label" wx:if="{{todayOrders > 0}}">↑ {{dayChangePct === null ? '—' : (dayChangePct > 0 ? '+' : '') + fmt.fixed(dayChangePct, 1) + '%'}} 较昨日</text>
+        <text class="hero-amount-label" wx:else>今天还没有记录，去记一笔吧 →</text>
       </view>
-      <view class="snapshot-stats" wx:if="{{todayOrders > 0}}">
-        <view class="sstat"><text class="sstat-num">{{todayOrders}}{{txnIsQty ? ' 斤' : ' 笔'}}</text><text class="sstat-label">{{txnIsQty ? '今日销量' : '交易笔数'}}</text></view>
-        <view class="sstat" wx:if="{{!txnIsQty}}"><text class="sstat-num">¥{{todayAov}}</text><text class="sstat-label">客单价</text></view>
-        <view class="sstat"><text class="sstat-num {{dayChangeDir}}">{{trendLabel}}</text><text class="sstat-label">经营趋势</text></view>
+      <view class="hero-stats" wx:if="{{todayOrders > 0}}">
+        <view class="hero-stat"><text class="hero-stat-num">{{todayOrders}}{{txnIsQty ? ' 斤' : ' 笔'}}</text><text class="hero-stat-label">{{txnIsQty ? '今日销量' : '交易笔数'}}</text></view>
+        <view class="hero-stat" wx:if="{{!txnIsQty}}"><text class="hero-stat-num">¥{{todayAov}}</text><text class="hero-stat-label">客单价</text></view>
+        <view class="hero-stat"><text class="hero-stat-num {{dayChangeDir}}">{{trendLabel}}</text><text class="hero-stat-label">经营趋势</text></view>
       </view>
       <view class="snapshot-week" wx:if="{{weekTotal > 0}}" bindtap="goDashboard">本周累计 ¥{{weekTotal}} →</view>
     </block>
   </view>
 
-  <!-- 员工身份切换（权限体系）：无员工的单人摊主不展示，避免占住快照下方黄金位 -->
+  <!-- 员工身份切换（权限体系）：无员工的单人摊主不展示 -->
   <view class="identity-bar {{staffMode ? 'is-staff' : ''}}" wx:if="{{staffMode || hasStaff}}" bindtap="onIdentityTap">
     <view class="identity-info">
-      <text class="identity-role">{{staffMode ? (currentStaff.name + ' · ' + currentStaff.roleLabel) : ((merchantName || '老板') + ' · 全部权限')}}</text>
-      <text class="identity-hint">{{staffMode ? '当前为员工身份，点击退出恢复老板' : '点击切换为员工身份（按角色限权）'}}</text>
+      <text class="t-card-title">{{staffMode ? (currentStaff.name + ' · ' + currentStaff.roleLabel) : ((merchantName || '老板') + ' · 全部权限')}}</text>
+      <text class="t-caption">{{staffMode ? '当前为员工身份，点击退出恢复老板' : '点击切换为员工身份（按角色限权）'}}</text>
     </view>
     <text class="identity-action">{{staffMode ? '退出' : '切换 ›'}}</text>
   </view>
 
-  <!-- ② 快捷操作（v3.3 去重：语音记账走底部 tab，不再重复放卡） -->
-  <view class="section-head"><text class="section-title">快捷操作</text></view>
-  <view class="quick-grid">
-    <view class="quick-card" wx:if="{{canDashboard}}" data-page="dashboard" bindtap="goQuick"><icon name="mirror" size="44" color="var(--green-800)"/><text class="quick-title">经营镜像</text><text class="quick-desc">今日全貌</text></view>
-    <view class="quick-card" wx:if="{{canPos}}" data-page="pos" bindtap="goQuick"><icon name="cart" size="44" color="var(--green-800)"/><text class="quick-title">收银开单</text><text class="quick-desc">快速开单</text></view>
-  </view>
-  <view class="quick-purchase" wx:if="{{canPurchase}}" data-page="purchase" bindtap="goQuick">
-    <view class="qp-left"><icon name="box" size="36" color="var(--corn)"/><text class="qp-title">采购清单</text></view>
-    <view class="qp-right">
-      <text class="qp-badge" wx:if="{{purchasePending > 0}}">待补 {{purchasePending}} 件</text>
-      <text class="qp-badge muted" wx:else>暂无待购</text>
-      <text>›</text>
+  <!-- ② 常用功能：两大动作 + 采购清单（合并为一张分组卡） -->
+  <view class="section-head" wx:if="{{canDashboard || canPos || canPurchase}}"><text class="section-title">常用功能</text></view>
+  <view class="card card--flush" wx:if="{{canDashboard || canPos || canPurchase}}">
+    <view class="feature-grid" wx:if="{{canDashboard || canPos}}">
+      <view class="feature-cell" wx:if="{{canDashboard}}" data-page="dashboard" bindtap="goQuick">
+        <icon name="mirror" size="lg" color="var(--green-700)" />
+        <view class="feature-copy"><text class="t-card-title">经营镜像</text><text class="t-caption">今日全貌</text></view>
+      </view>
+      <view class="feature-cell" wx:if="{{canPos}}" data-page="pos" bindtap="goQuick">
+        <icon name="cart" size="lg" color="var(--green-700)" />
+        <view class="feature-copy"><text class="t-card-title">收银开单</text><text class="t-caption">快速开单</text></view>
+      </view>
+    </view>
+    <view class="feature-row" wx:if="{{canPurchase}}" data-page="purchase" bindtap="goQuick">
+      <icon name="box" size="md" color="var(--corn)" />
+      <view class="feature-copy grow"><text class="t-card-title">采购清单</text></view>
+      <view class="badge badge-tomato" wx:if="{{purchasePending > 0}}">待补 {{purchasePending}} 件</view>
+      <text class="t-caption" wx:else>暂无待购</text>
+      <text class="list-arrow">›</text>
     </view>
   </view>
 
   <!-- ③ 设备与同步 -->
   <view class="section-head"><text class="section-title">设备与同步</text><text class="section-link" bindtap="goDevices">查看全部 ›</text></view>
-  <view class="device-panel">
+  <view class="list">
     <block wx:if="{{deviceError}}">
-      <view class="device-row muted"><text>设备数据暂不可用</text></view>
+      <view class="list-item"><text class="t-caption">设备数据暂不可用</text></view>
     </block>
     <block wx:elif="{{devices.length === 0}}">
-      <view class="device-row muted"><text>暂无设备，点此添加 →</text></view>
+      <view class="list-item list-item--tap" bindtap="goDevices"><text class="t-caption">暂无设备，点此添加 →</text></view>
     </block>
     <block wx:else>
-      <view wx:for="{{devices}}" wx:key="type" class="device-row">
+      <view wx:for="{{devices}}" wx:key="type" class="list-item">
         <view class="dev-status {{item.status}}"></view>
-        <text class="dev-name">{{item.name}} · {{item.status === 'online' ? '在线' : (item.status === 'unstable' ? '不稳定' : '离线')}}</text>
-        <text class="dev-time">{{item.heartbeat}}</text>
+        <text class="t-card-title grow">{{item.name}} · {{item.status === 'online' ? '在线' : (item.status === 'unstable' ? '不稳定' : '离线')}}</text>
+        <text class="t-caption">{{item.heartbeat}}</text>
       </view>
     </block>
-    <view class="device-row sync-row" bindtap="triggerSync">
+    <view class="list-item list-item--tap" bindtap="triggerSync">
       <view class="dev-status {{offlineQueueCount === 0 ? 'online' : (offlineQueueCount > 5 ? 'offline' : 'unstable')}}"></view>
-      <text class="dev-name">离线数据</text>
-      <text class="dev-time">{{offlineQueueCount === 0 ? '已同步' : (offlineQueueCount + ' 条待上传')}}</text>
-      <text class="dev-action">同步 ›</text>
+      <text class="t-card-title grow">离线数据</text>
+      <text class="t-caption">{{offlineQueueCount === 0 ? '已同步' : (offlineQueueCount + ' 条待上传')}}</text>
+      <text class="identity-action">同步 ›</text>
     </view>
   </view>
 
-  <!-- ④ 经营工具 — 常用 6 直达 + 更多工具折叠（v3.2 收敛） -->
-  <view class="section-head"><text class="section-title">常用直达</text><text class="section-caption">一天里用得最多</text></view>
-  <view class="tool-group" wx:if="{{quickTools.length}}">
-    <view class="tool-grid">
-      <view wx:for="{{quickTools}}" wx:key="name" wx:for-item="tool" class="tool-chip" data-page="{{tool.page}}" data-url="{{tool.url}}" bindtap="goDeep">
+  <!-- ④ 经营工具：常用直达 + 更多折叠（同一个网格，少一个区块） -->
+  <view class="section-head"><text class="section-title">经营工具</text><text class="section-link" wx:if="{{moreTools.length}}" bindtap="toggleMoreTools">{{moreOpen ? '收起 ‹' : '更多 ' + moreTools.length + ' 项 ›'}}</text></view>
+  <view class="ui-quick-grid" wx:if="{{quickTools.length || (moreOpen && moreTools.length)}}">
+    <view wx:for="{{quickTools}}" wx:key="name" wx:for-item="tool" class="ui-quick-cell" data-page="{{tool.page}}" data-url="{{tool.url}}" bindtap="goDeep">
+      <view class="tool-glyph {{tool.tone}}">{{tool.glyph}}</view>
+      <text>{{tool.name}}</text>
+    </view>
+    <block wx:if="{{moreOpen}}">
+      <view wx:for="{{moreTools}}" wx:key="name" wx:for-item="tool" class="ui-quick-cell" data-page="{{tool.page}}" data-url="{{tool.url}}" bindtap="goDeep">
         <view class="tool-glyph {{tool.tone}}">{{tool.glyph}}</view>
-        <text class="tool-name">{{tool.name}}</text>
+        <text>{{tool.name}}</text>
+      </view>
+    </block>
+  </view>
+
+  <!-- ⑤ 设置与帮助（合并为一张分组卡：摊位设置行 + 四个帮助动作） -->
+  <view class="section-head"><text class="section-title">设置与帮助</text></view>
+  <view class="card card--flush">
+    <view class="list-item list-item--tap" bindtap="goStallSettings">
+      <view class="grow">
+        <text class="t-card-title">{{merchantName || '未设置摊位名称'}}</text>
+        <text class="t-caption" style="margin-top:4rpx;">{{stallSummary || '设置名称 · 城市 · 方言 · 营业时段'}}</text>
+      </view>
+      <text class="list-arrow">›</text>
+    </view>
+    <view class="help-wrap">
+      <view class="help-grid">
+        <view class="help-item" bindtap="showGuide"><icon name="book" size="sm" /><text class="t-caption">操作指南</text></view>
+        <view class="help-item" bindtap="showFAQ"><icon name="help" size="sm" /><text class="t-caption">常见问题</text></view>
+        <view class="help-item" bindtap="showFeedback"><icon name="edit" size="sm" /><text class="t-caption">意见反馈</text></view>
+        <view class="help-item" bindtap="contactService"><icon name="chat" size="sm" /><text class="t-caption">联系客服</text></view>
       </view>
     </view>
   </view>
 
-  <view class="section-head"><text class="section-title">更多工具</text><text class="section-link" bindtap="toggleMoreTools">{{moreOpen ? '收起' : '展开'}} {{moreTools.length}} 项 ›</text></view>
-  <view class="tool-group" wx:if="{{moreOpen && moreTools.length}}">
-    <view class="tool-grid">
-      <view wx:for="{{moreTools}}" wx:key="name" wx:for-item="tool" class="tool-chip" data-page="{{tool.page}}" data-url="{{tool.url}}" bindtap="goDeep">
-        <view class="tool-glyph {{tool.tone}}">{{tool.glyph}}</view>
-        <text class="tool-name">{{tool.name}}</text>
-      </view>
-    </view>
-  </view>
-
-  <!-- ⑤ 摊位设置（跳转独立页面；副标题展示当前真实设置值） -->
-  <view class="section-head"><text class="section-title">摊位设置</text></view>
-  <view class="setting-entry" bindtap="goStallSettings">
-    <view class="setting-entry-body">
-      <text class="setting-entry-title">{{merchantName || '未设置摊位名称'}}</text>
-      <text class="setting-entry-desc">{{stallSummary || '设置名称 · 城市 · 方言 · 营业时段'}}</text>
-    </view>
-    <text class="setting-entry-arrow">›</text>
-  </view>
-
-  <!-- ⑥ 帮助与反馈（低频区：一行四项紧凑排布，去掉大卡与宣传语） -->
-  <view class="section-head"><text class="section-title">帮助与反馈</text></view>
-  <view class="help-grid">
-    <view class="help-item" bindtap="showGuide"><icon name="book" size="sm" color="var(--green-800)"/><text class="help-title">操作指南</text></view>
-    <view class="help-item" bindtap="showFAQ"><icon name="help" size="sm" color="var(--blue)"/><text class="help-title">常见问题</text></view>
-    <view class="help-item" bindtap="showFeedback"><icon name="edit" size="sm" color="var(--corn)"/><text class="help-title">意见反馈</text></view>
-    <view class="help-item" bindtap="contactService"><icon name="chat" size="sm" color="var(--green-800)"/><text class="help-title">联系客服</text></view>
-  </view>
-
-  <!-- ⑦ 关于 -->
+  <!-- ⑥ 关于 -->
   <view class="section-head"><text class="section-title">关于</text></view>
-  <view class="about-section">
-    <view class="about-row"><text>千摊智脑</text><text class="muted">v{{appVersion}}</text></view>
-    <view class="about-row" bindtap="showPrivacy"><text>隐私政策</text><text>›</text></view>
-    <view class="about-row" bindtap="showTerms"><text>用户协议</text><text>›</text></view>
-    <view class="about-row"><text>开源许可</text><text class="muted">MIT</text></view>
-    <view class="about-row logout-row" bindtap="logout"><text class="logout-text">退出登录</text><text class="muted">›</text></view>
+  <view class="list">
+    <view class="list-item"><text class="grow">千摊智脑</text><text class="t-caption">v{{appVersion}}</text></view>
+    <view class="list-item list-item--tap" bindtap="showPrivacy"><text class="grow">隐私政策</text><text class="list-arrow">›</text></view>
+    <view class="list-item list-item--tap" bindtap="showTerms"><text class="grow">用户协议</text><text class="list-arrow">›</text></view>
+    <view class="list-item"><text class="grow">开源许可</text><text class="t-caption">MIT</text></view>
+    <view class="list-item list-item--tap" bindtap="logout"><text class="grow" style="color:var(--tomato);font-weight:700;">退出登录</text><text class="list-arrow">›</text></view>
   </view>
+
+  <view class="safe-bottom"></view>
 </view>

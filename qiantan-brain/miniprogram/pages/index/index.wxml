@@ -1,5 +1,5 @@
 <!-- 经营台：真实指标、今日待办、高频工作入口 -->
-<view class="page-shell index-page skin-{{skin}}">
+<view class="page-shell index-page skin-{{skin}} {{uiDark ? 'ui-dark' : ''}}">
   <view class="skeleton-wrap" wx:if="{{showSkeleton}}">
     <view class="sk-hero"><view class="sk-line w60"></view><view class="sk-line w40"></view><view class="sk-ring"></view></view>
     <view class="sk-grid"><view class="sk-card"></view><view class="sk-card"></view></view>
@@ -16,13 +16,13 @@
     <block wx:if="{{loadError}}">
       <view class="section-head"><text class="section-title">常用工作</text><text class="section-caption">离线可用 · 动作类入口</text></view>
       <view class="action-grid work-grid">
-        <button class="action-card action-primary" bindtap="navigateToVoice"><icon name="mic" size="lg" color="#fff"/><text class="action-title">记一笔</text><text class="action-desc">说句话记进货/销售/损耗</text></button>
-        <button class="action-card" bindtap="navigateToWaste"><icon name="leaf" size="lg" color="var(--tomato-ink)"/><text class="action-title">报损</text><text class="action-desc">腐烂碰伤，随手记</text></button>
+        <button class="action-card action-primary btn--sheen" bindtap="navigateToVoice"><icon name="mic" size="lg" color="#fff"/><text class="action-title">记一笔</text><text class="action-desc">说句话记进货/销售/损耗</text></button>
+        <button class="action-card stagger--on" bindtap="navigateToWaste"><icon name="leaf" size="lg" color="var(--tomato-ink)"/><text class="action-title">报损</text><text class="action-desc">腐烂碰伤，随手记</text></button>
       </view>
     </block>
 
     <block wx:if="{{!loadError}}">
-    <view class="page-hero home-hero">
+    <view class="page-hero home-hero rise">
       <view class="hero-topline">
         <text class="eyebrow home-eyebrow">{{greeting}}，{{merchantName}} · 今日经营</text>
         <view class="skin-seg">
@@ -47,7 +47,7 @@
 
     <view class="section-head"><text class="section-title">今日待办</text><text class="section-caption">只展示基于当前数据的提醒</text></view>
     <view class="task-stack">
-      <view wx:for="{{todayTasks}}" wx:key="id" class="task-card {{item.tone}}" data-route="{{item.route}}" bindtap="handleTask">
+      <view wx:for="{{todayTasks}}" wx:key="id" class="task-card stagger--on {{item.tone}}" data-route="{{item.route}}" bindtap="handleTask">
         <view class="task-glyph">{{item.glyph}}</view>
         <view class="task-copy"><text class="task-title">{{item.title}}</text><text class="task-desc">{{item.desc}}</text></view>
         <text class="task-action">{{item.action}} ›</text>
@@ -56,16 +56,24 @@
 
     <view class="section-head"><text class="section-title">常用工作</text><text class="section-caption">两个高频动作 · 其余在「我的」页</text></view>
     <view class="action-grid work-grid">
-      <button class="action-card action-primary" bindtap="navigateToVoice"><icon name="mic" size="lg" color="#fff"/><text class="action-title">记一笔</text><text class="action-desc">说句话记进货/销售/损耗</text></button>
-      <button class="action-card" bindtap="navigateToWaste"><icon name="leaf" size="lg" color="var(--tomato-ink)"/><text class="action-title">报损</text><text class="action-desc">腐烂碰伤，随手记</text></button>
+      <button class="action-card action-primary btn--sheen" bindtap="navigateToVoice"><icon name="mic" size="lg" color="#fff"/><text class="action-title">记一笔</text><text class="action-desc">说句话记进货/销售/损耗</text></button>
+      <button class="action-card stagger--on" bindtap="navigateToWaste"><icon name="leaf" size="lg" color="var(--tomato-ink)"/><text class="action-title">报损</text><text class="action-desc">腐烂碰伤，随手记</text></button>
     </view>
 
     <!-- 今日建议单列：高频动作，从“分析工具”上移避免被淹没 -->
     <view class="section-head"><text class="section-title">今日建议</text><text class="section-link" bindtap="navigateToAdvisor">全部 ›</text></view>
-    <view class="today-advisor" bindtap="navigateToAdvisor">
+    <view class="today-advisor card--spotlight" style="--spot: rgba(217, 154, 38, 0.16);" bindtap="navigateToAdvisor">
       <view class="ta-glyph"><icon name="bulb" size="md" color="var(--corn)"/></view>
       <view class="ta-copy"><text class="ta-title">今天怎么卖更稳？</text><text class="ta-desc">基于天气、库存与经营偏好的判断</text></view>
       <text class="ta-arrow">›</text>
+    </view>
+
+    <view class="section-head" wx:if="{{weekBars.length}}"><text class="section-title">近 7 日营业额</text><text class="section-link" bindtap="navigateToReport">完整报告 ›</text></view>
+    <view class="card card--tap week-trend" wx:if="{{weekBars.length}}" bindtap="navigateToReport">
+      <view class="kpi grow"><text class="kpi-value">¥{{weekSum}}</text><text class="kpi-label">近 7 日合计 · 日均 ¥{{weekAvg}}</text></view>
+      <view class="mini-bars week-trend-bars">
+        <view wx:for="{{weekBars}}" wx:key="index" style="height:{{item}}%;" class="{{index === weekBars.length - 1 ? 'is-hi' : ''}}"></view>
+      </view>
     </view>
 
     <view class="section-head"><text class="section-title">库存状态</text><text class="section-link" bindtap="navigateToInventory">查看全部 ›</text></view>

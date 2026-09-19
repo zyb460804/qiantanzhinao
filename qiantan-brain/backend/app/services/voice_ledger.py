@@ -31,6 +31,39 @@ from app.services.accounts_service import record_customer_receivable
 from app.services.batch import BatchRollbackSummary, rollback_batch_on_void
 
 
+# 未确认（parsed）解析草稿每商户保留上限：超出移除最旧的。
+# 每次解析都会先落一条 parsed 行作为 confirm 锚点；摊主反复试口音/改词时
+# 这些行只增不减（实测单商户 46 条），污染存储与「最近说过」列表。移除
+# 从未确认的草稿不涉及任何回滚；在用锚点属于最新的 20 条，不受影响。
+MAX_PARSED_DRAFTS = 20
+
+
+async def prune_stale_parsed_logs(db: AsyncSession, merchant_id) -> int:
+    """移除超出上限的最旧 parsed 草稿，返回移除条数（随调用方事务提交）。"""
+    stale = (
+        (
+            await db.execute(
+                select(VoiceLog)
+                .where(
+                    VoiceLog.merchant_id == merchant_id,
+                    VoiceLog.status == "parsed",
+                )
+                .order_by(VoiceLog.created_at.desc(), VoiceLog.id.desc())
+                .offset(MAX_PARSED_DRAFTS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    removed = 0
+    for row in stale:
+        await db.delete(row)
+        removed += 1
+    if removed:
+        await db.commit()
+    return removed
+
+
 async def sync_voice_receivables(
     db: AsyncSession,
     log: VoiceLog,

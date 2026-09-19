@@ -1,99 +1,78 @@
 /* ============================================================
- * 「我的」页面 v3.0 样式
- * 七模块: 经营快照 / 快捷操作 / 设备同步 / 工具 / 设置 / 帮助 / 关于
+ * 「我的」页 v5.2 样式 —— 排版收敛版
+ * 表面只剩两种：绿色快照 hero + 白瓷分组卡（card--flush/.list）；
+ * 文字全部走 app.wxss 的 t-* 词汇表，本地只留布局与品牌细节。
  * ============================================================ */
 
 .profile-page { padding-top: 22rpx; padding-bottom: 160rpx; }
 
-/* ── ① 经营快照 ── */
+/* ── ① 经营快照（金额/统计行走全局 hero DNA，这里只管周累计胶囊）── */
 .snapshot-hero { padding-bottom: 34rpx; }
 .snapshot-main { position: relative; z-index: 2; margin-top: 16rpx; }
-.snapshot-revenue { display: block; font-family: var(--font-num); font-size: 62rpx; font-weight: 800; color: #fff; letter-spacing: -2rpx; }
-.snapshot-label { display: block; margin-top: 6rpx; font-size: 24rpx; color: rgba(255,255,255,.72); }
-.snapshot-label.muted { color: rgba(255,255,255,.55); }
-.snapshot-stats { position: relative; z-index: 2; display: flex; gap: 18rpx; margin-top: 30rpx; padding-top: 24rpx; border-top: 1rpx solid rgba(255,255,255,.13); }
-.sstat { flex: 1; text-align: center; }
-.sstat-num { display: block; font-family: var(--font-num); font-size: 34rpx; font-weight: 750; color: #fff; }
-.sstat-num.up { color: #7ee8a0; }
-.sstat-num.down { color: #ffb088; }
-.sstat-label { display: block; margin-top: 4rpx; font-size: 22rpx; color: rgba(255,255,255,.6); }
-.snapshot-week { position: relative; z-index: 2; display: block; margin-top: 22rpx; padding: 14rpx 22rpx; background: rgba(255,255,255,.1); border-radius: 999rpx; font-size: 23rpx; color: rgba(255,255,255,.8); }
+/* 涨跌色（profile.js 的 dayChangeDir 是 up/down，映射到 hero 深底配色） */
+.hero-stat-num.up { color: #8fe8ac; }
+.hero-stat-num.down { color: #ffc79e; }
+.snapshot-week {
+  position: relative; z-index: 2; display: block; margin-top: 22rpx;
+  padding: 14rpx 22rpx; background: rgba(255,255,255,.10);
+  border-radius: var(--r-pill); font-size: var(--fs-sm);
+  color: rgba(255,255,255,.82); text-align: center;
+}
 
 /* 骨架屏 */
-.sk-bar { padding: 20rpx 0; }
-.sk-bar .sk-line { height: 28rpx; margin: 12rpx 0; }
+.sk-bar { padding: 20rpx 0; position: relative; z-index: 2; }
+.sk-bar .sk-line { height: 28rpx; margin: 12rpx 0; background: rgba(255,255,255,.16); }
 
-/* ── ② 快捷操作 ── */
-.quick-grid { display: flex; gap: 16rpx; }
-.quick-card { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8rpx; padding: 28rpx 12rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); transition: transform var(--dur-fast) var(--ease-spring); }
-.quick-card:active { transform: scale(.97); }
-.quick-card .quick-title { display: block; margin-top: 8rpx; color: var(--ink); font-size: 26rpx; font-weight: 700; }
-.quick-card .quick-desc { display: block; color: var(--muted); font-size: 22rpx; }
+/* ── 员工身份切换横条 ── */
+.identity-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16rpx;
+  margin-top: var(--s-2); padding: 24rpx 28rpx;
+  background: var(--paper); border: 1rpx solid var(--ring); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.identity-bar.is-staff { border-left: 8rpx solid var(--green-700); }
+.identity-info { display: flex; flex-direction: column; gap: 6rpx; min-width: 0; }
+.identity-action { flex: 0 0 auto; font-size: var(--fs-sm); font-weight: 700; color: var(--primary); }
 
-.quick-purchase { display: flex; align-items: center; justify-content: space-between; margin-top: 16rpx; padding: 24rpx 28rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.quick-purchase:active { transform: scale(.99); }
-.qp-left { display: flex; align-items: center; gap: 16rpx; }
-.qp-title { color: var(--ink); font-size: 27rpx; font-weight: 700; }
-.qp-right { display: flex; align-items: center; gap: 8rpx; }
-.qp-badge { padding: 6rpx 16rpx; color: #fff; background: var(--red); border-radius: 999rpx; font-size: 22rpx; font-weight: 700; }
-.qp-badge.muted { color: var(--muted); background: var(--line); }
+/* ── ② 常用功能：分组卡（上双格 + 下采购行）── */
+.feature-grid { display: grid; grid-template-columns: 1fr 1fr; }
+.feature-cell {
+  display: flex; align-items: center; gap: 18rpx; padding: 28rpx 24rpx;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.feature-cell:active { background: var(--paper-2); }
+.feature-cell + .feature-cell { border-left: 1rpx solid var(--line-soft); }
+.feature-copy { display: flex; flex-direction: column; gap: 4rpx; min-width: 0; }
+.feature-row {
+  display: flex; align-items: center; gap: 18rpx;
+  padding: 22rpx 24rpx; border-top: 1rpx solid var(--line-soft);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.feature-row:active { background: var(--paper-2); }
+.feature-row .feature-copy { flex: 1; }
 
-/* ── ③ 设备与同步 ── */
-.device-panel { overflow: hidden; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.device-row { display: flex; align-items: center; gap: 16rpx; min-height: 92rpx; padding: 18rpx 24rpx; border-bottom: 1rpx solid var(--line); }
-.device-row:last-child { border-bottom: 0; }
-.device-row.muted { justify-content: center; color: var(--muted); font-size: 24rpx; }
-.dev-status { width: 16rpx; height: 16rpx; border-radius: 50%; flex-shrink: 0; }
-.dev-status.online { background: var(--green-600); box-shadow: 0 0 8rpx rgba(42, 107, 60, .4); }
+/* ── ③ 设备状态点（配全局 .list）── */
+.dev-status { width: 14rpx; height: 14rpx; border-radius: 50%; flex-shrink: 0; }
+.dev-status.online { background: var(--green-500); box-shadow: 0 0 8rpx rgba(52, 168, 94, .45); }
 .dev-status.unstable { background: var(--corn); }
 .dev-status.offline { background: var(--tomato); }
-.dev-name { flex: 1; color: var(--ink); font-size: 25rpx; font-weight: 600; }
-.dev-time { color: var(--muted); font-size: 22rpx; }
-.dev-action { color: var(--green-800); font-size: 22rpx; font-weight: 700; }
-.sync-row { cursor: pointer; }
 
-/* ── ④ 经营工具 ── */
-.tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16rpx; }
-.tool-group { margin-top: 20rpx; }
-.tool-chip { display: flex; flex-direction: column; align-items: center; gap: 12rpx; padding: 26rpx 12rpx; background: var(--paper); border: 1rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.tool-chip:active { transform: translateY(1rpx); box-shadow: none; }
-.tool-glyph { display: flex; align-items: center; justify-content: center; width: 76rpx; height: 76rpx; border-radius: 22rpx; font-size: 28rpx; font-weight: 800; }
+/* ── ④ 工具格（配全局 .ui-quick-grid 网格；软底字块缩小一档更安静）── */
+.tool-glyph {
+  display: flex; align-items: center; justify-content: center;
+  width: 64rpx; height: 64rpx; border-radius: 18rpx;
+  font-size: 26rpx; font-weight: 800;
+}
 .tool-glyph.blue { color: var(--info-ink); background: var(--info-soft); }
 .tool-glyph.corn { color: var(--corn-ink); background: var(--corn-soft); }
 .tool-glyph.green { color: var(--green-800); background: var(--green-100); }
-.tool-name { color: var(--ink-2); font-size: 22rpx; font-weight: 650; }
 
-/* ── ⑤ 摊位设置入口（跳转独立页面）── */
-.setting-entry { display: flex; align-items: center; gap: 16rpx; padding: 30rpx 28rpx; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); transition: transform var(--dur-fast) var(--ease-spring); }
-.setting-entry:active { transform: scale(.99); }
-.setting-entry-body { flex: 1; display: flex; flex-direction: column; gap: 8rpx; }
-.setting-entry-title { color: var(--ink); font-size: 31rpx; font-weight: 700; }
-.setting-entry-desc { color: var(--muted); font-size: 22rpx; }
-.setting-entry-arrow { color: var(--muted); font-size: 40rpx; font-weight: 300; line-height: 1; }
-
-/* ── ⑥ 帮助与反馈（低频区：一行四项紧凑排布）── */
+/* ── ⑤ 设置与帮助：帮助四格（分组卡内平底，hairline 由网格缝提供）── */
+.help-wrap { padding: var(--s-2); border-top: 1rpx solid var(--line-soft); }
 .help-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12rpx; }
-.help-item { display: flex; flex-direction: column; align-items: center; gap: 10rpx; padding: 24rpx 8rpx; background: var(--paper); border: 1rpx solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.help-item:active { transform: scale(.97); }
-.help-title { color: var(--ink-2); font-size: 22rpx; font-weight: 650; }
-
-/* ── ⑦ 关于 ── */
-.about-section { overflow: hidden; background: var(--paper); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.about-row { display: flex; align-items: center; justify-content: space-between; min-height: 92rpx; padding: 20rpx 24rpx; border-bottom: 1rpx solid var(--line); font-size: 26rpx; color: var(--ink); }
-.about-row:last-child { border-bottom: 0; }
-.about-row .muted { color: var(--muted); font-size: 23rpx; }
-.about-row.logout-row { border-bottom: 0; }
-.logout-text { color: var(--tomato); font-weight: 700; }
-
-/* ── 员工身份切换横条（权限体系）── */
-.identity-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  margin: 0 24rpx 20rpx; padding: 24rpx 28rpx;
-  background: var(--paper); border-radius: 20rpx;
-  box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.04);
+.help-item {
+  display: flex; flex-direction: column; align-items: center; gap: 10rpx;
+  padding: 20rpx 8rpx; background: var(--paper-2); border-radius: var(--r-md);
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.identity-bar.is-staff { border-left: 8rpx solid var(--green-700); }
-.identity-info { display: flex; flex-direction: column; gap: 6rpx; }
-.identity-role { font-size: 30rpx; font-weight: 700; color: var(--ink); }
-.identity-hint { font-size: 24rpx; color: var(--muted); }
-.identity-action { font-size: 28rpx; font-weight: 600; color: var(--green-700); }
+.help-item:active { background: var(--paper-3); }

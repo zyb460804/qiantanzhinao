@@ -71,6 +71,7 @@ Page({
     docVersion: '',
     docEffectiveDate: '',
     sections: [],
+    docOpen: 0,   // 默认展开第一条；-1 表示全部收起
   },
 
   onLoad: function (options) {
@@ -84,5 +85,10 @@ Page({
       sections: doc.sections,
     });
     wx.setNavigationBarTitle({ title: doc.title });
+  },
+
+  toggleAcc: function (e) {
+    var i = Number(e.currentTarget.dataset.i);
+    this.setData({ docOpen: this.data.docOpen === i ? -1 : i });
   },
 });

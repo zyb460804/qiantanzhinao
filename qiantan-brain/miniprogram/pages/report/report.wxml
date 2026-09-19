@@ -2,7 +2,7 @@
 <view class="page-shell report-page {{skinClass}}">
 
   <!-- 顶部 hero -->
-  <view class="page-hero report-hero">
+  <view class="page-hero report-hero rise">
     <view class="hero-kick">经营报告</view>
     <text class="hero-title">经营报告</text>
     <text class="hero-desc">{{rangeLabel}} · 更新于 {{refreshTime}}</text>
@@ -80,19 +80,27 @@
       </view>
     </view>
 
-    <!-- 趋势图表 -->
+    <!-- 趋势图表（纯 CSS 分组柱，替代 canvas 折线） -->
     <view class="block">
       <view class="section-head">
         <text class="section-title">营业趋势</text>
-        <text class="section-caption">{{activeTab === 'daily' ? '近7日走势' : (activeTab === 'weekly' ? '本周走势' : '近30日走势')}}</text>
+        <text class="section-caption">{{activeTab === 'daily' ? '近7日对比' : (activeTab === 'weekly' ? '本周对比' : '近30日对比')}}</text>
       </view>
       <view class="card chart-card">
         <view class="chart-legend">
           <text class="legend-item legend-revenue">营业额</text>
-          <text class="legend-item legend-profit">利润</text>
-          <text class="legend-item legend-aov">客单价</text>
+          <text class="legend-item legend-profit">毛利</text>
         </view>
-        <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
+        <view class="trend-chart" wx:if="{{trendBars.length}}">
+          <view wx:for="{{trendBars}}" wx:key="label" class="trend-col">
+            <view class="trend-bars">
+              <view class="trend-bar is-rev" style="height:{{item.revPct}}%"></view>
+              <view class="trend-bar is-prof" style="height:{{item.profPct}}%"></view>
+            </view>
+            <text class="trend-col-label">{{item.label}}</text>
+          </view>
+        </view>
+        <view wx:else class="empty-state"><text>暂无趋势数据</text></view>
       </view>
     </view>
 
@@ -133,8 +141,8 @@
         <view class="waste-row" wx:for="{{wasteList}}" wx:key="product_id">
           <view class="waste-mark">{{activeTab === 'daily' ? '滞' : '损'}}</view>
           <view class="waste-info">
-            <text class="waste-name">{{item.product_name}}</text>
-            <text class="waste-detail">{{activeTab === 'daily' ? '库存 ' + item.stock_qty + ' 件' : '损耗 ' + item.qty + ' 件 · ¥' + item.amountDisplay}}</text>
+            <text class="t-card-title">{{item.product_name}}</text>
+            <text class="t-caption">{{activeTab === 'daily' ? '库存 ' + item.stock_qty + ' 件' : '损耗 ' + item.qty + ' 件 · ¥' + item.amountDisplay}}</text>
           </view>
           <text class="tag tag-amber" wx:if="{{activeTab === 'daily'}}">关注</text>
           <text class="tag tag-red" wx:else>损耗</text>
@@ -152,7 +160,7 @@
         <text class="section-title">经营总结</text>
         <text class="section-caption">智能分析</text>
       </view>
-      <view class="card ai-card">
+      <view class="card ai-card card--spotlight">
         <view class="ai-head">
           <mascot size="sm" mood="think"></mascot>
           <view class="ai-head-copy"><text class="ai-name">小智</text><text class="ai-role">经营参谋</text></view>

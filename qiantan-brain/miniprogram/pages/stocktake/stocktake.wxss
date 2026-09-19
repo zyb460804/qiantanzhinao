@@ -27,7 +27,7 @@
 /* ── 商品盘点列表 ───────────────────────────────────────── */
 .stocktake-list { display: flex; flex-direction: column; gap: 18rpx; }
 .stocktake-card { padding: 26rpx; background: var(--paper); border: 1rpx solid transparent; border-radius: var(--radius-lg); box-shadow: 0 8rpx 24rpx rgba(25,48,38,.06); }
-.stocktake-card.submitted { border-color: rgba(0, 160, 106,.15); background: #fbfdfb; }
+.stocktake-card.submitted { border-color: var(--green-200); background: var(--green-50); }
 
 /* 商品头部 */
 .item-head { display: flex; justify-content: space-between; align-items: flex-start; }
@@ -45,9 +45,9 @@
 .qty-input-unit { color: var(--muted); font-size: 26rpx; }
 .qty-placeholder { color: var(--muted); font-size: 30rpx; font-weight: 500; }
 
-/* 快捷调整按钮 */
-.quick-btns { display: flex; gap: 10rpx; margin-top: 16rpx; }
-.quick-btn { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 66rpx; color: var(--green-800); background: var(--green-50); border-radius: 14rpx; font-size: 25rpx; font-weight: 720; }
+/* 快捷调整按钮（grid 五等分，杜绝溢出） */
+.quick-btns { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10rpx; margin-top: 16rpx; }
+.quick-btn { display: flex; align-items: center; justify-content: center; min-height: 62rpx; color: var(--green-800); background: var(--green-50); border-radius: 14rpx; font-size: 25rpx; font-weight: 720; }
 .quick-btn.gain { color: var(--corn-ink); background: var(--corn-soft); }
 .quick-btn:active { opacity: .78; transform: scale(.97); }
 
@@ -175,6 +175,6 @@
 .stocktake-tabs .tab-item.active::after { display: none; }
 .start-card { margin-top: 0; border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }
 .progress-card, .stocktake-card, .result-card, .history-card { border: 1.5rpx solid var(--ring); box-shadow: var(--shadow-sm); }
-.qty-input-area { background: var(--green-50); border-radius: 18rpx; }
-.quick-btn { min-height: 62rpx; }
-.bottom-bar { background: rgba(255,254,250,.96); }
+.qty-input-area { padding: 18rpx; background: var(--green-50); border-radius: 18rpx; }
+.quick-btns .quick-btn { min-height: 62rpx; }
+.bottom-bar { background: var(--paper); }

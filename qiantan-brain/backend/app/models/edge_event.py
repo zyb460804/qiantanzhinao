@@ -41,4 +41,5 @@ class EdgeEvent(Base):
         sa.UniqueConstraint("merchant_id", "event_id", name="uq_edge_events_merchant_event_id"),
         sa.Index("ix_edge_events_event_id", "event_id"),
         sa.Index("ix_edge_events_merchant_occurred", "merchant_id", "occurred_at"),
+        {"comment": "边缘设备上报事件：称重/视觉/心跳，按商户+event_id 幂等去重"},
     )

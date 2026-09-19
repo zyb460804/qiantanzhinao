@@ -1,5 +1,19 @@
-<!-- stock-chart 库存水平条形图 -->
-<view class="sc-wrap {{compact ? 'is-compact' : ''}}">
+<!-- stock-chart 库存结构图 · v5.6 纯 CSS 版
+     原 canvas 版在真机同层渲染失败时会浮层错位；纯 WXML/WXSS 零平台风险。
+     Props 不变：items [{name, qty, unit, status, color?}] / compact / max / title -->
+<view class="sc-list {{compact ? 'is-compact' : ''}}">
   <text class="sc-title" wx:if="{{title}}">{{title}}</text>
-  <canvas type="2d" id="sc-canvas" class="sc-canvas"></canvas>
+  <view wx:if="{{!rows.length}}" class="sc-empty">暂无库存数据</view>
+  <view wx:for="{{rows}}" wx:key="index" class="sc-row">
+    <text class="sc-idx {{item.hi ? 'is-hi' : ''}}">{{item.idxText}}</text>
+    <view class="sc-main">
+      <view class="sc-line1">
+        <text class="sc-name">{{item.name}}</text>
+        <text class="sc-qty" style="color:{{item.color}};">{{item.qtyText}}</text>
+      </view>
+      <view class="sc-track">
+        <view class="sc-fill" style="width:{{item.pct}}%;background:{{item.color}};"></view>
+      </view>
+    </view>
+  </view>
 </view>

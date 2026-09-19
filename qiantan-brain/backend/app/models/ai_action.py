@@ -18,6 +18,7 @@ class AIAction(Base):
     """AI 建议的一次可执行动作。"""
 
     __tablename__ = "ai_actions"
+    __table_args__ = {"comment": "AI 建议的可执行动作：清货/采购/改价/备货任务及其执行状态与结果"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

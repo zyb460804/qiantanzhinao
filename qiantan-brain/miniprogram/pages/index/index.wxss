@@ -21,8 +21,8 @@
 .home-trend { display: inline-flex; align-items: center; margin-top: 14rpx; padding: 6rpx 18rpx; border-radius: var(--r-pill); background: rgba(255,255,255,.12); color: rgba(255,255,255,.85); font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
 .home-trend.up { color: #7ee8a0; background: rgba(126, 232, 160, .12); }
 .home-trend.down { color: #ffb088; background: rgba(255, 176, 136, .12); }
-.home-amount-label { position: relative; z-index: 2; display: block; margin-top: 14rpx; color: rgba(255,255,255,.72); font-size: var(--fs-sm); }
-.home-amount-note { position: relative; z-index: 2; display: block; margin-top: 4rpx; color: rgba(255,255,255,.48); font-size: var(--fs-xs, 22rpx); }
+.home-amount-label { position: relative; z-index: 2; display: block; margin-top: 14rpx; color: rgba(255,255,255,.80); font-size: var(--fs-sm); }
+.home-amount-note { position: relative; z-index: 2; display: block; margin-top: 4rpx; color: rgba(255,255,255,.62); font-size: var(--fs-xs, 22rpx); }
 .weather-pill { position: relative; z-index: 2; display: flex; align-items: center; gap: 10rpx; padding: 12rpx 18rpx; color: rgba(255,255,255,.86); background: rgba(255,255,255,.11); border: 1rpx solid rgba(255,255,255,.12); border-radius: var(--r-pill); font-size: var(--fs-sm); }
 .weather-temp { font-family: var(--font-num); font-size: var(--fs-lg); font-weight: 700; }
 .home-weather { margin: 0 0 4rpx; }
@@ -40,11 +40,11 @@
 .task-card.danger .task-glyph { color: var(--tomato-ink); background: var(--paper); }
 .task-copy { flex: 1; min-width: 0; }
 .task-title { display: block; color: var(--ink); font-size: var(--fs-base); font-weight: 700; }
-.task-desc { display: block; margin-top: 6rpx; color: var(--muted); font-size: var(--fs-sm); line-height: 1.45; }
+.task-desc { display: block; margin-top: 6rpx; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
 .task-action { flex: 0 0 auto; color: var(--green-700); font-size: var(--fs-sm); font-weight: 700; }
 
 /* ── 常用工作（两个高频动作）── */
-.action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18rpx; }
+.action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16rpx; }
 .action-card { min-height: 190rpx; padding: 24rpx; text-align: left; background: var(--paper); border: 1rpx solid var(--ring); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); transition: transform var(--dur-fast) var(--ease-spring); }
 .action-card:active { transform: translateY(2rpx) scale(.99); }
 .action-card icon { margin-bottom: var(--s-2); }
@@ -74,6 +74,10 @@
 .summary-label { display: block; margin-top: 5rpx; color: var(--muted); font-size: var(--fs-xs); }
 .summary-divider { width: 1rpx; height: 68rpx; background: var(--line); }
 .data-note { display: block; margin: 14rpx 6rpx 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+
+/* ── 近 7 日趋势卡（v5.1 mini-bars 接 /reports/trends 真实数据）── */
+.week-trend { display: flex; align-items: center; gap: var(--s-3); }
+.week-trend-bars { flex: 0 0 300rpx; }
 
 /* ── 最近记录 ── */
 .record-list { overflow: hidden; background: var(--paper); border: 1rpx solid var(--ring); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }

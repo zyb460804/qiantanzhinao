@@ -58,6 +58,7 @@ class ProductSKU(Base):
             sqlite_where=sa.text("is_active = 1"),
             postgresql_where=sa.text("is_active"),
         ),
+        {"comment": "商品 SKU：可经营的最小商品单元，库存/批次/账本的真正主键"},
     )
 
 
@@ -77,13 +78,17 @@ class ProductAlias(Base):
     is_system: Mapped[bool] = mapped_column(
         sa.Boolean, default=False
     )  # True=系统内置（如 西红柿→番茄）
-    __table_args__ = (sa.UniqueConstraint("merchant_id", "alias", name="uq_alias_per_merchant"),)
+    __table_args__ = (
+        sa.UniqueConstraint("merchant_id", "alias", name="uq_alias_per_merchant"),
+        {"comment": "商品别名映射：番茄/西红柿/洋柿子指向同一 SKU，语音识别的关键"},
+    )
 
 
 class ProductSpecification(Base):
     """同一 SKU 的不同规格，影响售价与识别。"""
 
     __tablename__ = "product_specifications"
+    __table_args__ = {"comment": "商品规格：大果/精品等同 SKU 分级，含相对标准售价的加价"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(
@@ -110,7 +115,10 @@ class Unit(Base):
     name: Mapped[str] = mapped_column(sa.String(20), nullable=False)
     kind: Mapped[str] = mapped_column(sa.String(10), default="weight")  # weight / package / count
     is_base: Mapped[bool] = mapped_column(sa.Boolean, default=False)
-    __table_args__ = (sa.UniqueConstraint("merchant_id", "code", name="uq_unit_code_per_merchant"),)
+    __table_args__ = (
+        sa.UniqueConstraint("merchant_id", "code", name="uq_unit_code_per_merchant"),
+        {"comment": "计量单位字典：斤/筐/件等，区分重量/包装/计件三类"},
+    )
 
 
 class UnitConversion(Base):
@@ -135,6 +143,7 @@ class UnitConversion(Base):
     )
     __table_args__ = (
         sa.UniqueConstraint("merchant_id", "from_unit", "to_unit", "sku_id", name="uq_unit_conv"),
+        {"comment": "单位换算因子：to_base=数量×factor（筐→斤按商品定），sku 为空即通用换算"},
     )
 
 
@@ -147,6 +156,7 @@ class Supplier(Base):
     """
 
     __tablename__ = "suppliers"
+    __table_args__ = {"comment": "供应商档案：联系方式/起订量/账期/证照，及缺斤率退货率等质量评分"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(
@@ -182,6 +192,7 @@ class SupplierProduct(Base):
     """某供应商对某 SKU 的近期报价与起订量，支撑比价与采购预测。"""
 
     __tablename__ = "supplier_products"
+    __table_args__ = {"comment": "供应商报价：某供应商对某 SKU 的近期价格与最小起订量，支撑比价"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(
@@ -211,6 +222,7 @@ class PriceHistory(Base):
     """
 
     __tablename__ = "price_history"
+    __table_args__ = {"comment": "售价变更流水：改价动作可审计（AI 改价/手动/清货），支撑效果复盘"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

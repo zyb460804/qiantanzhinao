@@ -58,7 +58,7 @@
 
       <!-- P2 修复：批量保存按钮，弱网下减少请求数 -->
       <view class="batch-save-row" wx:if="{{stocktakeItems.length > 0}}">
-        <button class="btn-secondary batch-save-btn" bindtap="submitAllItems" loading="{{submitting}}">
+        <button class="btn-outline btn-block batch-save-btn" bindtap="submitAllItems" loading="{{submitting}}">
           一键保存全部
         </button>
       </view>

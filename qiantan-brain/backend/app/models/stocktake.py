@@ -17,6 +17,7 @@ class StocktakeSession(Base):
     """A single盘点 session — one merchant counting all (or subset of) products."""
 
     __tablename__ = "stocktake_sessions"
+    __table_args__ = {"comment": "盘点场次：账面 vs 实盘的总量与盘亏金额汇总（进行中/完成/取消）"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(
@@ -44,6 +45,7 @@ class StocktakeItem(Base):
             "product_id",
             name="uq_stocktake_item_session_product",
         ),
+        {"comment": "盘点明细行：单商品账面量/实盘量/差异及原因（自然损耗/漏记/秤错等）"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)

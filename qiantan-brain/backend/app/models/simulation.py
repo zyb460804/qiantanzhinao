@@ -11,6 +11,7 @@ from app.database import Base
 
 class SimulationRecord(Base):
     __tablename__ = "simulation_records"
+    __table_args__ = {"comment": "经营沙盘推演记录：假设参数输入与模拟结果输出（定价/备货推演）"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     merchant_id: Mapped[uuid.UUID] = mapped_column(

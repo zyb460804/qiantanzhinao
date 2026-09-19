@@ -1,15 +1,21 @@
-<!-- 文档展示页 -->
+<!-- 文档展示页 · v5.1 折叠面板版 -->
 <view class="page-shell doc-page {{skinClass}}">
-  <view class="page-hero doc-hero">
+  <view class="page-hero doc-hero rise">
     <text class="eyebrow">文档手册</text>
     <text class="hero-title">{{docTitle}}</text>
+    <text class="hero-desc" wx:if="{{docVersion}}">版本 {{docVersion}} · 生效 {{docEffectiveDate || '—'}}</text>
   </view>
-  <view class="doc-list">
-    <view wx:for="{{sections}}" wx:key="h" class="doc-section">
-      <text class="doc-h">{{item.h}}</text>
-      <text class="doc-body">{{item.body}}</text>
+
+  <view class="ui-acc doc-acc">
+    <view wx:for="{{sections}}" wx:key="h" class="ui-acc-item {{docOpen === index ? 'is-open' : ''}}">
+      <view class="ui-acc-head" bindtap="toggleAcc" data-i="{{index}}">
+        <text>{{item.h}}</text>
+        <text class="ui-acc-arrow">›</text>
+      </view>
+      <view class="ui-acc-body"><view class="ui-acc-inner">{{item.body}}</view></view>
     </view>
   </view>
+
   <view class="doc-footer">
     <text class="doc-meta">由千摊智脑提供 · 版本 {{docVersion || '1.0'}} · 生效 {{docEffectiveDate || '—'}}</text>
   </view>

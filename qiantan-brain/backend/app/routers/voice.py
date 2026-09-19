@@ -44,7 +44,11 @@ from app.services.accounts_service import record_customer_receivable
 from app.services.batch import consume_batches_fifo, create_batch, rollback_batch_on_void
 from app.services.sku_service import resolve_sku_id
 from app.services.unit_conversion import convert_to_base_unit
-from app.services.voice_ledger import sync_voice_receivables, void_voice_confirmed_record
+from app.services.voice_ledger import (
+    prune_stale_parsed_logs,
+    sync_voice_receivables,
+    void_voice_confirmed_record,
+)
 from app.services.voice_parser import parse_voice_events
 
 
@@ -329,6 +333,8 @@ async def _persist_voice_logs(
         await db.refresh(log)
     for event, log in zip(events, logs, strict=False):
         event["voice_log_id"] = str(log.id)
+    # 解析草稿治理：parsed 只保留最新 20 条，防止反复试口音造成无限累积
+    await prune_stale_parsed_logs(db, merchant_id)
     return logs
 
 

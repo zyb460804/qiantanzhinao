@@ -19,6 +19,7 @@ class Market(Base):
     """菜市场实体。"""
 
     __tablename__ = "markets"
+    __table_args__ = {"comment": "菜市场实体：市场管理后台的顶层组织单元"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(sa.String(100), nullable=False)
@@ -52,13 +53,17 @@ class MarketMerchant(Base):
         sa.DateTime, server_default=sa.func.now(), nullable=False
     )
 
-    __table_args__ = (sa.UniqueConstraint("market_id", "merchant_id", name="uq_market_merchant"),)
+    __table_args__ = (
+        sa.UniqueConstraint("market_id", "merchant_id", name="uq_market_merchant"),
+        {"comment": "商户入场登记：摊位号、证照、健康证到期日、食安评分与经营状态"},
+    )
 
 
 class MarketInspection(Base):
     """市场巡检记录。"""
 
     __tablename__ = "market_inspections"
+    __table_args__ = {"comment": "市场巡检记录：食安/设备/卫生检查的结果、照片与备注"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     market_id: Mapped[uuid.UUID] = mapped_column(
@@ -81,6 +86,7 @@ class MarketComplaint(Base):
     """投诉处理。"""
 
     __tablename__ = "market_complaints"
+    __table_args__ = {"comment": "投诉处理：顾客投诉的受理、处理过程与关闭归档"}
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     market_id: Mapped[uuid.UUID] = mapped_column(

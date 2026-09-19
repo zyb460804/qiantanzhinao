@@ -25,6 +25,8 @@ Page({
     heatmapBuckets: ['今日', '1天内', '2天内', '3天以上'],
     riskMirror: null,
     riskGaugeData: null,
+    riskRingColor: '#1b7a44',   // 综合风险圆环颜色（低绿/中金/高红）
+    riskRingLabel: '',
     recommendations: [],
 
     loading: true,
@@ -114,6 +116,7 @@ Page({
 
       var db = results[0];
       var healthScore = db ? Math.max(0, Math.min(100, 100 - (db.risk_score || 0))) : 0;
+      var riskScore = db ? (db.risk_score || 0) : 0;
       self.setData({
         dashboard: db,
         inventoryMirror: invData,
@@ -124,6 +127,8 @@ Page({
         riskGaugeData: riskGaugeData,
         healthScore: healthScore,
         healthLevel: self._healthLevel(healthScore),
+        riskRingColor: riskScore <= 30 ? '#1b7a44' : (riskScore <= 60 ? '#d99a26' : '#d93a2b'),
+        riskRingLabel: riskScore <= 30 ? '经营平稳，放心卖' : (riskScore <= 60 ? '有要紧事的苗头，看看下面哪项分高' : '风险偏高，建议今天就处理'),
         loading: false,
         loadError: false,
       }, function () { if (onDone) onDone(); });
@@ -146,7 +151,7 @@ Page({
     if (!invData || !invData.lifecycle_heatmap) return [];
     var buckets = ['today', '1day', '2days', '3days+'];
     var severity = { red: 3, yellow: 2, green: 1, gray: 0 };
-    var colorHex = { red: '#c8392b', yellow: '#c8902a', green: '#357d48', gray: '#e1e4e1' };
+    var colorHex = { red: '#d93a2b', yellow: '#d99a26', green: '#1b7a44', gray: '#e2e6df' };
     var textColor = { red: '#FFFFFF', yellow: '#5A4500', green: '#FFFFFF', gray: '#8A938D' };
 
     var byProduct = {};
