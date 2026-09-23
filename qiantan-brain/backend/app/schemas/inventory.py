@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import ApiResponse, DecimalNum, PaginatedResponse
+
+
+# RA-11：offline-sync 事件类型白名单 —— 仅允许四类业务事件（大小写归一后校验）。
+# 此前 "Sale"/"mystery_type" 等任意值原样落库，绕过符号归一与批次消耗分支
+# （流水 +qty 不扣批次 → /current 与批次余量双向分歧）。非法值在 schema 层
+# 422 拒绝并列出合法值；合法值统一小写归一，保证下游精确匹配。
+OFFLINE_EVENT_TYPES = ("sale", "purchase", "refund", "waste")
 
 
 class CurrentInventoryItem(BaseModel):
@@ -119,6 +126,22 @@ class OfflineSyncItem(BaseModel):
     source: str = "offline"
     client_id: str | None = None
     client_reference: str | None = None
+
+    @field_validator("event_type", mode="before")
+    @classmethod
+    def _normalize_event_type(cls, v):
+        # 大小写归一（"Sale" → "sale"）；非字符串交给类型校验报错。
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+    @field_validator("event_type")
+    @classmethod
+    def _validate_event_type(cls, v):
+        if v not in OFFLINE_EVENT_TYPES:
+            allowed = " / ".join(OFFLINE_EVENT_TYPES)
+            raise ValueError(f"event_type 必须为 {allowed} 之一")
+        return v
 
 
 class OfflineSyncRequest(BaseModel):

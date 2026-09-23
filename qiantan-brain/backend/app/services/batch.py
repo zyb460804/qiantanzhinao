@@ -310,12 +310,40 @@ async def get_batch_trace_data(
     }
 
 
+def _consume_qty_from_batches(
+    batches: list[BatchLifecycle], to_consume: Decimal
+) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    """在已锁定的批次集合上按给定顺序实扣数量。
+
+    返回 (已扣数量, 已扣成本, 缺成本数量, 剩余待扣数量)，供主消耗与
+    无主批次回退两段共用，保证成本/缺成本口径完全一致。
+    """
+    consumed = Decimal("0")
+    total_cost = Decimal("0")
+    missing_cost_quantity = Decimal("0")
+    for batch in batches:
+        if to_consume <= 0:
+            break
+        available = batch.remaining_qty
+        take = min(available, to_consume)
+        batch.remaining_qty = available - take
+        to_consume -= take
+        consumed += take
+        if batch.unit_cost is None:
+            missing_cost_quantity += take
+        else:
+            total_cost += take * batch.unit_cost
+    return consumed, total_cost, missing_cost_quantity, to_consume
+
+
 async def consume_batches_fifo(
     db: AsyncSession,
     merchant_id: uuid.UUID,
     product_id: int,
     quantity: Decimal,
     sku_id: uuid.UUID | None = None,
+    *,
+    fallback_to_unowned: bool = False,
 ) -> Decimal:
     consumption = await consume_batches_fifo_costed(
         db,
@@ -323,6 +351,9 @@ async def consume_batches_fifo(
         product_id,
         quantity,
         sku_id=sku_id,
+        # QA2-02：透传无主批次回退开关（语音 sale/waste 消耗与 POS/offline-sync
+        # 同口径），默认关闭保持既有行为不变。
+        fallback_to_unowned=fallback_to_unowned,
     )
     return consumption["quantity"]
 
@@ -333,6 +364,8 @@ async def consume_batches_fifo_costed(
     product_id: int,
     quantity: Decimal,
     sku_id: uuid.UUID | None = None,
+    *,
+    fallback_to_unowned: bool = False,
 ) -> BatchConsumption:
     """Consume quantity from existing batches using FIFO (oldest first).
 
@@ -341,6 +374,11 @@ async def consume_batches_fifo_costed(
     legacy data that has no SKU link. Returns actual FIFO cost where all
     consumed batches have a unit cost, and separately reports unknown-cost
     quantity for historical batches.
+
+    QA-04：``fallback_to_unowned=True`` 时，若按 sku_id 过滤消耗不足且该
+    商品存在无主批次（sku_id IS NULL，语音/POS 兜底路径建账产物），按
+    merchant+product 维度回退消耗差额。库存不再出现「账面 16 斤、补账
+    报可用 0」的断层；幂等键与流水字段语义由调用方保持不变。
     """
     to_consume = abs(quantity)
     if to_consume <= 0:
@@ -373,21 +411,37 @@ async def consume_batches_fifo_costed(
     result = await db.execute(query)
     batches = sorted(result.scalars().all(), key=_fefo_key)
 
-    consumed = Decimal("0")
-    total_cost = Decimal("0")
-    missing_cost_quantity = Decimal("0")
-    for batch in batches:
-        if to_consume <= 0:
-            break
-        available = batch.remaining_qty
-        take = min(available, to_consume)
-        batch.remaining_qty = available - take
-        to_consume -= take
-        consumed += take
-        if batch.unit_cost is None:
-            missing_cost_quantity += take
-        else:
-            total_cost += take * batch.unit_cost
+    consumed, total_cost, missing_cost_quantity, to_consume = _consume_qty_from_batches(
+        batches, to_consume
+    )
+
+    # QA-04：sku 过滤消耗不足且存在无主批次 → 按 merchant+product 维度回退消耗。
+    # 仅在调用方显式开启（offline_sync 补账 / 盘点盘亏）时生效，默认行为不变。
+    if to_consume > 0 and fallback_to_unowned and sku_id is not None:
+        orphan_filters = [
+            BatchLifecycle.merchant_id == merchant_id,
+            BatchLifecycle.remaining_qty > 0,
+            BatchLifecycle.status.in_(("sellable", "near_expiry")),
+            BatchLifecycle.product_id == product_id,
+            BatchLifecycle.sku_id.is_(None),
+        ]
+        orphan_query = (
+            select(BatchLifecycle)
+            .where(*orphan_filters)
+            .order_by(BatchLifecycle.id.asc())
+            .with_for_update()
+        )
+        orphan_result = await db.execute(orphan_query)
+        orphan_batches = sorted(orphan_result.scalars().all(), key=_fefo_key)
+        (
+            orphan_consumed,
+            orphan_cost,
+            orphan_missing,
+            to_consume,
+        ) = _consume_qty_from_batches(orphan_batches, to_consume)
+        consumed += orphan_consumed
+        total_cost += orphan_cost
+        missing_cost_quantity += orphan_missing
 
     if to_consume > 0:
         logger.info(

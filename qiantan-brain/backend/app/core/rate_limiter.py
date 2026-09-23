@@ -38,6 +38,13 @@ GLOBAL_MAX_ATTEMPTS = 10
 GLOBAL_WINDOW_SECONDS = 900  # 15 分钟
 GLOBAL_LOCK_SECONDS = 3600  # 锁定 1 小时
 
+# 微信登录 code 限流（QA P2 修复）：按来源 IP 维度的滑动窗口。
+# 与 staff/admin 登录限流不同：成功与失败尝试都计数（目标是防"任意 code
+# 批量建商户"的资源滥用，而非防 PIN/密码爆破），因此不用锁定语义，
+# 只做纯滑动窗口——窗口滑过后自动恢复，无需人为解锁。
+WECHAT_LOGIN_MAX_ATTEMPTS = 10
+WECHAT_LOGIN_WINDOW_SECONDS = 60
+
 BACKEND = os.getenv("RATE_LIMIT_BACKEND", "memory")
 REDIS_URL = os.getenv("RATE_LIMIT_REDIS_URL", "redis://localhost:6379/0")
 
@@ -72,6 +79,16 @@ class RateLimitBackend(ABC):
     @abstractmethod
     async def status(self, key: str, max_attempts: int, window: int) -> dict:
         """获取当前状态。"""
+        ...
+
+    @abstractmethod
+    async def hit(self, key: str, max_count: int, window: int) -> None:
+        """滑动窗口限流：窗口内命中数已达 max_count 时抛 429，否则记录一次命中。
+
+        与 check/record 的区别：check+record 面向"失败尝试 + 锁定"语义，
+        成功后 clear；hit 面向"所有尝试都计数"的场景（如微信登录按 IP
+        防刷），无锁定、无成功清除，窗口滑过自动恢复。
+        """
         ...
 
 
@@ -143,6 +160,21 @@ class MemoryBackend(RateLimitBackend):
             "max_attempts": max_attempts,
             "remaining_attempts": max(0, max_attempts - len(recent)),
         }
+
+    async def hit(self, key: str, max_count: int, window: int) -> None:
+        now = time.time()
+        # 与登录限流共享 _attempts 字典（key 命名空间隔离：wechat-login:{ip}
+        # vs {ip}:{email}），先清出窗口外的旧命中再做计数。
+        recent = [t for t in self._attempts.get(key, []) if now - t < window]
+        if len(recent) >= max_count:
+            # 提示窗口内最早一次命中滑出窗口还需多久，用户可预期恢复时间。
+            retry_after = max(1, int(window - (now - recent[0])) + 1)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"登录尝试过于频繁，请 {retry_after} 秒后再试",
+            )
+        recent.append(now)
+        self._attempts[key] = recent
 
 
 # ═══════════════════════════════════════════
@@ -232,6 +264,21 @@ class RedisBackend(RateLimitBackend):
             "max_attempts": max_attempts,
             "remaining_attempts": max(0, max_attempts - count),
         }
+
+    async def hit(self, key: str, max_count: int, window: int) -> None:
+        data_key = f"ratelimit:data:{key}"
+        now = time.time()
+        await self._client.zremrangebyscore(data_key, 0, now - window)
+        count = await self._client.zcard(data_key)
+        if count >= max_count:
+            oldest = await self._client.zrange(data_key, 0, 0)
+            retry_after = max(1, int(window - (now - float(oldest[0]))) + 1) if oldest else window
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"登录尝试过于频繁，请 {retry_after} 秒后再试",
+            )
+        await self._client.zadd(data_key, {str(now): now})
+        await self._client.expire(data_key, window)
 
 
 # ═══════════════════════════════════════════
@@ -327,3 +374,32 @@ async def get_rate_limit_status(request: Request, email: str) -> dict[str, Any]:
     """获取当前限流状态。"""
     backend = _get_backend()
     return await backend.status(_get_key(request, email), MAX_ATTEMPTS, WINDOW_SECONDS)
+
+
+# ── 微信登录 code 限流（IP 维度滑动窗口，QA P2 修复）──────────
+
+
+def get_wechat_login_key(request: Request) -> str:
+    """微信登录限流 key：按来源 IP。
+
+    注意：内存后端在 FastAPI 多 worker / 多实例部署下各进程独立计数，
+    实际放行总量为 max_attempts × worker 数；生产多实例请设
+    RATE_LIMIT_BACKEND=redis 切换集中式后端。
+    """
+    return f"wechat-login:{_get_client_ip(request)}"
+
+
+async def check_wechat_login_rate_limit(request: Request) -> None:
+    """微信登录频控：60 秒窗口内每 IP 最多 10 次登录尝试，超出抛 429。
+
+    成功与失败尝试都计入（在业务逻辑前调用一次即可）；422 形态校验
+    （空/超长/非法字符 code）在 Pydantic schema 层完成，不会进入本函数。
+    测试环境通过重置 `_backend = None`（见 tests/conftest.py）获得全新
+    限流状态，等效于禁用。
+    """
+    backend = _get_backend()
+    await backend.hit(
+        get_wechat_login_key(request),
+        WECHAT_LOGIN_MAX_ATTEMPTS,
+        WECHAT_LOGIN_WINDOW_SECONDS,
+    )

@@ -21,7 +21,7 @@
     <view class="cat-list" wx:if="{{wasteRecords.length}}">
       <view wx:for="{{wasteRecords}}" wx:key="record_id" class="cat-item">
         <view class="cat-main"><text class="cat-name">{{item.product_name || '商品' + item.product_id}}</text><text class="cat-meta">{{item.notes || '未填备注'}}</text></view>
-        <text class="cat-amount warn">-{{item.quantity}}{{item.unit}}</text>
+        <text class="cat-amount warn">{{item.quantity_display ? '-' : ''}}{{item.quantity_display}}{{item.unit}}</text>
       </view>
     </view>
     <view wx:elif="{{wasteError}}" class="empty-state"><text>报损记录加载失败</text><button class="btn-primary" bindtap="loadWasteRecords">重新加载</button></view>

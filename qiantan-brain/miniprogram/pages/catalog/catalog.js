@@ -94,7 +94,8 @@ Page({
   _loadSkus: function () {
     var self = this;
     this.setData({ loading: true });
-    app.request({ url: '/catalog/skus' }).then(function (data) {
+    // N8 适配：列表接口分页生效，用 fetchAllSkus 按页拉全量，保持本页全量管理体验
+    app.fetchAllSkus().then(function (data) {
       var decorated = (data || []).map(function (s) {
         s._shelfLabel = shelfLifeLabel(s.shelf_life_hours);
         s._initial = (s.name || '商').slice(0, 1);

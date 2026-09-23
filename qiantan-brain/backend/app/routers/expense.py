@@ -19,6 +19,10 @@ from app.models.accounts import SupplierPayable
 from app.models.expense import Expense, Invoice
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
+
+# QA-08：复用 catalog.py 的展示文本净化（剥离 <> " ' ` 等脚本/标签字符），
+# 费用描述此前未净化，payload 原样落库并 API 原样回显。
+from app.routers.catalog import _sanitize_display_name
 from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 
@@ -28,6 +32,10 @@ router = APIRouter(prefix="/api/v1/expenses", tags=["expenses"])
 EXPENSE_CATEGORIES = {"rent", "utility", "labor", "fee", "other"}
 EXPENSE_PAYMENT_METHODS = {"cash", "wechat", "bank_transfer"}
 INVOICE_TYPES = {"electronic", "paper"}
+
+# 费用金额上限：与 SKU 售价上限口径对齐（catalog.py "售价必须在 0 ~ 1000000
+# 之间"），防止 1e9 级脏数据落库污染月报/利润统计（QA P2 修复）。
+MAX_EXPENSE_AMOUNT = Decimal("1000000")
 
 
 def _parse_month(month: str) -> tuple[int, int]:
@@ -86,8 +94,13 @@ async def create_expense(
         amount = Decimal(str(body.get("amount", 0)))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="费用金额格式不正确") from exc
-    if not amount.is_finite() or amount <= 0:
-        raise HTTPException(status_code=400, detail="费用金额必须大于0")
+    # 金额区间约束 0 < x ≤ 1000000（与 SKU 售价口径一致）；422 与 SKU 的
+    # 参数校验状态码对齐（原 400 → 422），中文报错直达前端。
+    if not amount.is_finite() or not (Decimal("0") < amount <= MAX_EXPENSE_AMOUNT):
+        raise HTTPException(
+            status_code=422,
+            detail=f"费用金额必须在 0（不含）到 {MAX_EXPENSE_AMOUNT} 之间",
+        )
     category = (body.get("category") or "").strip()
     if not category:
         raise HTTPException(status_code=400, detail="费用分类不能为空")
@@ -103,11 +116,18 @@ async def create_expense(
     # P2-3 修复：费用日期不允许晚于今天（此前 2030-01-01 也能入账，污染月报）。
     if expense_date > date.today():
         raise HTTPException(status_code=422, detail="费用日期不能晚于今天")
+    # QA2-04：日结锁 —— expense_date 所属业务日已 closed → 409 拒写。
+    # 口径与 pos._check_settlement_locked 完全一致（直接复用同一函数，含
+    # reopen 后 status 变回 open 即放行的语义）。
+    from app.routers.pos import _check_settlement_locked
+
+    await _check_settlement_locked(db, merchant.id, expense_date)
     e = Expense(
         merchant_id=merchant.id,
         category=category,
         amount=amount,
-        description=body.get("description"),
+        # QA-08：描述与 supplier contact/address 同款净化，杜绝存储型 XSS 原样落库
+        description=_sanitize_display_name(body.get("description")) or None,
         expense_date=expense_date,
         payment_method=payment_method,
     )
@@ -126,6 +146,11 @@ async def delete_expense(
     e = await db.get(Expense, expense_id)
     if not e or e.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="费用不存在")
+    # RA-07：日结锁 —— 删除与新增同为改写业务日口径（QA2-04 只盖了 POST）。
+    # 按被删费用 expense_date 判定，closed → 409，reopen 后放行。
+    from app.routers.pos import _check_settlement_locked
+
+    await _check_settlement_locked(db, merchant.id, e.expense_date)
     await db.delete(e)
     await db.commit()
     return {"code": 0, "message": "费用已删除"}

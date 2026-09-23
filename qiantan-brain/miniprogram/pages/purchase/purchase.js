@@ -15,6 +15,8 @@ Page({
     loadError: false, historyError: false,
     // 验收模式
     acceptanceMode: false, acceptanceItems: {},
+    // QA-07：验收提交失败的行内错误（失败时弹层保持打开，允许改后重试）
+    acceptanceError: '',
     // 付款弹窗
     showPayment: false, paymentSupplierId: '', paymentSupplierName: '',
     paymentAmount: 0, paymentMethod: 'cash', paymentNote: '',
@@ -278,9 +280,27 @@ Page({
     if (items.length === 0) { wx.showToast({ title: '请至少添加一个商品', icon: 'none' }); return; }
     this.setData({ manualSubmitting: true });
     app.request({ url: '/purchase/from-advice', method: 'POST', data: { items: items } })
-      .then(function () {
+      .then(function (data) {
         self.setData({ manualSubmitting: false, showManual: false });
-        wx.showToast({ title: '采购清单已创建', icon: 'success' });
+        // QA-06：后端会把与清单已有商品同名的项并入原条目（响应 data.merged_count，
+        // 为合并入已有商品的项数），不再"静默丢弃"。toast 必须如实反映：
+        //   新增>0 且并入>0 → 说明两件事；只并入未新增 → 明说"未新增"；
+        //   新增>0 且无 merged_count 字段（后端未发版）→ 保持旧文案兜底。
+        var added = (data && Number(data.added_count)) || 0;
+        var hasMergedField = !!(data && data.merged_count !== undefined && data.merged_count !== null);
+        var merged = hasMergedField ? (Number(data.merged_count) || 0) : 0;
+        if (merged > 0) {
+          wx.showToast({
+            title: (added > 0 ? '已创建清单，' : '未新增商品，') + merged + ' 项并入已有商品',
+            icon: 'none', duration: 3000,
+          });
+        } else if (added > 0) {
+          wx.showToast({ title: '采购清单已创建', icon: 'success' });
+        } else {
+          // 一项都没进清单（后端未发版时同名项被丢弃 / 商品名不在目录），
+          // 不再假报"已创建"。
+          wx.showToast({ title: '未新增商品，请核对商品名是否在商品目录中', icon: 'none', duration: 3000 });
+        }
         self.loadList();
       })
       .catch(function (err) {
@@ -451,18 +471,22 @@ Page({
     var acc = {};
     list.items.forEach(function (item) {
       if (item.status === 'cancelled') return;
+      // QA-07：毛重预填=净重预填（同取到货数量）。此前毛重=0/空、净重=数量，
+      // 后端校验「净重不能大于毛重」必 422，默认值本身就交不上去。
+      var prefilledWeight = item.net_weight || item.actual_qty;
       acc[item.item_id] = {
         arrival_qty: item.actual_qty, accepted_qty: item.actual_qty,
         shortage_qty: 0, damaged_qty: 0, rejected_qty: 0, returned_qty: 0, replenish_qty: 0,
-        package_count: item.package_count || 0, gross_weight: 0, tare_weight: 0,
-        net_weight: item.net_weight || item.actual_qty, actual_unit_cost: item.actual_unit_cost,
+        package_count: item.package_count || 0,
+        gross_weight: prefilledWeight, tare_weight: 0,
+        net_weight: prefilledWeight, actual_unit_cost: item.actual_unit_cost,
         quality_ok: true, acceptance_notes: ''
       };
     });
-    this.setData({ acceptanceMode: true, acceptanceItems: acc });
+    this.setData({ acceptanceMode: true, acceptanceItems: acc, acceptanceError: '' });
   },
 
-  exitAcceptance: function () { this.setData({ acceptanceMode: false }); },
+  exitAcceptance: function () { this.setData({ acceptanceMode: false, acceptanceError: '' }); },
 
   editAcceptanceField: function (e) {
     var itemId = e.currentTarget.dataset.id;
@@ -533,13 +557,21 @@ Page({
       .then(function () {
         return app.request({ url: '/purchase/' + list.list_id + '/acceptance/confirm', method: 'POST', data: {} });
       }).then(function (result) {
-        self.setData({ submitting: false, confirmed: true, confirmResult: result, acceptanceMode: false });
+        self.setData({ submitting: false, confirmed: true, confirmResult: result, acceptanceMode: false, acceptanceError: '' });
         wx.showToast({ title: '验收并入库完成', icon: 'success' });
         self.loadList();
       }).catch(function (err) {
+        // QA-07：失败必须留在验收表单。此前 catch 里调 loadList 会重置
+        // acceptanceMode 把弹层关掉，与成功态几乎无差别，摊主误以为已入库。
+        // 现改为：弹层保持打开、表单内容保留、行内+toast 展示后端错误文案，改后可直接重试。
         self.setData({ submitting: false });
-        wx.showToast({ title: (err.body && err.body.detail) || '验收或入库失败', icon: 'none' });
-        self.loadList();
+        var detail = err && err.body && (err.body.detail || err.body.message);
+        if (typeof detail !== 'string') detail = '';
+        // 后端 pydantic 校验错误带「Value error, 」前缀，展示给摊主前剥掉
+        detail = detail.replace(/^Value error,\s*/, '');
+        var msg = detail || '验收未完成，请核对毛重/净重后再试';
+        self.setData({ acceptanceError: msg });
+        wx.showToast({ title: msg, icon: 'none', duration: 3000 });
       });
   },
 

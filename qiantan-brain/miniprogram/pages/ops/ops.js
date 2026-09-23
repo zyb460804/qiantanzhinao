@@ -117,7 +117,13 @@ Page({
     var self = this;
     this.setData({ wasteError: false, loadError: false });
     return app.request({ url: '/ops/waste?limit=20' }).then(function (data) {
-      self.setData({ wasteRecords: data || [] });
+      // QA2-16：后端 quantity 为负数，模板里已带「-」前缀，直拼会出现「--1斤」双负号。
+      // 统一在渲染前取绝对值，负号只由模板提供一份。
+      var records = (data || []).map(function (r) {
+        r.quantity_display = Math.abs(Number(r.quantity) || 0);
+        return r;
+      });
+      self.setData({ wasteRecords: records });
     }).catch(function () { self.setData({ wasteRecords: [], wasteError: true, loadError: true }); wx.showToast({ title: '报损记录加载失败', icon: 'none' }); });
   },
 

@@ -66,6 +66,7 @@ project.private.config.json
 .codegraph/
 .cursor/
 .workbuddy/
+.zcodeignore
 # Test coverage artifacts
 .coverage
 coverage/

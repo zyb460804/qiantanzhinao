@@ -33,11 +33,13 @@ class VoiceCorrection(BaseModel):
     product: str | None = None
     quantity: DecimalNum | None = Field(None, ge=0)
     unit: str | None = None
-    unit_cost: DecimalNum | None = Field(None, ge=0)
-    unit_price: DecimalNum | None = Field(None, ge=0)
-    total_amount: DecimalNum | None = Field(None, ge=0)
-    # 业务语义字段（confirm 下游依赖）
-    event_type: Literal["purchase", "sale", "waste"] | None = None
+    # 金额上限与 SKU 售价口径一致（pos.py 同款 le=1000000），防误录天文数字
+    unit_cost: DecimalNum | None = Field(None, ge=0, le=1000000)
+    unit_price: DecimalNum | None = Field(None, ge=0, le=1000000)
+    total_amount: DecimalNum | None = Field(None, ge=0, le=1000000)
+    # 业务语义字段（confirm 下游依赖）；expense：经营支出（摊位费/房租/水电等），
+    # 确认后落 expenses 表，不产生库存/销售/成本流水
+    event_type: Literal["purchase", "sale", "waste", "expense"] | None = None
     party_name: str | None = Field(None, max_length=50)
     is_credit: bool | None = None
     is_repay: bool | None = None
@@ -91,6 +93,8 @@ class VoiceParseTextData(BaseModel):
     parsed: dict | None = None
     # 同 VoiceUploadData：parsed/event 均为 events[0]，字段名与小程序端契约一致；
     # events[i] 内嵌各自的 voice_log_id，多笔各自 confirm 互不被幂等误伤。
+    # 事件 dict 额外携带解析器透传的可选字段：time_hint（「昨天/上午」等时间词，
+    # 仅展示用）、expense_category（expense 事件的费用归口）。
     event: dict | None = None
     events: list[dict] = Field(default_factory=list)
     warning: str | None = None

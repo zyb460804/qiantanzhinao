@@ -8,8 +8,14 @@ from app.schemas.common import ApiResponse, DecimalNum
 
 
 class DashboardData(BaseModel):
+    """经营台指标（口径：收入=净销售额扣退款；成本=已售成本 COGS；毛利=收入-成本；
+    采购支出 today_purchase_cost 单列，不与成本混用）。"""
+
     today_revenue: DecimalNum
+    today_cost: DecimalNum | None = None
     today_profit: DecimalNum
+    today_purchase_cost: DecimalNum | None = None
+    today_refund_total: DecimalNum | None = None
     today_order_count: int
     inventory_value: DecimalNum
     estimated_gross_profit: DecimalNum | None = None

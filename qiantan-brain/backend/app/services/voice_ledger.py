@@ -16,6 +16,7 @@ InventoryRecord），并发交错时会对同一条流水做两次批次回滚 +
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -25,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.timezone import utc_now
 from app.models.accounts import CustomerReceivable
 from app.models.audit import AuditLog
+from app.models.expense import Expense
 from app.models.inventory import InventoryRecord
 from app.models.voice import VoiceLog
 from app.services.accounts_service import record_customer_receivable
@@ -129,6 +131,45 @@ async def sync_voice_receivables(
             )
 
 
+async def _delete_linked_expense(
+    db: AsyncSession, log: VoiceLog, reason: str, operator: str
+) -> None:
+    """撤销 expense 语音单时删除 confirm 落下的经营费用行（幂等）。
+
+    费用事件没有库存流水，confirm 把费用行 id 写进 parsed_event.expense_id
+    作为撤销锚点；这里按锚点删除并留审计。行不存在/跨商户时静默跳过
+    （幂等：重复撤销在状态检查处已被 409 拦截，不会走到这里两次）。
+    """
+    expense_id = (log.parsed_event or {}).get("expense_id")
+    if not expense_id:
+        return
+    try:
+        eid = uuid.UUID(str(expense_id))
+    except (TypeError, ValueError):
+        return
+    expense = await db.get(Expense, eid)
+    if expense is None or expense.merchant_id != log.merchant_id:
+        return
+    before_data = {
+        "amount": float(expense.amount),
+        "category": expense.category,
+        "description": expense.description,
+    }
+    await db.delete(expense)
+    db.add(
+        AuditLog(
+            merchant_id=log.merchant_id,
+            action="void",
+            target_table="expenses",
+            target_id=str(eid),
+            before_data=before_data,
+            after_data={"deleted": True},
+            reason=reason,
+            operator=operator,
+        )
+    )
+
+
 async def void_voice_confirmed_record(
     db: AsyncSession,
     log: VoiceLog,
@@ -177,6 +218,9 @@ async def void_voice_confirmed_record(
         )
 
     if not record:
+        # expense 语音单没有库存流水：撤销时删除 confirm 落下的经营费用行
+        # （锚点 parsed_event.expense_id），费用从月报口径同步消失。
+        await _delete_linked_expense(db, log, reason, operator)
         log.status = "voided"
         return None, None
 

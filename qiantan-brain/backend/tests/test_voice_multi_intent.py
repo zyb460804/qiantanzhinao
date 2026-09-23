@@ -208,7 +208,14 @@ class TestUploadMultiIntent:
 
         resp = await client.post(
             "/api/v1/voice/upload",
-            files={"audio": ("rec.wav", b"RIFF-fake-audio-bytes", "audio/wav")},
+            # QA-30：upload 增加魔数校验，fake 字节需带合法 WAV 头（RIFF....WAVE）
+            files={
+                "audio": (
+                    "rec.wav",
+                    b"RIFF\x18\x00\x00\x00WAVEfmt " + b"fake-audio-bytes",
+                    "audio/wav",
+                )
+            },
             data={"dialect": "mandarin"},
         )
         assert resp.status_code == 200, resp.text

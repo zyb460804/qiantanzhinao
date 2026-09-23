@@ -1,5 +1,6 @@
 var app = getApp();
 var offlineSync = require('../../utils/offline-sync');
+var TimeFormat = require('../../utils/time-format'); // QA2-15：UTC ISO → CST「MM-DD HH:mm」
 
 // 金额四舍五入到分。加 Number.EPSILON 规避 JS 浮点边界值（1.005、2.675）被错位。
 function money(value) {
@@ -90,12 +91,16 @@ Page({
     ]).then(function (res) {
       var products = (res[0] || []).filter(function (item) { return Number(item.current_qty) > 0; }).map(function (item) {
         var price = item.sale_price;
+        // QA-05：商户自有建档 SKU 优先（名称/价格/ID），避免回退展示种子品类价
+        if (price === null || price === undefined) price = item.own_sku_price;
         if (price === null || price === undefined) price = item.default_sale_price;
         if (price === null || price === undefined) price = money(Number(item.avg_cost || 0) * 1.3);
         return Object.assign({}, item, {
+          sku_name: item.own_sku_name || item.sku_name,
+          sku_id: item.own_sku_id || item.sku_id || null,
           sale_price: money(price),
           price_is_promotion: item.promotion_price !== null && item.promotion_price !== undefined,
-          price_is_estimated: (item.sale_price === null || item.sale_price === undefined) && !item.default_sale_price,
+          price_is_estimated: (item.sale_price === null || item.sale_price === undefined) && (item.own_sku_price === null || item.own_sku_price === undefined) && !item.default_sale_price,
         });
       });
       self.setData({ products: products, records: self.mergePendingRecords(res[1] || []), loading: false, loadError: false });
@@ -110,7 +115,12 @@ Page({
   loadHeldOrders: function () {
     var self = this;
     app.request({ url: '/pos/orders/held' }).then(function (data) {
-      self.setData({ heldOrders: data || [] });
+      // QA2-15：held_at 为后端 UTC ISO 串，直出会显示原始串且与 CST 业务日差一天，统一转 CST 渲染
+      var held = (data || []).map(function (o) {
+        o.held_at_display = TimeFormat.cstTime(o.held_at);
+        return o;
+      });
+      self.setData({ heldOrders: held });
     }).catch(function (err) {
       // P2：不再静默吞掉，明确提示用户挂单加载失败。
       var isNet = err && err.type === 'network_error';
@@ -156,10 +166,12 @@ Page({
   mergePendingRecords: function (serverRecords) {
     var pending = wx.getStorageSync('pendingPosOrders') || [];
     this.setData({ pendingCount: pending.filter(function (x) { return x.status === 'pending'; }).length });
+    // QA2-15：created_at（后端 UTC 串 / 本地 toISOString）统一转 CST「MM-DD HH:mm」再渲染
     var local = pending.map(function (x) {
-      return { order_id: x.client_id, order_no: '本地-' + x.client_id.slice(0, 8), total_amount: x.payable, status: x.status, created_at: x.created_at, payment_method: x.payment_method };
+      return { order_id: x.client_id, order_no: '本地-' + x.client_id.slice(0, 8), total_amount: x.payable, status: x.status, created_at: x.created_at, created_at_display: TimeFormat.cstTime(x.created_at), payment_method: x.payment_method };
     });
-    return local.concat(serverRecords);
+    (serverRecords || []).forEach(function (o) { o.created_at_display = TimeFormat.cstTime(o.created_at); });
+    return local.concat(serverRecords || []);
   },
 
   // ==================== 购物车 ====================

@@ -49,9 +49,10 @@ class TestStaffMarketAdminRoleGate:
         assert "租户/平台管理员" in res.json()["detail"]
 
     async def test_tenant_admin_can_create_market_admin(self, client):
+        # QA-21：PIN 必填后，合法创建路径同样需要携带 pin_code
         res = await client.post(
             "/api/v1/staff",
-            json={"name": "合法市场管理员", "role": "market_admin"},
+            json={"name": "合法市场管理员", "role": "market_admin", "pin_code": "123456"},
             headers={"X-Test-Token-Role": "tenant_admin"},
         )
         assert res.status_code == 200, res.text

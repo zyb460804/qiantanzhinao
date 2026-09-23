@@ -33,6 +33,7 @@ from app.models.inventory import InventoryRecord
 from app.models.pos import Payment, SaleOrder
 from app.models.purchase import PurchaseList
 from app.models.recommendation import Recommendation
+from app.models.staff import StaffMember
 from app.models.stocktake import StocktakeSession
 from app.services.batch import create_batch
 
@@ -172,7 +173,8 @@ async def test_stocktake_complete_duplicate_burst_single_adjustment(client, db_s
         db_session,
         select(InventoryRecord).where(
             InventoryRecord.source == "stocktake",
-            InventoryRecord.event_type == "adjustment",
+            # QA-20：盘亏改记 waste 口径（原 'adjustment'）
+            InventoryRecord.event_type == "waste",
         ),
     )
     assert len(records) == 1
@@ -481,3 +483,130 @@ async def test_idempotency_unique_constraints_backstop(db_session):
         with pytest.raises(IntegrityError):
             await s.flush()
         await s.rollback()
+
+
+async def test_pos_order_client_id_unique_race_loser_returns_existing(client, db_session, monkeypatch):
+    """并发同 client_id 的真时序竞态（QA-10/F-02）：输者预检查时赢家尚未提交
+    （scalar 落空），到 flush 才撞 uq_sale_order_client_per_merchant——兜底必须在
+    flush 处回查赢家按幂等重放返回 200，而不是漏接成 500。
+
+    单连接 harness 无法让两事务真实重叠（见模块 docstring），这里按生产时序做
+    定向注入：scalar 仅对 SaleOrder 预检查语句放空一次；flush 仅在刷入目标
+    SaleOrder 时抛一次 IntegrityError——其余语句/对象不受影响，依赖链
+    （结算锁/租户门禁/配额）原样执行。
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.exc import IntegrityError
+
+    cid = "race-flush-" + uuid.uuid4().hex[:8]
+    winner_id = uuid.uuid4()
+    async with db_session() as s:
+        s.add(
+            SaleOrder(
+                id=winner_id,
+                merchant_id=MID,
+                order_no="POS-RACE-" + uuid.uuid4().hex[:10],
+                status="paid",
+                client_id=cid,
+                total_amount=Decimal("10"),
+                paid_amount=Decimal("10"),
+            )
+        )
+        await s.commit()
+
+    real_scalar, real_flush = AsyncSession.scalar, AsyncSession.flush
+    fired = {"scalar": False, "flush": False}
+
+    async def racy_scalar(self, statement, *a, **k):
+        entity = None
+        try:
+            entity = statement.column_descriptions[0]["entity"]
+        except Exception:
+            pass
+        if entity is SaleOrder and not fired["scalar"]:
+            fired["scalar"] = True  # 模拟赢家此刻尚未提交，预检查落空
+            return None
+        return await real_scalar(self, statement, *a, **k)
+
+    async def racy_flush(self, *a, **k):
+        target = any(
+            isinstance(o, SaleOrder) and getattr(o, "client_id", None) == cid
+            for o in list(self.new)
+        )
+        if target and not fired["flush"]:
+            fired["flush"] = True  # 模拟唯一约束在 INSERT（flush）时触发
+            raise IntegrityError(
+                "INSERT INTO sale_orders ...",
+                None,
+                Exception(
+                    "UNIQUE constraint failed: sale_orders.merchant_id, sale_orders.client_id"
+                ),
+            )
+        return await real_flush(self, *a, **k)
+
+    monkeypatch.setattr(AsyncSession, "scalar", racy_scalar)
+    monkeypatch.setattr(AsyncSession, "flush", racy_flush)
+
+    resp = await client.post(
+        "/api/v1/pos/orders",
+        json={
+            "client_id": cid,
+            "payment_method": "cash",
+            "items": [{"product_id": 1, "quantity": 2, "unit_price": 5.0}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["duplicate"] is True
+    assert data["order_id"] == str(winner_id)
+    assert fired == {"scalar": True, "flush": True}  # 兜底路径确实被走到
+
+    orders = await _scalars(
+        db_session, select(SaleOrder).where(SaleOrder.client_id == cid)
+    )
+    assert len(orders) == 1  # 赢家订单原样，输者未产生第二行
+
+
+async def test_staff_create_duplicate_phone_conflict_409(client, db_session):
+    """同商户重复手机号建员工 → 409 而非 500（QA-12/MC-01）：唯一约束冲突必须
+    转义为明确冲突语义，不允许 IntegrityError 直抛。"""
+    payload = {"name": "张三", "role": "cashier", "phone": "13900000001", "pin_code": "123456"}
+    first = await client.post("/api/v1/staff", json=payload)
+    assert first.status_code == 200, first.text
+
+    dup = await client.post(
+        "/api/v1/staff",
+        json={"name": "李四", "role": "cashier", "phone": "13900000001", "pin_code": "123456"},
+    )
+    assert dup.status_code == 409, dup.text
+    assert "手机号" in dup.json()["detail"]
+
+    staff = await _scalars(
+        db_session, select(StaffMember).where(StaffMember.phone == "13900000001")
+    )
+    assert len(staff) == 1
+    assert staff[0].name == "张三"
+
+
+async def test_staff_update_phone_conflict_409(client, db_session):
+    """把员工手机号改成同商户已有号码 → 409 而非 500（QA-12/MC-01 同族）。"""
+    a = await client.post(
+        "/api/v1/staff",
+        json={"name": "甲", "role": "cashier", "phone": "13900000011", "pin_code": "123456"},
+    )
+    b = await client.post(
+        "/api/v1/staff",
+        json={"name": "乙", "role": "cashier", "phone": "13900000012", "pin_code": "123456"},
+    )
+    assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
+
+    upd = await client.put(
+        f"/api/v1/staff/{b.json()['data']['staff_id']}", json={"phone": "13900000011"}
+    )
+    assert upd.status_code == 409, upd.text
+
+    staff = await _scalars(
+        db_session, select(StaffMember).where(StaffMember.phone == "13900000011")
+    )
+    assert len(staff) == 1
+    assert staff[0].name == "甲"  # 原归属未被打错

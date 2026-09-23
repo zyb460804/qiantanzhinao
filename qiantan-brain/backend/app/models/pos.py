@@ -143,14 +143,18 @@ class DailySettlement(Base):
         sa.Uuid, sa.ForeignKey("merchants.id"), nullable=False
     )
     date: Mapped[date] = mapped_column(sa.Date, nullable=False)
+    # 净额口径（QA 拍板）：total_sales = 销售总额 - 当日退款合计（净销售额）；
+    # 退款合计等完整统计存 snapshot.refunds_total，无独立列。
     total_sales: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
+    # 净实收：正向收款 - 退款流水（退款行金额为负），与 total_sales 同口径。
     total_payments: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     cash_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     wechat_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     alipay_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     card_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     credit_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
-    # 差异 = 销售总额 - 实收总额（赊账单独列）
+    # 差异 = 净销售额(total_sales) - 净实收(total_payments) - 赊账净额(credit_amount)，
+    # 正常记账恒为 0；非 0 即真实账目差异（漏记流水/手工改账）。
     diff_amount: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), default=Decimal("0"))
     status: Mapped[str] = mapped_column(sa.String(20), default="open")  # open / closed
     # P2-6 修复：关闭时的完整统计快照（order_count/refund_amount/estimated_cogs 等）。

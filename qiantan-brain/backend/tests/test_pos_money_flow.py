@@ -578,8 +578,9 @@ async def test_pay_rejects_credit_method(client, db_session):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 第五轮 L3：四流恒等式跨日场景（V1-H2）+ net_cash_flow 去双算（V1-H3）
-# 四流恒等式：total_sales = payments + credit_amount + refund_amount
+# 第五轮 L3：净额口径跨日场景（V1-H2）+ net_cash_flow 去双算（V1-H3）
+# 净额恒等式（QA 拍板）：total_sales(净) = payments(净) + credit_amount
+# 其中 total_sales = 销售总额 - refunds_total（退款合计单列保留）
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -610,7 +611,11 @@ async def _live_settlement(client, day: date) -> dict:
 
 @pytest.mark.asyncio
 async def test_same_day_refund_settlement_balances(client, db_session):
-    """场景① 当日退：现金单 100 当日整单退 → refund==100、payments==0、diff==0."""
+    """场景① 当日退：现金单 100 当日整单退 → 净销售==0、refund==100、payments==0、diff==0.
+
+    净额口径：total_sales = 销售总额 - 当日退款（refunds_total 单列保留毛额信息），
+    与 total_payments（退款负向行冲减后）同口径，diff 恒等式自然归零。
+    """
     await _seed_stock(db_session, quantity=10)
     create = await client.post(
         "/api/v1/pos/orders",
@@ -629,7 +634,8 @@ async def test_same_day_refund_settlement_balances(client, db_session):
     assert refund.status_code == 200
 
     numbers = await _live_settlement(client, cst_today())
-    assert numbers["total_sales"] == 100.0
+    assert numbers["total_sales"] == 0.0  # 净销售额 = 100 - 100
+    assert numbers["refunds_total"] == 100.0
     assert numbers["refund_amount"] == 100.0
     assert numbers["total_payments"] == 0.0  # +100 收款与 -100 退款同日对冲
     assert numbers["diff_amount"] == 0.0
@@ -664,9 +670,11 @@ async def test_next_day_refund_counts_on_refund_day_and_keeps_both_days_balanced
     )
     assert refund.status_code == 200
 
-    # 退款日（今天）：无销售，但退款流水落今天并计入渠道额
+    # 退款日（今天）：无销售，但退款流水落今天并计入渠道额；
+    # 净额口径下净销售额 = 0 - 100 = -100，与净实收(-100)同口径对齐
     today_numbers = await _live_settlement(client, cst_today())
-    assert today_numbers["total_sales"] == 0.0
+    assert today_numbers["total_sales"] == -100.0
+    assert today_numbers["refunds_total"] == 100.0
     assert today_numbers["refund_amount"] == 100.0
     assert today_numbers["cash_amount"] == -100.0
     assert today_numbers["total_payments"] == -100.0

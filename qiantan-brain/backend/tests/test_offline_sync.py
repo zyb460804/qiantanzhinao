@@ -92,7 +92,8 @@ def test_build_inventory_record_uses_quantity(fake_models):
 
     assert record._data["merchant_id"] == merchant_id
     assert record._data["product_id"] == 7
-    assert record._data["quantity"] == Decimal("5")
+    # QA2-03：sale 事件符号归一 —— 正数输入落账为负（出库恒负）
+    assert record._data["quantity"] == Decimal("-5")
     assert record._data["total_amount"] == Decimal("10")
     assert record._data["idempotency_key"] == "pos-abc-123"
 

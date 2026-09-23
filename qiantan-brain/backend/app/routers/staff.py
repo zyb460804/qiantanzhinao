@@ -13,6 +13,7 @@ import uuid
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rate_limiter import (
@@ -79,6 +80,55 @@ HIGH_RISK_PERMISSIONS: set[str] = {
 }
 
 
+async def _resolve_operator_role(
+    db: AsyncSession, merchant: Merchant, request: Request | None = None
+) -> tuple[str, uuid.UUID | None]:
+    """解析当前操作者角色（QA2-10 抽取，require_permission 与 check 共用）。
+
+    解析次序与原 require_permission 完全一致：
+      1. token role claim（get_current_merchant 写入 merchant._token_role），
+         缺省回退 "owner"；
+      2. token 携带 staff_id claim → 校验员工存在/归属/在职后取员工角色
+         （停用/不存在/跨商户 → 403，与路由拦截口径一致）；
+      3. 兼容 X-Staff-Id 请求头（过渡方案，优先级低于 token claim）。
+
+    返回 (role, staff_id)。
+    """
+    role = getattr(merchant, "_token_role", None) or "owner"
+    staff_id: uuid.UUID | None = None
+
+    # 优先从 token 的 staff_id claim 取员工身份
+    token_staff_id = getattr(merchant, "_token_staff_id", None)
+    if token_staff_id:
+        try:
+            sid = uuid.UUID(str(token_staff_id))
+            staff = await db.get(StaffMember, sid)
+            if staff and staff.merchant_id == merchant.id and staff.is_active:
+                role = staff.role
+                staff_id = sid
+            else:
+                # 修复（F1）：token 携带 staff_id 但员工已停用/不存在/不属于此商户 → 拒绝。
+                # 原实现仅不进入 if 分支，role 仍保持 token 中的角色，权限残留。
+                raise HTTPException(status_code=403, detail="员工账号已停用或不存在")
+        except (ValueError, TypeError):
+            pass
+
+    # 兼容：X-Staff-Id 头（过渡方案，优先级低于 token claim）
+    if staff_id is None and request is not None:
+        staff_header = request.headers.get("X-Staff-Id")
+        if staff_header:
+            try:
+                sid = uuid.UUID(staff_header)
+                staff = await db.get(StaffMember, sid)
+                if staff and staff.merchant_id == merchant.id and staff.is_active:
+                    role = staff.role
+                    staff_id = sid
+            except ValueError:
+                pass
+
+    return role, staff_id
+
+
 def require_permission(permission: str):
     """路由级权限依赖工厂。用法: Depends(require_permission("void_record")).
 
@@ -88,6 +138,9 @@ def require_permission(permission: str):
     role/staff_id 写到 merchant._token_role / _token_staff_id），不再硬编码 "owner"。
     兼容保留 X-Staff-Id 头作为补充来源，但优先取 token claim。
     未来员工有自己的 JWT 时，token role 即员工角色，此检查自动生效。
+
+    QA2-10：角色解析抽取为 _resolve_operator_role，与 /permissions/check
+    信息端点共用同一实现，杜绝两处口径漂移。
     """
 
     async def _check(
@@ -95,38 +148,7 @@ def require_permission(permission: str):
         merchant: Merchant = Depends(get_current_merchant),
         db: AsyncSession = Depends(get_db),
     ) -> PermissionContext:
-        # 优先从 token 取 role（审计 P1-7：不再硬编码 "owner"）
-        role = getattr(merchant, "_token_role", None) or "owner"
-        staff_id: uuid.UUID | None = None
-
-        # 优先从 token 的 staff_id claim 取员工身份
-        token_staff_id = getattr(merchant, "_token_staff_id", None)
-        if token_staff_id:
-            try:
-                sid = uuid.UUID(str(token_staff_id))
-                staff = await db.get(StaffMember, sid)
-                if staff and staff.merchant_id == merchant.id and staff.is_active:
-                    role = staff.role
-                    staff_id = sid
-                else:
-                    # 修复（F1）：token 携带 staff_id 但员工已停用/不存在/不属于此商户 → 拒绝。
-                    # 原实现仅不进入 if 分支，role 仍保持 token 中的角色，权限残留。
-                    raise HTTPException(status_code=403, detail="员工账号已停用或不存在")
-            except (ValueError, TypeError):
-                pass
-
-        # 兼容：X-Staff-Id 头（过渡方案，优先级低于 token claim）
-        if staff_id is None:
-            staff_header = request.headers.get("X-Staff-Id")
-            if staff_header:
-                try:
-                    sid = uuid.UUID(staff_header)
-                    staff = await db.get(StaffMember, sid)
-                    if staff and staff.merchant_id == merchant.id and staff.is_active:
-                        role = staff.role
-                        staff_id = sid
-                except ValueError:
-                    pass
+        role, staff_id = await _resolve_operator_role(db, merchant, request)
 
         perms = ROLE_PERMISSIONS.get(role, set())
         # 租户/平台管理员虽然不在 staff 的 ROLE_PERMISSIONS 中，但按安全要求
@@ -299,16 +321,28 @@ async def create_staff(
     if role == "market_admin" and _perm.role not in ("tenant_admin", "platform_admin"):
         raise HTTPException(status_code=403, detail="仅租户/平台管理员可创建市场管理员")
 
+    # QA-21：创建员工时 PIN 必填 —— 此前允许 pin_code 缺失落 NULL，产生一批
+    # 无法 PIN 登录却处于 active 状态的员工行。缺失/空 → 422；格式非法仍走
+    # _normalize_and_validate_pin 的既有 422 口径（4-6 位数字）。
+    pin_hash = _normalize_and_validate_pin(body.get("pin_code"))
+    if pin_hash is None:
+        raise HTTPException(status_code=422, detail="请设置员工 PIN")
+
     s = StaffMember(
         merchant_id=merchant.id,
         name=name,
         phone=body.get("phone"),
         role=role,
         # P1-4：服务端校验 4-6 位数字并 bcrypt 哈希落库（不再明文）
-        pin_code=_normalize_and_validate_pin(body.get("pin_code")),
+        pin_code=pin_hash,
     )
     db.add(s)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # QA-12/MC-01：同商户手机号唯一约束（含并发窗口），转义为 409 而非 500
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="该手机号已存在员工") from None
     await db.refresh(s)
     return {"code": 0, "data": {"staff_id": str(s.id), "name": s.name, "role": s.role}}
 
@@ -356,7 +390,12 @@ async def update_staff(
         s.role = body["role"]
     if "is_active" in body:
         s.is_active = bool(body["is_active"])
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # QA-12/MC-01：手机号改成同商户已有号码时的唯一约束兜底
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="该手机号已存在员工") from None
     return {"code": 0, "data": {"staff_id": str(s.id), "name": s.name, "role": s.role}}
 
 
@@ -378,8 +417,21 @@ async def deactivate_staff(
 @router.get("/permissions/check", response_model=AnyResponse)
 async def check_permission(
     action: str,
+    request: Request,
     merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Return whether the current user (owner) has a given permission."""
-    owner_perms = ROLE_PERMISSIONS.get("owner", set())
-    return {"code": 0, "data": {"action": action, "allowed": action in owner_perms}}
+    """Return whether the current user has a given permission.
+
+    QA2-10：按当前 token 实际角色判定（token role claim / 员工 staff_id，
+    经 _resolve_operator_role 与 require_permission 完全同源），不再硬编码
+    查 owner 权限表 —— 此前 cashier 查 change_price/view_profit 误报
+    allowed=true，误导前端按钮控制（路由层实际早已 403 拦截）。
+    响应附加 role 字段便于前端定位身份，既有 allowed 字段语义不变。
+    """
+    role, _staff_id = await _resolve_operator_role(db, merchant, request)
+    perms = ROLE_PERMISSIONS.get(role, set())
+    # 与 require_permission 口径一致：租户/平台管理员可管理员工
+    if role in ("tenant_admin", "platform_admin") and action == "manage_staff":
+        perms = {action}
+    return {"code": 0, "data": {"action": action, "allowed": action in perms, "role": role}}

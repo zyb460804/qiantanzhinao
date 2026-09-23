@@ -29,7 +29,12 @@ from app.models.voice import VoiceLog
 from app.routers.staff import require_permission
 from app.schemas import inventory as inventory_schemas
 from app.schemas.common import AnyResponse
-from app.services.batch import create_batch, get_active_batches, rollback_batch_on_void
+from app.services.batch import (
+    consume_batches_fifo_costed,
+    create_batch,
+    get_active_batches,
+    rollback_batch_on_void,
+)
 from app.services.lifecycle import calc_batch_status
 from app.services.offline_sync import upsert_offline_items
 from app.services.sku_service import resolve_sku_id
@@ -146,6 +151,29 @@ async def get_current_inventory(
                 round(float(s.default_sale_price), 2) if s.default_sale_price is not None else None
             )
 
+    # QA-05（目录读侧）：POS 可售列表（即本接口，pos.js loadData 以 current_qty>0
+    # 过滤后作商品网格）此前对 sku_id 为空的种子品类批次只能回退品类名，前端再以
+    # avg_cost*1.3 估算售价（实证「白菜 ¥3.09」），商户自建同名 SKU 设的价格完全
+    # 不生效。这里按名称加载商户自有活跃 SKU 作优先映射：品类名与自有 SKU 名对齐
+    # 时，随行返回自有 SKU 的 id/名称/价格（新增 own_sku_* 字段，不改既有字段语义，
+    # 向后兼容；种子品类仅在无自有 SKU 时兜底）。采购写入侧（from-advice
+    # manual_by_name）归 purchase.py 修复，不在本接口范围。
+    own_sku_by_name: dict[str, ProductSKU] = {}
+    own_skus = (
+        (
+            await db.execute(
+                select(ProductSKU).where(
+                    ProductSKU.merchant_id == merchant_id,
+                    ProductSKU.is_active == True,  # noqa: E712
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for s in own_skus:
+        own_sku_by_name.setdefault(s.name, s)
+
     # Batch promotions are temporary and only apply while the batch is sellable,
     # has stock, and falls inside its explicit validity window.
     now = utc_now().replace(tzinfo=None)
@@ -174,32 +202,45 @@ async def get_current_inventory(
                 price if old is None else min(old, price)
             )
 
-    items = [
-        {
-            "product_id": row.product_id,
-            "sku_id": str(row.sku_id) if row.sku_id else None,
-            "sku_name": sku_names.get(row.sku_id) if row.sku_id else None,
-            "product_name": product_names.get(row.product_id, f"商品{row.product_id}"),
-            "current_qty": round(float(row.qty), 1),
-            "avg_cost": round(float(row.avg_cost), 2) if row.avg_cost is not None else None,
-            "default_sale_price": sku_prices.get(row.sku_id) if row.sku_id else None,
-            "promotion_price": (
-                promotion_prices_by_sku.get(row.sku_id)
-                if row.sku_id
-                else promotion_prices_by_product.get(row.product_id)
-            ),
-            "sale_price": (
-                promotion_prices_by_sku.get(row.sku_id)
-                if row.sku_id and row.sku_id in promotion_prices_by_sku
-                else promotion_prices_by_product.get(row.product_id)
-                or (sku_prices.get(row.sku_id) if row.sku_id else None)
-            ),
-            "unit": row.unit or "斤",
-            # 按单位下发的低库存阈值，修复 P2：原前端写死=10 跨业态误报严重。
-            "low_stock_threshold": _low_stock_threshold_for_unit(row.unit),
-        }
-        for row in rows
-    ]
+    items = []
+    for row in rows:
+        # QA-05：商户自有 SKU（名称对齐种子品类时）优先下发，供 POS 可售列表
+        # 优先展示自有名称/价格；无对齐自有 SKU 时为 None（种子品类兜底）。
+        category_name = product_names.get(row.product_id)
+        own = own_sku_by_name.get(category_name) if category_name else None
+        own_price = (
+            round(float(own.default_sale_price), 2)
+            if own is not None and own.default_sale_price is not None
+            else None
+        )
+        items.append(
+            {
+                "product_id": row.product_id,
+                "sku_id": str(row.sku_id) if row.sku_id else None,
+                "sku_name": sku_names.get(row.sku_id) if row.sku_id else None,
+                "product_name": category_name or f"商品{row.product_id}",
+                "current_qty": round(float(row.qty), 1),
+                "avg_cost": round(float(row.avg_cost), 2) if row.avg_cost is not None else None,
+                "default_sale_price": sku_prices.get(row.sku_id) if row.sku_id else None,
+                "own_sku_id": str(own.id) if own is not None else None,
+                "own_sku_name": own.name if own is not None else None,
+                "own_sku_price": own_price,
+                "promotion_price": (
+                    promotion_prices_by_sku.get(row.sku_id)
+                    if row.sku_id
+                    else promotion_prices_by_product.get(row.product_id)
+                ),
+                "sale_price": (
+                    promotion_prices_by_sku.get(row.sku_id)
+                    if row.sku_id and row.sku_id in promotion_prices_by_sku
+                    else promotion_prices_by_product.get(row.product_id)
+                    or (sku_prices.get(row.sku_id) if row.sku_id else None)
+                ),
+                "unit": row.unit or "斤",
+                # 按单位下发的低库存阈值，修复 P2：原前端写死=10 跨业态误报严重。
+                "low_stock_threshold": _low_stock_threshold_for_unit(row.unit),
+            }
+        )
 
     return {"code": 0, "data": items}
 
@@ -209,17 +250,26 @@ async def get_inventory_history(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     page: int = 1,
     limit: int = 20,
+    include_voided: bool = True,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get inventory change history."""
-    offset = (page - 1) * limit
-    query = (
-        select(InventoryRecord)
-        .where(InventoryRecord.merchant_id == merchant_id)
-        .order_by(InventoryRecord.event_time.desc())
-        .offset(offset)
-        .limit(limit)
-    )
+    """Get inventory change history.
+
+    QA2-08：响应行补 is_voided 及撤销元数据（voided_at/voided_by/void_reason），
+    已冲正行与原行可区分；默认仍全量返回（include_voided=true 向后兼容），
+    需要时可用 include_voided=false 过滤掉已撤销行。
+    """
+    # RA-12：limit≤0 → 空列表（对齐 QA2-13 pos 语义）。SQLite 把 LIMIT -N
+    # 视作无上限，负 limit 会泄全量。
+    safe_limit = limit
+    if safe_limit <= 0:
+        return {"code": 0, "data": [], "meta": {"page": page, "limit": 0}}
+    offset = (page - 1) * safe_limit
+    stmt = select(InventoryRecord).where(InventoryRecord.merchant_id == merchant_id)
+    # QA2-08：可选过滤已撤销行（默认不过滤，保持既有全量语义）
+    if not include_voided:
+        stmt = stmt.where(InventoryRecord.is_voided.is_(False))
+    query = stmt.order_by(InventoryRecord.event_time.desc()).offset(offset).limit(safe_limit)
     result = await db.execute(query)
     records = result.scalars().all()
 
@@ -238,6 +288,11 @@ async def get_inventory_history(
                 "event_type": r.event_type,
                 "event_time": r.event_time.isoformat() if r.event_time else None,
                 "source": r.source,
+                # QA2-08：撤销标记与元数据
+                "is_voided": bool(r.is_voided),
+                "voided_at": r.voided_at.isoformat() if r.voided_at else None,
+                "voided_by": r.voided_by,
+                "void_reason": r.void_reason,
             }
             for r in records
         ],
@@ -337,6 +392,17 @@ async def void_inventory_record(
     )
     if not probe or probe.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="库存记录不存在")
+
+    # RA-06：日结锁 —— 撤销会回滚流水与批次，等价于改写该业务日台账。
+    # 按被撤流水 event_time 所属 CST 业务日判定（离线补账可跨日），口径与
+    # pos._check_settlement_locked / offline-sync 锁完全一致（QA2-04 同款），
+    # closed → 409，reopen 后放行。覆盖 voice 与手动两条撤销分支。
+    from app.core.timezone import cst_date_of_utc_naive
+    from app.routers.pos import _check_settlement_locked
+
+    await _check_settlement_locked(
+        db, merchant.id, cst_date_of_utc_naive(probe.event_time or utc_now())
+    )
 
     if probe.source == "pos":
         # 订单体系另有完整退款链路（pos.py refund），直接撤销会绕过其核销逻辑。
@@ -464,6 +530,8 @@ async def _stocktake_session_data(db: AsyncSession, session: StocktakeSession) -
         product_names = {p.id: p.name for p in product_result.scalars().all()}
 
         # 计算每个商品的加权均价（与 /current 接口同口径），用于盘点过程中预估损耗金额。
+        # QA2-07：补 merchant_id 过滤 —— 此前仅按 product_id 聚合，多租户下把
+        # 别家商户同商品采购混入均价（实测白菜盘点页 1.30 vs 库存页 2.10）。
         cost_result = await db.execute(
             select(
                 InventoryRecord.product_id,
@@ -493,6 +561,7 @@ async def _stocktake_session_data(db: AsyncSession, session: StocktakeSession) -
                 ).label("avg_cost"),
             )
             .where(
+                InventoryRecord.merchant_id == session.merchant_id,
                 InventoryRecord.product_id.in_(product_ids),
                 InventoryRecord.is_voided == False,  # noqa: E712
             )
@@ -789,6 +858,12 @@ async def complete_stocktake(
     db: AsyncSession = Depends(get_db),
 ):
     """Complete a stocktake after every persisted snapshot line is counted."""
+    # RA-08：日结锁 —— complete 是落账动作（盘亏落 waste 流水、盘盈落 adjustment
+    # 与批次），已 close 的当日日结不得再被校准。盘点是当日操作，按 CST 今日
+    # 业务日加锁，口径与 operations.record_waste 一致（QA2-04 同款，reopen 放行）。
+    from app.routers.pos import _check_settlement_locked
+
+    await _check_settlement_locked(db, merchant.id)
     # 锚点行锁：串行化同一会话的并发 complete，防止双并发各自 INSERT 调整记录与
     # 盘盈批次（PG 生效；SQLite 静默忽略 FOR UPDATE）。
     session_result = await db.execute(
@@ -842,45 +917,11 @@ async def complete_stocktake(
         )
         product_map = {p.id: p for p in prod_result.scalars().all()}
 
-    # 修复 F1：批量预计算每个商品的加权均价，损耗按成本而非售价估算（与 /current 同口径）。
-    avg_costs: dict[int, float] = {}
-    if product_ids:
-        cost_result = await db.execute(
-            select(
-                InventoryRecord.product_id,
-                func.coalesce(
-                    func.sum(
-                        case(
-                            (
-                                InventoryRecord.quantity > 0,
-                                InventoryRecord.unit_cost * InventoryRecord.quantity,
-                            ),
-                            else_=0,
-                        )
-                    )
-                    / func.nullif(
-                        func.sum(
-                            case(
-                                (
-                                    InventoryRecord.quantity > 0,
-                                    InventoryRecord.quantity,
-                                ),
-                                else_=0,
-                            )
-                        ),
-                        0,
-                    ),
-                    0,
-                ).label("avg_cost"),
-            )
-            .where(
-                InventoryRecord.product_id.in_(product_ids),
-                InventoryRecord.is_voided == False,  # noqa: E712
-            )
-            .group_by(InventoryRecord.product_id)
-        )
-        for row in cost_result:
-            avg_costs[row.product_id] = round(float(row.avg_cost), 2)
+    # QA2-09：损耗汇总口径统一 —— complete 阶段不再按 avg_cost 估算损耗金额
+    # （与落账 waste 的 FIFO 成本两口径，实测 9.46 vs 10.00），改为在落账分支
+    # 直接累加 waste 流水的 total_amount（FIFO 实扣成本），汇总与台账同源。
+    # avg_cost 预计算已随之下线（展示侧 avg_cost 见 _stocktake_session_data，
+    # 已按 QA2-07 补 merchant 过滤与 /current 同口径）。
 
     for item in items:
         if item.actual_qty is None:
@@ -908,27 +949,79 @@ async def complete_stocktake(
         product_name = product.name if product else f"商品{item.product_id}"
         # 修复 F2：调整记录需解析并填充 sku_id，保证账本与 SKU 体系对齐。
         sku_id = await resolve_sku_id(db, session.merchant_id, product_id=item.product_id)
-        record = InventoryRecord(
-            merchant_id=session.merchant_id,
-            product_id=item.product_id,
-            sku_id=sku_id,
-            quantity=variance,
-            unit=item.unit,
-            event_type="adjustment",
-            event_time=utc_now(),
-            source="stocktake",
-            notes=(
-                f"盘点调整: 账面{book_qty:.2f}, 实盘{actual_qty:.2f}, "
-                f"原因: {item.variance_reason or '未说明'}"
-            ),
-        )
+
+        if variance < 0:
+            # QA-20：盘亏按报损口径落账 —— event_type='waste'，成本按 FIFO
+            # 从批次实扣（参照 operations.record_waste 的成本化做法），批次
+            # remaining 同步扣减，消除「流水净和 ≠ 批次余量」的台账偏差；
+            # 日报 waste_amount / 日结 waste_cost 因此能计入盘亏金额。
+            # 批次缺失或批次无成本时不猜成本（unit_cost/total_amount 置空），
+            # 但流水仍按完整差异落账，保证账面库存校准到实盘（原语义不变）。
+            loss_qty = Decimal(str(abs(variance)))
+            consumption = await consume_batches_fifo_costed(
+                db,
+                session.merchant_id,
+                item.product_id,
+                loss_qty,
+                sku_id=sku_id,
+                fallback_to_unowned=True,  # QA-04 家族：语音/POS 兜底批次 sku_id=NULL
+            )
+            fully_costed = (
+                consumption["quantity"] >= loss_qty
+                and consumption["quantity"] > 0
+                and consumption["missing_cost_quantity"] == 0
+            )
+            waste_unit_cost = (
+                (consumption["total_cost"] / consumption["quantity"]).quantize(Decimal("0.01"))
+                if fully_costed
+                else None
+            )
+            record = InventoryRecord(
+                merchant_id=session.merchant_id,
+                product_id=item.product_id,
+                sku_id=sku_id,
+                quantity=variance,
+                unit=item.unit,
+                unit_cost=waste_unit_cost,
+                total_amount=(
+                    consumption["total_cost"].quantize(Decimal("0.01"))
+                    if waste_unit_cost is not None
+                    else None
+                ),
+                event_type="waste",
+                event_time=utc_now(),
+                source="stocktake",
+                notes=(
+                    f"盘点盘亏: 账面{book_qty:.2f}, 实盘{actual_qty:.2f}, "
+                    f"原因: {item.variance_reason or '未说明'}"
+                ),
+            )
+            # QA2-09：汇总与落账同源 —— total_loss_amount 按实际落账 waste 的
+            # FIFO total_amount 求和；批次缺成本时落账 total_amount 为空，同样
+            # 不计入汇总（两口径严格一致）。
+            if fully_costed:
+                total_loss_amount += float(consumption["total_cost"].quantize(Decimal("0.01")))
+        else:
+            # 盘盈（正差异）：保持 adjustment 语义 + 生成盘盈批次（原行为不变）
+            record = InventoryRecord(
+                merchant_id=session.merchant_id,
+                product_id=item.product_id,
+                sku_id=sku_id,
+                quantity=variance,
+                unit=item.unit,
+                event_type="adjustment",
+                event_time=utc_now(),
+                source="stocktake",
+                notes=(
+                    f"盘点调整: 账面{book_qty:.2f}, 实盘{actual_qty:.2f}, "
+                    f"原因: {item.variance_reason or '未说明'}"
+                ),
+            )
         db.add(record)
         await db.flush()
         item.adjustment_record_id = record.id
 
-        if variance < 0:
-            total_loss_amount += abs(variance) * float(avg_costs.get(item.product_id, 0.0))
-        else:
+        if variance > 0:
             await create_batch(
                 db,
                 merchant_id=session.merchant_id,
@@ -1000,6 +1093,9 @@ async def stocktake_history(
     db: AsyncSession = Depends(get_db),
 ):
     """Get past stocktake sessions for a merchant."""
+    # RA-12：limit≤0 → 空列表（对齐 QA2-13 pos 语义，防 LIMIT -N 泄全量）。
+    if limit <= 0:
+        return {"code": 0, "data": [], "meta": {"page": page, "limit": 0}}
     offset = (page - 1) * limit
     query = (
         select(StocktakeSession)
@@ -1068,6 +1164,21 @@ async def sync_offline_items(
     The caller receives per-item results (`created` / `duplicate` / `error`)
     so the client can clean up successfully synced items.
     """
+    # QA2-04：日结锁 —— 落库前按每条记录 event_time 所属 CST 业务日判定，
+    # 任一记录落入已日结（closed）的业务日即整单 409（含日期，语义清楚、
+    # 实现最简：离线队列本就按天缓存，重开后整批重放即可）。口径与
+    # pos._check_settlement_locked 完全一致（直接复用，reopen 后放行）。
+    from app.core.timezone import cst_date_of_utc_naive, parse_iso_datetime, utc_now
+    from app.routers.pos import _check_settlement_locked
+
+    checked_days: set = set()
+    for item in req.items:
+        parsed = parse_iso_datetime(item.event_time) if item.event_time else None
+        business_day = cst_date_of_utc_naive(parsed or utc_now())
+        if business_day not in checked_days:
+            checked_days.add(business_day)
+            await _check_settlement_locked(db, merchant.id, business_day)
+
     results = await upsert_offline_items(db, merchant.id, req.items)
     # The service only flushes inside per-item savepoints; the endpoint owns the
     # outer transaction and commits all successful items exactly once.

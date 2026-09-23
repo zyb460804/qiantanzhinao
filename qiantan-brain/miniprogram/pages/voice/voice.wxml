@@ -1,5 +1,6 @@
 <!-- 记账页 · 降低操作门槛，突出主任务 (v2.2 生鲜元气) -->
-<view class="page-shell voice-page skin-{{skin}}">
+<!-- with-records（v3.3）：有确认卡时加大底部留白，最后一张卡的按钮不被 TabBar 贴边遮挡 -->
+<view class="page-shell voice-page skin-{{skin}} {{showRecords ? 'with-records' : ''}}">
   <view class="page-hero voice-hero">
     <view class="voice-hero-top">
       <view>
@@ -82,12 +83,26 @@
       <view class="multi-item-head">
         <text class="multi-item-tag {{item._confirmed ? 'ok' : ''}}">{{item._confirmed ? '已入账' : '第' + (index + 1) + '笔'}}</text>
       </view>
+      <!-- 时间语义提示（v3.3）：后端给出 time_hint（如「昨天」）时提醒记账归属日期 -->
+      <view class="time-hint" wx:if="{{item.time_hint}}"><text>检测到『{{item.time_hint}}』：将记入今天，如需修改日期请到记录页处理</text></view>
       <record-card record="{{item}}" show-actions="{{!item._confirmed}}" bind:confirm="confirmRecord" bind:correct="correctAndConfirm" />
+      <!-- 词表外品名建议（v3.3）：没认出商品但给了候选词，点一下带出纠错卡 -->
+      <view class="word-suggest" wx:if="{{!item._confirmed && !item.product && item.product_word}}">
+        <text class="word-suggest-label">没认出这个商品，是不是：</text>
+        <view class="word-suggest-chip" bindtap="pickSuggestedProduct" data-name="{{item.product_word}}" data-record="{{item}}">{{item.product_word}}</view>
+      </view>
     </view>
   </block>
 
   <!-- 单条：渲染行为与旧版一致 -->
-  <record-card wx:if="{{parsed && !(parsedEvents && parsedEvents.length > 1)}}" record="{{parsed}}" show-actions="{{showRecords}}" bind:confirm="confirmRecord" bind:correct="correctAndConfirm" />
+  <block wx:if="{{parsed && !(parsedEvents && parsedEvents.length > 1)}}">
+    <view class="time-hint" wx:if="{{parsed.time_hint}}"><text>检测到『{{parsed.time_hint}}』：将记入今天，如需修改日期请到记录页处理</text></view>
+    <record-card record="{{parsed}}" show-actions="{{showRecords}}" bind:confirm="confirmRecord" bind:correct="correctAndConfirm" />
+    <view class="word-suggest" wx:if="{{showRecords && !parsed.product && parsed.product_word}}">
+      <text class="word-suggest-label">没认出这个商品，是不是：</text>
+      <view class="word-suggest-chip" bindtap="pickSuggestedProduct" data-name="{{parsed.product_word}}" data-record="{{parsed}}">{{parsed.product_word}}</view>
+    </view>
+  </block>
 
   <!-- 页内纠错卡：商品 chips 点选 + 数字键盘 + 重说这一项（替代串行弹窗） -->
   <view class="cp" wx:if="{{correction}}">
@@ -96,6 +111,15 @@
         <text class="cp-title">改一改这笔账</text>
       </view>
       <text class="cp-close" bindtap="closeCorrection">收起</text>
+    </view>
+
+    <!-- 类型/方向切换（v3.3）：ASR 把「卖」听成「买」、摊位费被记成进货时，直接改这笔账的类型；
+         选中值经 submitCorrection 写入 corrections.event_type 提交后端 -->
+    <view class="cp-field">
+      <text class="cp-label">这笔账的类型</text>
+      <view class="cp-types">
+        <view class="cp-type {{correction.event_type === item.value ? 'active' : ''}}" wx:for="{{typeOptions}}" wx:key="value" data-value="{{item.value}}" bindtap="pickTypeChip">{{item.label}}</view>
+      </view>
     </view>
 
     <view class="cp-field">

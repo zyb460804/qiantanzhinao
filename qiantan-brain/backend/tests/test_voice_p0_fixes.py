@@ -183,6 +183,13 @@ class TestMultiIntent:
         assert events[1]["total_amount"] == 8.0
         assert events[1]["unit_cost"] == 4.0
 
+    def test_aggregate_clause_attaches_to_previous_event(self):
+        """「一共卖了40块」是对前一笔的合计，不另起一笔。"""
+        events = parse_voice_events("卖了西瓜20斤，两块钱一斤，一共卖了40块", PRODUCT_NAMES)
+        assert len(events) == 1
+        assert events[0]["unit_price"] == 2.0
+        assert events[0]["total_amount"] == 40.0
+
     def test_parse_voice_text_returns_first_event(self):
         """兼容入口返回第 1 笔。"""
         first = parse_voice_text("卖了3斤猪肉又进了2斤白菜花了十块", PRODUCT_NAMES)
@@ -194,6 +201,147 @@ class TestMultiIntent:
         events = parse_voice_events("今天进了白菜50斤，三毛钱一斤", PRODUCT_NAMES)
         assert len(events) == 1
         assert events[0]["product"] == "白菜"
+
+
+# ---------------------------------------------------------------------------
+# 1b. 单价识别 + 进价/卖价角色（2026-09 西瓜话术实测）
+# ---------------------------------------------------------------------------
+
+
+class TestUnitPriceRecognition:
+    """「X毛一斤 / 卖价1元一斤」说的是单价，不是这一单的总额。"""
+
+    def test_mao_per_jin_is_unit_cost_not_total(self):
+        """进价5毛一斤 → 单价 0.5、总额 20×0.5=10（曾错成总额 0.5、单价 0.03）。"""
+        r = parse_voice_text("今天买了西瓜20斤，进价5毛一斤", PRODUCT_NAMES)
+        assert r["event_type"] == "purchase"
+        assert r["quantity"] == 20.0
+        assert r["unit_cost"] == 0.5
+        assert r["total_amount"] == 10.0
+
+    @pytest.mark.parametrize(
+        "suffix,price",
+        [
+            ("5毛一斤", 0.5),
+            ("五角一斤", 0.5),
+            ("3块5一斤", 3.5),
+            ("三块五一斤", 3.5),
+            ("每斤3元", 3.0),
+            ("一斤3元", 3.0),
+            ("3元/斤", 3.0),
+            ("两块钱一斤", 2.0),
+        ],
+    )
+    def test_per_unit_phrases_all_read_as_unit_price(self, suffix, price):
+        """单价口语形态全覆盖，且「一斤」不被误当数量。"""
+        r = parse_voice_text(f"进了白菜10斤{suffix}", PRODUCT_NAMES)
+        assert r["unit_cost"] == price, suffix
+        assert r["quantity"] == 10.0, suffix
+        assert r["total_amount"] == round(10.0 * price, 2), suffix
+
+    def test_sale_price_label_lands_on_unit_price(self):
+        """卖价 → unit_price；进价 → unit_cost，各自落位。"""
+        sale = parse_voice_text("卖了土豆15斤，卖价1元一斤", PRODUCT_NAMES)
+        assert sale["event_type"] == "sale"
+        assert sale["unit_price"] == 1.0
+        assert sale["unit_cost"] is None
+        assert sale["total_amount"] == 15.0
+
+        purchase = parse_voice_text("土豆15斤，进价8毛一斤", PRODUCT_NAMES)
+        assert purchase["event_type"] == "purchase"
+        assert purchase["unit_cost"] == 0.8
+        assert purchase["total_amount"] == 12.0
+
+    def test_both_labels_on_one_event_do_not_cross(self):
+        """同句并报进价与卖价：销售流水只带卖价，进价不污染成本。"""
+        r = parse_voice_text("卖了苹果10斤，进价3块，卖价5块一斤", PRODUCT_NAMES)
+        assert r["event_type"] == "sale"
+        assert r["unit_price"] == 5.0
+        assert r["total_amount"] == 50.0
+        assert r["unit_cost"] is None
+
+    def test_labeled_bare_price_is_not_total(self):
+        """「进价5毛」没有「一斤」时仍是每斤价，不能被当成 0.5 元总额。"""
+        r = parse_voice_text("进了西瓜20斤，进价5毛", PRODUCT_NAMES)
+        assert r["unit_cost"] == 0.5
+        assert r["total_amount"] == 10.0
+
+    def test_explicit_total_wins_over_derived(self):
+        """显式总额优先于单价推导。"""
+        r = parse_voice_text("进了西瓜20斤，进价5毛一斤，一共花了80块", PRODUCT_NAMES)
+        assert r["total_amount"] == 80.0
+
+
+class TestPriceClauseGrouping:
+    """价格补充语/尾货分句的归属，以及同句商品延续。"""
+
+    def test_price_clause_merges_into_previous_event(self):
+        """「卖了15斤，卖价1元一斤」是一笔，不是两笔。"""
+        events = parse_voice_events("卖了西瓜15斤，卖价1元一斤", PRODUCT_NAMES)
+        assert len(events) == 1
+        assert events[0]["quantity"] == 15.0
+        assert events[0]["unit_price"] == 1.0
+        assert events[0]["total_amount"] == 15.0
+
+    def test_quote_clause_waits_for_the_quantity(self):
+        """先报价后报量是一笔：「卖苹果5块钱一斤，卖了30斤」。"""
+        events = parse_voice_events("卖苹果5块钱一斤，卖了30斤", PRODUCT_NAMES)
+        assert len(events) == 1
+        assert events[0]["product"] == "苹果"
+        assert events[0]["quantity"] == 30.0
+        assert events[0]["unit_price"] == 5.0
+        assert events[0]["total_amount"] == 150.0
+
+    def test_inverted_per_unit_phrase(self):
+        """「一斤西瓜3块钱」倒装单价：商品词不被吞掉，数量仍取 20 斤。"""
+        events = parse_voice_events("一斤西瓜3块钱，卖了20斤", PRODUCT_NAMES)
+        assert len(events) == 1
+        assert events[0]["product"] == "西瓜"
+        assert events[0]["quantity"] == 20.0
+        assert events[0]["unit_price"] == 3.0
+
+    def test_remainder_quantity_feeds_next_sale(self):
+        """「剩余5斤，按照8毛一斤卖完了」→ 一笔 5 斤、0.8 元/斤的销售。"""
+        events = parse_voice_events("剩余5斤，按照8毛一斤卖完了", PRODUCT_NAMES)
+        assert len(events) == 1
+        assert events[0]["event_type"] == "sale"
+        assert events[0]["quantity"] == 5.0
+        assert events[0]["unit_price"] == 0.8
+        assert events[0]["total_amount"] == 4.0
+
+    def test_remainder_word_is_not_a_product(self):
+        """「剩余」曾被抽成商品原词。"""
+        assert parse_voice_text("剩余5斤卖完了", PRODUCT_NAMES)["product_word"] is None
+
+    def test_product_carries_over_within_one_utterance(self):
+        """后笔省略商品时继承前笔，并按一次推断扣减置信度。"""
+        events = parse_voice_events(
+            "买了西瓜20斤，进价5毛一斤，又卖了15斤，卖价1元一斤", PRODUCT_NAMES
+        )
+        assert len(events) == 2
+        assert events[1]["product"] == "西瓜"
+        assert events[1]["missing_fields"] == []
+        assert events[1]["confidence"] < 1.0
+
+    def test_explicit_product_is_never_overridden(self):
+        """后笔自带商品时不被继承覆盖。"""
+        events = parse_voice_events("买了西瓜20斤，又卖了白菜5斤", PRODUCT_NAMES)
+        assert [e["product"] for e in events] == ["西瓜", "白菜"]
+
+    async def test_watermelon_full_utterance(self):
+        """用户实测原话：一笔进货 + 两笔销售，金额与毛利全对。"""
+        events = parse_voice_events(
+            "今天买了西瓜20斤，进价5毛一斤，卖了15斤，卖价1元一斤，剩余5斤，按照8毛一斤卖完了",
+            PRODUCT_NAMES,
+        )
+        assert [(e["event_type"], e["quantity"], e["total_amount"]) for e in events] == [
+            ("purchase", 20.0, 10.0),
+            ("sale", 15.0, 15.0),
+            ("sale", 5.0, 4.0),
+        ]
+        assert all(e["product"] == "西瓜" for e in events)
+        assert all(e["missing_fields"] == [] for e in events)
+        assert sum(e["total_amount"] for e in events if e["event_type"] == "sale") == 19.0
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +381,7 @@ class TestMultiIntentResponseContract:
         assert len(data["events"]) == 2
         assert data["event"] == data["parsed"]
         assert data["parsed"] == data["events"][0]
-        assert data["warning"] == "检测到2笔，仅返回第1笔"
+        assert data["warning"] == "检测到2笔，已全部拆分，请逐笔确认"
 
         assert data["events"][0]["event_type"] == "sale"
         assert data["events"][0]["product"] == "猪肉"
@@ -369,9 +517,7 @@ class TestSkuPriorityMatch:
             "/api/v1/voice/correct",
             json={"voice_log_id": sale_log, "corrections": {"total_amount": 10}},
         )
-        confirmed = await client.post(
-            "/api/v1/voice/confirm", json={"voice_log_id": sale_log}
-        )
+        confirmed = await client.post("/api/v1/voice/confirm", json={"voice_log_id": sale_log})
         assert confirmed.status_code == 200
         assert confirmed.json()["data"]["product"] == "西红柿"
 

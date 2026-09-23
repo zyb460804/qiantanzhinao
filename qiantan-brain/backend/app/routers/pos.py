@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.idempotency import short_idem_key
 from app.core.security import get_current_merchant
 from app.core.tenant_context import QuotaCheck
-from app.core.timezone import cst_day_bounds_utc, cst_today, utc_now
+from app.core.timezone import cst_day_bounds_utc, cst_now, cst_today, utc_now
 from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.catalog import ProductSKU
@@ -55,8 +55,11 @@ logger = logging.getLogger(__name__)
 
 
 class SettlementNumbers(TypedDict):
+    # 净额口径：total_sales = 销售总额(gross) - 当日退款(refunds_total)；
+    # total_payments 本身就是净额（退款流水为负向行，直接冲减渠道额）。
     total_sales: Decimal
     order_count: int
+    refunds_total: Decimal
     total_payments: Decimal
     cash_amount: Decimal
     wechat_amount: Decimal
@@ -80,7 +83,10 @@ class SettlementNumbers(TypedDict):
 
 
 def _generate_order_no() -> str:
-    now = utc_now()
+    # QA-44：单号前缀时间戳改用 CST 业务时刻——原 UTC 时间戳在 CST 0-8 点会
+    # 落前一 UTC 日（POS20260921…，CST 业务日实为 09-22），展示位与业务日错位。
+    # 唯一性不受影响：精度仍为毫秒（strftime 到秒 + 3 位毫秒）。
+    now = cst_now()
     return f"POS{now.strftime('%Y%m%d%H%M%S')}{now.microsecond // 1000:03d}"
 
 
@@ -171,11 +177,33 @@ async def _resolve_sku_map(
     return {sku.id: sku for sku in skus}
 
 
+# QA-13：单价上限与商品目录售价上限一致（catalog.py「售价必须在 0 ~ 1000000 之间」）。
+# 此前 POS unit_price 只校验 >0，1e13 订单可创建（NUMERIC(12,2) 声明被 SQLite
+# 动态类型忽略，存储无损，仅 API 缺上限）。
+MAX_UNIT_PRICE = Decimal("1000000")
+
+
 def _resolve_unit_price(
     request_price: float | Decimal | None, sku: ProductSKU | None, product_name: str
 ) -> Decimal:
     if request_price is not None:
-        return Decimal(str(request_price)).quantize(Decimal("0.01"))
+        # QA2-14（B-207）：先按 catalog 同规则量化（ROUND_HALF_UP，2 位）再校验
+        # 上限。量化源取请求值的浮点二进制真实值（Decimal(float(x))），与 catalog
+        # 售价经 SQLite REAL 存储的有效舍入一致：999999.995→999999.99、
+        # 999999.999→1000000.00（恰等于上限，不越限，与 catalog 同为放行）；
+        # 量化后仍超上限（如 1000000.01）→ 422。修复前 HALF_EVEN 对 str 精确
+        # 十进制量化把 .995 抬到 1e6 再放行，两端口舍入不一致且落单越限。
+        try:
+            raw = Decimal(float(request_price))
+        except (ValueError, OverflowError):
+            # 解析失败转 422：内部异常不链入响应（B904）
+            raise HTTPException(status_code=422, detail="售价格式不正确") from None
+        if not raw.is_finite():
+            raise HTTPException(status_code=422, detail="售价格式不正确")
+        price = raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if price > MAX_UNIT_PRICE:
+            raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
+        return price
     if sku and sku.default_sale_price is not None:
         return Decimal(sku.default_sale_price).quantize(Decimal("0.01"))
     raise HTTPException(status_code=400, detail=f"{product_name}尚未设置售价")
@@ -259,6 +287,10 @@ async def _create_order_items_and_consume(
             request_item.product_id,
             stock_qty,
             sku_id=sku_id,
+            # QA2-02（B-202）：语音进货批次 sku_id=NULL，商户事后建档后按
+            # 自有 SKU 下单此前恒 409「可售 0」。与 offline-sync/盘亏一致
+            # 启用无主批次回退：sku 过滤不足时按 merchant+product 消耗差额。
+            fallback_to_unowned=True,
         )
         consumed = consumption["quantity"]
         if consumed < stock_qty:
@@ -439,6 +471,9 @@ async def create_sale_order(
 ):
     """Create an idempotent POS order with single or combined payment."""
     await _check_settlement_locked(db, merchant.id)
+    # QA-10/F-02：rollback 会 expire 实例（async 下再访问触发 MissingGreenlet），
+    # 兜底回查统一用本地 merchant_id
+    merchant_id = merchant.id
     if body.client_id:
         existing = await db.scalar(
             select(SaleOrder).where(
@@ -470,7 +505,22 @@ async def create_sale_order(
         note=body.note,
     )
     db.add(order)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # QA-10/F-02：并发同 client_id 时唯一约束在 INSERT（flush）即触发，
+        # 先于下方 commit 兜底；回滚后回查赢家订单按幂等重放返回
+        await db.rollback()
+        if body.client_id:
+            existing = await db.scalar(
+                select(SaleOrder).where(
+                    SaleOrder.merchant_id == merchant_id,
+                    SaleOrder.client_id == body.client_id,
+                )
+            )
+            if existing:
+                return {"code": 0, "data": _order_data(existing, duplicate=True)}
+        raise
 
     gross_total, _ = await _create_order_items_and_consume(
         db,
@@ -504,7 +554,7 @@ async def create_sale_order(
         if body.client_id:
             existing = await db.scalar(
                 select(SaleOrder).where(
-                    SaleOrder.merchant_id == merchant.id,
+                    SaleOrder.merchant_id == merchant_id,
                     SaleOrder.client_id == body.client_id,
                 )
             )
@@ -529,7 +579,13 @@ async def list_sale_orders(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    offset = (page - 1) * limit
+    # QA2-13（B-206）：limit 语义与 catalog 域统一为「≤0 → 空列表」。
+    # 此前负 limit 直通 SQL，SQLite 把 LIMIT -N 视作无上限返回全量，
+    # 与 catalog 域 limit=0/负数（空列表或 422）语义相反。
+    safe_limit = min(limit, 100)
+    if safe_limit <= 0:
+        return {"code": 0, "data": [], "meta": {"page": page, "limit": 0}}
+    offset = (page - 1) * safe_limit
     filters = [SaleOrder.merchant_id == merchant.id]
     if status:
         filters.append(SaleOrder.status == status)
@@ -540,7 +596,7 @@ async def list_sale_orders(
                 .where(*filters)
                 .order_by(SaleOrder.created_at.desc())
                 .offset(offset)
-                .limit(min(limit, 100))
+                .limit(safe_limit)
             )
         )
         .scalars()
@@ -555,7 +611,7 @@ async def list_sale_orders(
             }
             for order in orders
         ],
-        "meta": {"page": page, "limit": min(limit, 100)},
+        "meta": {"page": page, "limit": safe_limit},
     }
 
 
@@ -1270,6 +1326,8 @@ async def resume_held_order(
             product_id,
             item.quantity,
             sku_id=item.sku_id,
+            # QA2-02：取回挂单与开单消耗同口径——启用无主批次回退。
+            fallback_to_unowned=True,
         )
         consumed = consumption["quantity"]
         if consumed < item.quantity:
@@ -1505,7 +1563,13 @@ async def _estimate_daily_cogs(
         await db.execute(
             select(
                 InventoryRecord.product_id,
-                func.avg(InventoryRecord.unit_cost),
+                # QA-15：兜底成本口径改加权平均 sum(qty×unit_cost)/sum(qty)（按
+                # 采购量加权），与 reports/twin 的 _estimate_cogs 一致——原简单
+                # 平均 func.avg(unit_cost) 在多批次不同进价时系统性偏离实际成本。
+                func.coalesce(
+                    func.sum(InventoryRecord.unit_cost * InventoryRecord.quantity), 0
+                ).label("cost_sum"),
+                func.coalesce(func.sum(InventoryRecord.quantity), 0).label("qty_sum"),
             )
             .where(
                 InventoryRecord.merchant_id == merchant_id,
@@ -1519,9 +1583,11 @@ async def _estimate_daily_cogs(
             .group_by(InventoryRecord.product_id)
         )
     ).all()
-    average_costs = {
-        product_id: _decimal_value(average_cost) for product_id, average_cost in average_cost_rows
-    }
+    average_costs: dict[int, Decimal] = {}
+    for product_id, cost_sum, qty_sum in average_cost_rows:
+        total_qty = _decimal_value(qty_sum)
+        if total_qty > 0:
+            average_costs[product_id] = _decimal_value(cost_sum) / total_qty
     fallback_cogs = sum(
         (
             quantity * average_costs.get(product_id, Decimal("0"))
@@ -1570,7 +1636,11 @@ async def _settlement_numbers(
             ).where(*order_filters)
         )
     ).one()
-    total_sales = _decimal_value(total_sales_raw)
+    # 销售总额（gross）：当日创建订单的金额合计（不含 cancelled/held）。
+    # QA 口径统一（净额拍板）：日结 total_sales 对外一律为净销售额
+    # = gross_sales - 当日退款合计，与 total_payments（净额）同口径，
+    # 「销售」与「实收」不再打架；gross 只作中间量，不直接出参。
+    gross_sales = _decimal_value(total_sales_raw)
     legacy_credit = _decimal_value(legacy_credit_raw)
 
     # V1-H2 修复：退款改按「当日退款流水」归集 —— status="refunded" 的 Payment
@@ -1588,6 +1658,81 @@ async def _settlement_numbers(
         )
     )
     refund_amount = (-_decimal_value(refund_flow_row.scalar())).quantize(Decimal("0.01"))
+
+    # QA2-05：语音/离线渠道纳入日结口径 —— 日报 revenue 按 InventoryRecord
+    # 聚合（source=voice/offline 的 sale/refund 行都在内），日结此前只统计
+    # SaleOrder/Payment，同一笔语音卖 6 元「日报 +6、日结 +0」，两屏再分裂。
+    # 按台账流水来源补齐（撤销行 is_voided=True 不计，与日报口径一致）：
+    #   - 渠道销售并入 gross_sales、渠道退款并入 refunds_total（净额+单列退款
+    #     语义不变）；
+    #   - 渠道净额按现金渠道并入 payments（语音/离线无支付方式流水，摊主口径
+    #     即现金成交；赊账语音单的回款仍由 customer_repay 承接回款侧），
+    #     保证 diff = total_sales − total_payments − credit_amount 恒等不破坏。
+    channel_rows = await db.execute(
+        select(
+            InventoryRecord.event_type,
+            func.coalesce(func.sum(InventoryRecord.total_amount), Decimal("0")),
+        ).where(
+            InventoryRecord.merchant_id == merchant_id,
+            InventoryRecord.is_voided.is_(False),
+            InventoryRecord.event_type.in_(("sale", "refund")),
+            InventoryRecord.source.in_(("voice", "offline")),
+            InventoryRecord.event_time >= day_start,
+            InventoryRecord.event_time < day_end,
+        )
+    )
+    channel_amounts = {
+        event_type: _decimal_value(amount) for event_type, amount in channel_rows.all()
+    }
+    channel_sales = channel_amounts.get("sale", Decimal("0"))
+    channel_refunds = channel_amounts.get("refund", Decimal("0"))
+    gross_sales = (gross_sales + channel_sales).quantize(Decimal("0.01"))
+
+    # RA-04：渠道赊账销售不计现金 —— 语音赊账单 confirm 时按
+    # voice:{log.id}:charge 幂等键落 CustomerReceivable（无 SaleOrder），
+    # 据此以幂等键结构化识别渠道赊账净额，从渠道现金净额中剥到
+    # credit_amount（赊账未收现款，回款由 customer_repay 承接）。撤销/修改
+    # 的差额冲销行（voice_ledger 按 :void:/edit 序号键生成）同步从净额中
+    # 扣除，保证撤销后 credit_amount 归零、diff = total_sales − payments
+    # − credit_amount 恒等不破坏。POS 赊账（sale-credit:* 键、有 Payment
+    # 行）不命中 voice: 前缀，口径不受影响。
+    from app.models.accounts import CustomerReceivable
+
+    channel_credit_charge_row = await db.execute(
+        select(func.coalesce(func.sum(CustomerReceivable.amount), Decimal("0"))).where(
+            CustomerReceivable.merchant_id == merchant_id,
+            CustomerReceivable.direction == "charge",
+            CustomerReceivable.created_at >= day_start,
+            CustomerReceivable.created_at < day_end,
+            CustomerReceivable.idempotency_key.like("voice:%:charge"),
+            CustomerReceivable.idempotency_key.notlike("%:void:charge"),
+            CustomerReceivable.idempotency_key.notlike("%:edit%:charge"),
+        )
+    )
+    channel_credit_reversal_row = await db.execute(
+        select(func.coalesce(func.sum(CustomerReceivable.amount), Decimal("0"))).where(
+            CustomerReceivable.merchant_id == merchant_id,
+            CustomerReceivable.direction == "repay",
+            CustomerReceivable.created_at >= day_start,
+            CustomerReceivable.created_at < day_end,
+            or_(
+                CustomerReceivable.idempotency_key.like("%:void:repay"),
+                CustomerReceivable.idempotency_key.like("%:edit%:repay"),
+            ),
+        )
+    )
+    channel_credit = (
+        _decimal_value(channel_credit_charge_row.scalar())
+        - _decimal_value(channel_credit_reversal_row.scalar())
+    ).quantize(Decimal("0.01"))
+    channel_cash = (channel_sales - channel_refunds - channel_credit).quantize(Decimal("0.01"))
+
+    # 退款合计（正数）单列保留信息量：refunds_total 与 total_sales(净) 一起看，
+    # 净销售额 + 退款合计 = 销售总额，摊主想看毛额时可自行还原。
+    # QA2-05：含语音/离线渠道的当日退款行（此前只统计 POS 反向 Payment）。
+    refunds_total = (refund_amount + channel_refunds).quantize(Decimal("0.01"))
+    # 净销售额 = 销售总额 - 当日退款（跨日退款计退款日，可为负，与 payments 同口径）
+    total_sales = (gross_sales - refunds_total).quantize(Decimal("0.01"))
 
     payment_rows = (
         await db.execute(
@@ -1621,6 +1766,9 @@ async def _settlement_numbers(
     wechat = by_method.get("wechat", Decimal("0"))
     alipay = by_method.get("alipay", Decimal("0"))
     card = by_method.get("card", Decimal("0"))
+    # QA2-05：语音/离线渠道净额按现金渠道并入（口径见上方渠道流水查询处），
+    # diff = total_sales − total_payments − credit_amount 恒等保持归零。
+    cash = (cash + channel_cash).quantize(Decimal("0.01"))
     payments = cash + wechat + alipay + card
 
     # 采购付款（当日 supplier payments）
@@ -1662,6 +1810,20 @@ async def _settlement_numbers(
             CustomerReceivable.created_at >= day_start,
             CustomerReceivable.created_at < day_end,
             CustomerReceivable.note.notlike("退款%"),
+            # RA-05：语音赊账链的冲销/冲正差额行（voice_ledger.
+            # sync_voice_receivables 按 :void:/edit 序号幂等键生成）是账务
+            # 对冲、不是真实现金回款，按幂等键结构化排除 —— 此前仅按
+            # note like '退款%' 排除，「语音冲销 voice:…」不命中，void 后
+            # customer_repay 残留、net_cash_flow 幻影。真实回款键
+            # （voice:{log.id}:repay / customer-repay:* / sale-repay:*）
+            # 不含 :void:/edit 序号段，不受影响；NULL 键历史行按原口径保留。
+            or_(
+                CustomerReceivable.idempotency_key.is_(None),
+                and_(
+                    CustomerReceivable.idempotency_key.notlike("%:void:repay"),
+                    CustomerReceivable.idempotency_key.notlike("%:edit%:repay"),
+                ),
+            ),
         )
     )
     customer_repay = _decimal_value(customer_repay_row.scalar())
@@ -1692,7 +1854,7 @@ async def _settlement_numbers(
 
     # Fix 3: 赊账金额主口径 = 窗口内订单的 credit Payment 行净额（success 正向
     # 行 + refunded 反向行）。组合支付含 credit 的订单（status="paid"）由此纳入，
-    # total_sales = payments + credit_amount + refund_amount 对其恒成立；纯赊账
+    # 净额恒等式 total_sales(净) = payments + credit_amount 对其恒成立；纯赊账
     # 订单（status="credit"）同样成立。当日真实回款已计入 payments，须从
     # credit_amount 中扣除避免双算；存量无流水订单走 legacy_credit 原口径。
     credit_repay_row = await db.execute(
@@ -1714,6 +1876,7 @@ async def _settlement_numbers(
     credit_amount = (
         by_method.get("credit", Decimal("0"))
         + legacy_credit
+        + channel_credit  # RA-04：渠道赊账净额（语音赊账单），与现金渠道互斥
         - _decimal_value(credit_repay_row.scalar())
     ).quantize(Decimal("0.01"))
 
@@ -1722,6 +1885,10 @@ async def _settlement_numbers(
         select(func.coalesce(func.sum(InventoryRecord.total_amount), Decimal("0"))).where(
             InventoryRecord.merchant_id == merchant_id,
             InventoryRecord.event_type == "waste",
+            # RA-09：撤销的报损行不计 waste_cost（与上方 channel_rows 及日报
+            # waste_amount 口径一致）——此前 void 后日结 waste_cost 不回落，
+            # 与日报两屏打架，closed 日快照也被污染。
+            InventoryRecord.is_voided.is_(False),
             InventoryRecord.event_time >= day_start,
             InventoryRecord.event_time < day_end,
         )
@@ -1730,11 +1897,13 @@ async def _settlement_numbers(
 
     estimated_cogs = await _estimate_daily_cogs(db, merchant_id, day_start, day_end)
     net_cash_flow = payments + customer_repay - purchase_paid
-    estimated_gross_profit = total_sales - refund_amount - estimated_cogs
+    # 毛利 = 净销售额 - 已售成本（total_sales 已扣退款，不再重复减 refund）
+    estimated_gross_profit = total_sales - estimated_cogs
 
     return {
         "total_sales": total_sales,
         "order_count": int(order_count),
+        "refunds_total": refunds_total,
         "total_payments": payments,
         "cash_amount": cash,
         "wechat_amount": wechat,
@@ -1749,7 +1918,10 @@ async def _settlement_numbers(
         "net_cash_flow": net_cash_flow,
         "estimated_cogs": estimated_cogs,
         "estimated_gross_profit": estimated_gross_profit,
-        "diff_amount": total_sales - payments - credit_amount - refund_amount,
+        # 净额口径 diff：净销售额 - 净实收 - 赊账净额。total_sales 已含退款冲减
+        # （退款流水同时为负计入 payments/credit），跨日/当日退款均自洽归零；
+        # 非 0 仅在真有账目差异（漏记流水/手工改账）时出现。
+        "diff_amount": total_sales - payments - credit_amount,
     }
 
 
@@ -1802,6 +1974,8 @@ async def close_daily_settlement(
     if reconciliation is None:
         reconciliation = Reconciliation(merchant_id=merchant.id, date=settle_date)
         db.add(reconciliation)
+    # 净额口径：sale_total(净销售) 与 payment_total(净实收) 同口径，正常记账时
+    # diff_amount==0 → 对账状态 balanced；非 0 即真差异。
     reconciliation.sale_total = numbers["total_sales"]
     reconciliation.payment_total = numbers["total_payments"]
     reconciliation.diff_amount = numbers["diff_amount"]
@@ -1890,7 +2064,10 @@ async def get_daily_settlement(
             DailySettlement.date == settle_date,
         )
     )
-    if not settlement:
+    # QA-18：open（含 reopen 后补录中）一律走 live 实时计算，与行不存在路径
+    # 同源——此前对已存在行一律回读关闭时的列值/快照，reopen 后新流水不体现、
+    # refunds_total 丢失，status=open 却显示陈旧数字误导实时账。
+    if not settlement or settlement.status != "closed":
         # Return live numbers if not yet closed
         numbers = await _settlement_numbers(db, merchant.id, settle_date)
         return {
@@ -1904,7 +2081,9 @@ async def get_daily_settlement(
                 "status": "open",
             },
         }
-    # P2-6：优先回显关闭时的完整快照；旧行（snapshot 为 NULL）回退到列值。
+    # closed：P2-6 优先回显关闭时的完整快照；旧行（snapshot 为 NULL）回退到列值。
+    # 注意：列值里的 total_sales 是关闭时的口径快照——净额口径上线后新关的
+    # 日结为净销售额（快照含 refunds_total），更早的旧行仍是含退款的销售总额。
     data = {
         "date": settlement.date.isoformat(),
         "total_sales": float(settlement.total_sales),
@@ -1918,7 +2097,13 @@ async def get_daily_settlement(
         "status": settlement.status,
     }
     if settlement.snapshot:
+        # 快照含 refunds_total（关闭时完整 numbers 落库），退款合计不丢。
         data.update(settlement.snapshot)
+        data.setdefault("refunds_total", 0.0)
+    else:
+        # QA-18：净额口径上线前的旧行无快照、无 refunds_total 列，补 0 兜底
+        # 保证字段恒存在（旧行关闭时未单独统计退款）。
+        data["refunds_total"] = 0.0
     return {
         "code": 0,
         "data": data,

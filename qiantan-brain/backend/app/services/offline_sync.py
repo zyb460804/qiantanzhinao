@@ -72,6 +72,34 @@ def _build_inventory_record(
     else:
         qty = Decimal("0")
 
+    # QA2-03：按事件类型归一符号 —— 客户端不可信（F 探针故意传正数 sale）。
+    # 此前正数 sale 原样落账（流水 +qty），批次却按 abs(qty) 负向扣减，台账与
+    # 批次双向分歧；POS/语音路径均为服务端取负，offline 补账必须同口径对齐：
+    #   sale/waste → quantity = -abs(qty)（出库恒负）
+    #   purchase/refund（回库）→ quantity = +abs(qty)（入库恒正）
+    # 其余事件类型保持客户端原值。幂等键与响应结构不受影响。
+    if item.event_type in ("sale", "waste"):
+        qty = -abs(qty) if qty else qty
+    elif item.event_type in ("purchase", "refund"):
+        qty = abs(qty) if qty else qty
+
+    # RA-10：金额符号同步归一 —— 落库约定「金额恒正」（日报 revenue =
+    # Σsale.total_amount − Σrefund.total_amount、日结 channel_sales/refunds
+    # 与 waste_cost 均按该口径聚合）。此前只归一 quantity：refund 传
+    # total_amount=-6 落库 -6，日报把 -6 当减项反而 +6，与日结差 2×|total|。
+    # 四个白名单类型的 total_amount/unit_cost/unit_price 统一取绝对值；
+    # 未传 total_amount 时按 |qty|×单价（unit_price 优先，采购类落 unit_cost）
+    # 补算，保证日报/日结两屏同源。
+    unit_cost = abs(Decimal(str(item.unit_cost))) if item.unit_cost is not None else None
+    unit_price = abs(Decimal(str(item.unit_price))) if item.unit_price is not None else None
+    total_amount: Decimal | None = None
+    if item.total_amount is not None:
+        total_amount = abs(Decimal(str(item.total_amount)))
+    elif item.event_type in ("sale", "purchase", "refund", "waste"):
+        base_price = unit_price if unit_price is not None else unit_cost
+        if base_price is not None and qty:
+            total_amount = (abs(qty) * base_price).quantize(Decimal("0.01"))
+
     # Resolve event_time; accept ISO strings or fall back to UTC now().
     event_time = utc_now()
     if item.event_time:
@@ -85,9 +113,9 @@ def _build_inventory_record(
         sku_id=sku_id,
         quantity=qty,
         unit=item.unit or "斤",
-        unit_cost=Decimal(str(item.unit_cost)) if item.unit_cost is not None else None,
-        unit_price=Decimal(str(item.unit_price)) if item.unit_price is not None else None,
-        total_amount=Decimal(str(item.total_amount)) if item.total_amount is not None else None,
+        unit_cost=unit_cost,
+        unit_price=unit_price,
+        total_amount=total_amount,
         event_type=item.event_type,
         event_time=event_time,
         source=item.source or "offline",
@@ -201,12 +229,16 @@ async def upsert_offline_item(
             # so the caller's begin_nested() savepoint rolls back the already-
             # flushed InventoryRecord and the item is dead-lettered — the rest
             # of the batch continues uninterrupted.
+            # QA-04：语音/POS 兜底路径产生的批次 sku_id=NULL，而本路径经
+            # ensure_sku 强制落了 sku_id —— 按 sku 过滤恒为「可用 0」死信。
+            # 开启无主批次回退：sku 过滤不足时按 merchant+product 消耗差额。
             consumption = await consume_batches_fifo_costed(
                 db,
                 merchant_id,
                 product_id,
                 qty,
                 sku_id=sku_id,
+                fallback_to_unowned=True,
             )
             if consumption["quantity"] < qty:
                 raise ValueError(f"库存不足，需要{qty}，可用{consumption['quantity']}")

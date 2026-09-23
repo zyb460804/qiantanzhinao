@@ -393,22 +393,25 @@ Page({
       prodForm: { supplier_id: supplierId, sku_id: '', last_price: '', min_order_qty: '' },
       skuSearchKeyword: '', filteredSkus: [], allSkus: [],
     });
-    // 初始加载首屏 SKU（后端默认上限 500），搜索时改为服务端 keyword 查询
+    // 初始加载全部 SKU（N8 分页生效后由 fetchAllSkus 按页拉全量），搜索走本地过滤
     this._fetchSkus('');
   },
 
-  // 服务端 SKU 检索，带 300ms 防抖；SKU 数过多时避免一次性拉全量
+  // SKU 检索，带 300ms 防抖。N8 适配：列表接口分页生效（旧 limit/keyword
+  // 参数本就被后端忽略），改为按页拉全量 + 本地关键字过滤，搜索框恢复可用。
   _fetchSkus: function (keyword) {
     var self = this;
     if (this._skuSearchTimer) clearTimeout(this._skuSearchTimer);
     this._skuSearchTimer = setTimeout(function () {
-      var params = { limit: 200 };
-      if (keyword) params.keyword = keyword;
-      app.request({ url: '/catalog/skus', data: params }).then(function (data) {
+      app.fetchAllSkus().then(function (data) {
         var skus = (data || []).map(function (s) {
           return { sku_id: s.sku_id, name: s.name, _initial: (s.name || '商').slice(0, 1) };
         });
-        self.setData({ allSkus: skus, filteredSkus: skus });
+        var kw = (keyword || '').toLowerCase();
+        var filtered = kw ? skus.filter(function (s) {
+          return (s.name || '').toLowerCase().indexOf(kw) !== -1;
+        }) : skus;
+        self.setData({ allSkus: skus, filteredSkus: filtered });
       }).catch(function () {});
     }, 300);
   },
@@ -496,7 +499,8 @@ Page({
       compareRecommend: null, compareRecommendLoading: false,
       compareSort: 'value', compareError: '',
     });
-    app.request({ url: '/catalog/skus', data: { limit: 200 } }).then(function (data) {
+    // N8 适配：列表接口分页生效，改用 fetchAllSkus 按页拉全量（旧 limit 参数已被忽略）
+    app.fetchAllSkus().then(function (data) {
       var skus = (data || []).map(function (s) {
         return { sku_id: s.sku_id, name: s.name, _initial: (s.name || '商').slice(0, 1) };
       });

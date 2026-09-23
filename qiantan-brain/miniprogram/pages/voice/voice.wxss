@@ -114,3 +114,25 @@
 @keyframes cp-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
 .cp-submit { margin-top: 22rpx; min-height: 88rpx; display: flex; align-items: center; justify-content: center; border-radius: 19rpx; font-size: 27rpx; font-weight: 720; }
 .cp-submit[disabled] { opacity: .55; }
+
+/* ── 纠错卡类型四选一（v3.3：进货/销售/损耗/支出，对应 corrections.event_type）── */
+.cp-types { display: flex; gap: 12rpx; }
+.cp-type { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 68rpx; color: var(--ink-2); background: var(--paper-2); border: 2rpx solid transparent; border-radius: 16rpx; font-size: 24rpx; font-weight: 650; }
+.cp-type.active { color: var(--green-800); background: var(--green-50); border-color: var(--green-300); }
+.cp-type:active { opacity: .75; }
+
+/* ── 时间语义提示条（v3.3：解析带 time_hint，如「昨天」记入今天）──
+   参考 .parse-warning 的浅色条做法，但用信息蓝——这是说明不是警示 */
+.time-hint { margin-top: 14rpx; padding: 16rpx 22rpx; color: var(--info-ink); background: var(--info-soft); border-radius: var(--radius-lg); font-size: 23rpx; line-height: 1.5; }
+
+/* ── 词表外品名建议（v3.3：product 为空但 product_word 有候选，点击带出纠错卡）── */
+.word-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 12rpx; margin-top: 12rpx; padding: 16rpx 22rpx; background: var(--paper-2); border-radius: var(--radius-lg); }
+.word-suggest-label { color: var(--muted); font-size: 23rpx; }
+.word-suggest-chip { padding: 10rpx 24rpx; color: var(--green-800); background: var(--green-50); border: 2rpx solid var(--green-200); border-radius: 999rpx; font-size: 24rpx; font-weight: 650; }
+.word-suggest-chip:active { opacity: .7; }
+
+/* ── 复核修复（QA：多笔解析时最后一张卡的确认按钮被底部导航遮挡需手动滚动）──
+   有确认卡时加大页面底部留白（96rpx + 安全区），滚动到底后最后一张卡的
+   按钮区域在 375×667 / 320×568 都与 TabBar 之间留有呼吸空间；
+   解析完成时 voice.js 另会自动滚到 .multi-bar，首张卡直接进视口。 */
+.voice-page.with-records { padding-bottom: calc(var(--s-12) + env(safe-area-inset-bottom)); }

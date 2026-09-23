@@ -195,6 +195,8 @@ async def test_complete_stocktake(client, db_session):
     assert adjustments[0]["product_id"] == 1
 
     # Verify adjustment record in DB
+    # QA-20：盘亏改为报损口径 —— event_type='waste'（原 'adjustment' 无成本字段，
+    # 报损口径漏记金额、批次台账不扣减），source 仍为 stocktake。
     from app.models.inventory import InventoryRecord
 
     mid = uuid.UUID(TEST_MERCHANT_ID)
@@ -202,7 +204,7 @@ async def test_complete_stocktake(client, db_session):
         result = await session.execute(
             select(InventoryRecord).where(
                 InventoryRecord.merchant_id == mid,
-                InventoryRecord.event_type == "adjustment",
+                InventoryRecord.event_type == "waste",
                 InventoryRecord.source == "stocktake",
             )
         )
@@ -245,7 +247,7 @@ async def test_complete_stocktake_idempotent(client, db_session):
     assert resp2.json()["code"] == 0
     assert len(resp2.json()["data"]["adjustments"]) == 0
 
-    # Only one adjustment record in DB
+    # Only one adjustment record in DB（QA-20：盘亏落 waste 口径）
     from app.models.inventory import InventoryRecord
 
     mid = uuid.UUID(TEST_MERCHANT_ID)
@@ -253,7 +255,7 @@ async def test_complete_stocktake_idempotent(client, db_session):
         result = await session.execute(
             select(InventoryRecord).where(
                 InventoryRecord.merchant_id == mid,
-                InventoryRecord.event_type == "adjustment",
+                InventoryRecord.event_type == "waste",
             )
         )
         records = result.scalars().all()

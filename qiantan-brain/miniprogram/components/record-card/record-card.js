@@ -1,8 +1,11 @@
 /**
  * record-card 记账记录卡片组件
  *
- * 展示一条解析后的记账事件(采购/销售/损耗),支持只读和可操作两种模式。
+ * 展示一条解析后的记账事件(采购/销售/损耗/支出),支持只读和可操作两种模式。
  * voice 页用于"确认入库"前的预览;index 页用于最近记录展示。
+ *
+ * 支出(expense)事件(v3.3):契约约定 quantity/unit_cost/unit_price 为空、
+ * 只有 total_amount,卡片因此只展示「支/日常支出」徽章 + 金额,不放数量/单价行。
  *
  * 用法:
  *   <record-card record="{{parsed}}" show-actions="{{true}}"

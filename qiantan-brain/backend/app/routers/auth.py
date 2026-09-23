@@ -8,13 +8,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.rate_limiter import check_wechat_login_rate_limit
 from app.core.security import (
     create_access_token,
     decode_access_token,
@@ -88,9 +89,20 @@ def _merchant_to_info(m: Merchant) -> MerchantInfo:
 @router.post("/wechat-login", response_model=WechatLoginResponse)
 async def wechat_login(
     body: WechatLoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """微信小程序登录：code → openid → 绑定/创建商户 → 签发 JWT。"""
+    """微信小程序登录：code → openid → 绑定/创建商户 → 签发 JWT。
+
+    加固（QA P2 修复）：
+      - code 形态校验在 WechatLoginRequest schema 完成（trim 后非空、
+        ≤128 字符、字符白名单），非法输入 422，不会进入本函数；
+      - 进入本函数前先做 IP 维度滑动窗口频控（60 秒 10 次，成功与失败
+        都计数），阻断"任意 code 批量创建商户"的资源滥用。dev 环境的
+        mock 登录特性保留：合法 code 仍可换 mock openid 正常登录。
+    """
+    # 频控先行：超限 429，不再触碰 code2session 与数据库
+    await check_wechat_login_rate_limit(request)
     openid = await wechat_code2session(body.code)
 
     # 按 openid 查找已绑定商户；没有则创建（默认摊主角色）

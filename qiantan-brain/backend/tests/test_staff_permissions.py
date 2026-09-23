@@ -68,8 +68,10 @@ class TestRoleDefinitions:
 
 class TestStaffCRUD:
     async def test_create_staff(self, client):
+        # QA-21：创建员工时 PIN 必填（pin_code 缺落 NULL 的缺陷行为已改为 422）
         res = await client.post("/api/v1/staff", json={
             "name": "测试员工", "role": "cashier", "phone": "13800001111",
+            "pin_code": "123456",
         })
         assert res.status_code == 200
         assert res.json()["data"]["role"] == "cashier"
@@ -305,7 +307,11 @@ class TestStaffManagePermission:
 
     async def test_owner_can_still_manage_staff(self, client):
         """owner 不被锁死：create → update → deactivate 全链路 200."""
-        res = await client.post("/api/v1/staff", json={"name": "合法员工", "role": "cashier"})
+        # QA-21：创建员工需携带 pin_code
+        res = await client.post(
+            "/api/v1/staff",
+            json={"name": "合法员工", "role": "cashier", "pin_code": "123456"},
+        )
         assert res.status_code == 200
         sid = res.json()["data"]["staff_id"]
         res = await client.put(f"/api/v1/staff/{sid}", json={"role": "manager"})

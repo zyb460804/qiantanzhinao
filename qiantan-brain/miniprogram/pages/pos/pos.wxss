@@ -12,7 +12,8 @@
 .product-name { overflow:hidden; color:var(--ink); font-size:29rpx; font-weight:750; text-overflow:ellipsis; }
 .product-stock { margin-top:10rpx; color:var(--muted); font-size:22rpx; }
 .product-price { margin-top:auto; padding-top:18rpx; color:var(--green-800); font-family:var(--font-num); font-size:28rpx; font-weight:800; }
-.estimate { position:absolute; top:14rpx; right:12rpx; padding:4rpx 8rpx; color:var(--corn-ink); background:var(--corn-soft); border-radius:9rpx; font-size:17rpx; }
+/* QA-37 可读性：促销角标 17rpx→22rpx（用户群中老年摊主，关键信息 ≥22rpx） */
+.estimate { position:absolute; top:14rpx; right:12rpx; padding:4rpx 8rpx; color:var(--corn-ink); background:var(--corn-soft); border-radius:9rpx; font-size:22rpx; }
 .cart { overflow:hidden; background:var(--paper); border-radius:24rpx; box-shadow:var(--shadow); }
 .cart-item { display:flex; align-items:center; gap:18rpx; padding:22rpx; border-bottom:1rpx solid var(--line); }
 .cart-main { flex:1; min-width:0; }
@@ -57,10 +58,11 @@
 .held-item:active { background:var(--green-50); }
 .held-main { flex:1; min-width:0; }
 .held-no { display:block; color:var(--ink); font-size:24rpx; font-weight:700; }
-.held-time { display:block; margin-top:4rpx; color:var(--muted); font-size:19rpx; }
+/* QA-37 可读性：挂单时间/条目 19rpx→22rpx */
+.held-time { display:block; margin-top:4rpx; color:var(--muted); font-size:22rpx; }
 .held-right { text-align:right; }
 .held-amount { display:block; color:var(--ink); font-family:var(--font-num); font-size:25rpx; font-weight:800; }
-.held-items { display:block; margin-top:4rpx; color:var(--green-700); font-size:19rpx; }
+.held-items { display:block; margin-top:4rpx; color:var(--green-700); font-size:22rpx; }
 
 /* 日结 */
 .close-day { margin-top:20rpx; color:var(--green-800); background:var(--green-50); border:2rpx solid var(--green-200); border-radius:20rpx; font-weight:750; }

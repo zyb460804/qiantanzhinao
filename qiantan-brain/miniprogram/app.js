@@ -432,6 +432,27 @@ App({
     return promise;
   },
 
+  // N8 适配：/catalog/skus 分页生效（page_size 上限 100），需要全量列表的页面
+  // 用此方法按页循环拉取并拼接，直到返回短页为止（50 页安全上限防死循环）。
+  // extraParams 透传额外查询参数（当前后端不支持的参数会被忽略）。
+  fetchAllSkus: function (extraParams) {
+    var self = this;
+    var pageSize = 100;
+    var maxPages = 50;
+    var all = [];
+    function fetchPage(page) {
+      if (page > maxPages) return Promise.resolve(all);
+      var params = Object.assign({ page: page, page_size: pageSize }, extraParams || {});
+      return self.request({ url: '/catalog/skus', data: params }).then(function (data) {
+        var batch = data || [];
+        all = all.concat(batch);
+        if (batch.length === pageSize) return fetchPage(page + 1);
+        return all;
+      });
+    }
+    return fetchPage(1);
+  },
+
   _uploadOnce: function (options, retried) {
     var self = this;
     return new Promise(function (resolve, reject) {

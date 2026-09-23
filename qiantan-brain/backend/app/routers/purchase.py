@@ -25,7 +25,7 @@ from app.core.timezone import utc_now, utc_today_start
 from app.database import get_db
 from app.models.accounts import SupplierPayable
 from app.models.audit import AuditLog
-from app.models.catalog import Supplier
+from app.models.catalog import ProductAlias, ProductSKU, Supplier
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
 from app.models.product import ProductCategory
@@ -92,6 +92,103 @@ def _to_d(v) -> Decimal:
     return Decimal(str(v))
 
 
+def _parse_user_cost(raw: dict) -> Decimal | None:
+    """解析手动录入的进价（兼容 cost / actual_unit_cost 字段），无效值返回 None。"""
+    user_cost_raw = raw.get("cost", raw.get("actual_unit_cost"))
+    if user_cost_raw in (None, ""):
+        return None
+    try:
+        cand = _to_d(user_cost_raw)
+    except Exception:
+        return None
+    return cand if cand > 0 else None
+
+
+async def _load_merchant_skus_by_name(
+    db: AsyncSession, merchant_id: uuid.UUID, names: set[str]
+) -> dict[str, ProductSKU]:
+    """QA-05：按名称（含别名）加载商户自有 SKU，供手动采购录入优先匹配。
+
+    C 实证：摊主在商品管理新建「红富士苹果」后，采购手动录入报
+    「商品目录中未找到」——旧逻辑只查全局种子 ProductCategory，不查商户
+    product_skus。此处带 merchant 过滤查标准名 + 别名，命中则可入采购单；
+    未命中时由调用方回退现有品类逻辑（A/B 商户流程不受影响）。
+    """
+    if not names:
+        return {}
+    by_name: dict[str, ProductSKU] = {}
+    sku_rows = (
+        (
+            await db.execute(
+                select(ProductSKU).where(
+                    ProductSKU.merchant_id == merchant_id,
+                    ProductSKU.is_active == True,  # noqa: E712
+                    ProductSKU.name.in_(names),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for sku in sku_rows:
+        by_name[sku.name] = sku
+    alias_rows = (
+        (
+            await db.execute(
+                select(ProductAlias).where(
+                    ProductAlias.merchant_id == merchant_id,
+                    ProductAlias.alias.in_(names),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if alias_rows:
+        alias_skus = (
+            (
+                await db.execute(
+                    select(ProductSKU).where(
+                        ProductSKU.id.in_({a.sku_id for a in alias_rows}),
+                        ProductSKU.is_active == True,  # noqa: E712
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        alias_sku_map = {s.id: s for s in alias_skus}
+        for alias in alias_rows:
+            sku = alias_sku_map.get(alias.sku_id)
+            if sku is not None:
+                # 标准名优先，别名仅在未占用时登记
+                by_name.setdefault(alias.alias, sku)
+    return by_name
+
+
+async def _ensure_category_for_sku(db: AsyncSession, sku: ProductSKU) -> ProductCategory:
+    """QA-05：商户 SKU 命中后找到/补建同名品类，满足 purchase_items.product_id 外键。
+
+    product_categories 是全局表且 name 唯一：同名品类已存在（其他商户先建、
+    离线补账兜底建）时直接复用；否则按 SKU 档案补建，保证后续验收 confirm
+    经 resolve_sku_id 能回链到同一商户 SKU（QA-35）。
+    """
+    cat = await db.scalar(select(ProductCategory).where(ProductCategory.name == sku.name))
+    if cat is not None:
+        return cat
+    cat = ProductCategory(
+        name=sku.name,
+        unit=sku.canonical_unit or "斤",
+        shelf_life_hours=sku.shelf_life_hours or 72,
+        category_group=sku.category_group or "其他",
+        default_price=sku.default_sale_price,
+        is_active=True,
+    )
+    db.add(cat)
+    await db.flush()
+    return cat
+
+
 # ---------------------------------------------------------------------------
 # AI建议 → 采购单
 # ---------------------------------------------------------------------------
@@ -109,6 +206,13 @@ async def create_from_advice(
     manual_items = body.get("items") or []
     if not isinstance(recommendation_ids, list) or not isinstance(manual_items, list):
         raise HTTPException(status_code=400, detail="recommendation_ids 和 items 必须是数组")
+    # N10：显式提交空 items 且未指定建议 → 400 语义化报错。
+    # 此前落入「加载今日建议」分支后报 404「未找到可用的采购建议」，
+    # 把「客户端提交了空清单」误报成「资源不存在」。注意：不带 items 键
+    # （如「一键生成今日清单」）仍走建议加载路径，未命中时保持原 404。
+    raw_items = body.get("items")
+    if isinstance(raw_items, list) and not raw_items and not recommendation_ids:
+        raise HTTPException(status_code=400, detail="采购清单不能为空")
     if len(manual_items) > 100:
         raise HTTPException(status_code=400, detail="一次最多导入100个采购商品")
 
@@ -175,6 +279,8 @@ async def create_from_advice(
     )
     manual_by_id = {product.id: product for product in manual_products}
     manual_by_name = {product.name: product for product in manual_products}
+    # QA-05：商户自有 SKU（标准名 + 别名，带 merchant 过滤）优先于全局品类回退
+    merchant_skus_by_name = await _load_merchant_skus_by_name(db, merchant_id, names)
 
     existing_items = (
         (
@@ -188,9 +294,13 @@ async def create_from_advice(
         .scalars()
         .all()
     )
-    existing_product_ids = {item.product_id for item in existing_items}
+    # QA-06：product_id → 现有采购项 的映射。重复录入同名/同商品时改为
+    # 合并数量，不再「预填后 continue」静默丢弃。
+    items_by_product: dict[int, PurchaseItem] = {item.product_id: item for item in existing_items}
+    existing_product_ids = set(items_by_product)
 
     added_count = 0
+    merged_count = 0
     matched_manual_count = 0
     unmatched_names: list[str] = []
 
@@ -201,23 +311,23 @@ async def create_from_advice(
             continue
         est_cost = _to_d(product.default_price)
         est_total = (qty * est_cost).quantize(Decimal("0.01"))
-        db.add(
-            PurchaseItem(
-                list_id=plist.id,
-                merchant_id=merchant_id,
-                recommendation_id=rec.id,
-                product_id=rec.product_id,
-                sku_id=rec.sku_id,
-                recommended_qty=qty,
-                actual_qty=qty,
-                unit=product.unit,
-                estimated_unit_cost=est_cost,
-                estimated_cost=est_total,
-                status="pending",
-                reason=rec.suggestion,
-            )
+        rec_item = PurchaseItem(
+            list_id=plist.id,
+            merchant_id=merchant_id,
+            recommendation_id=rec.id,
+            product_id=rec.product_id,
+            sku_id=rec.sku_id,
+            recommended_qty=qty,
+            actual_qty=qty,
+            unit=product.unit,
+            estimated_unit_cost=est_cost,
+            estimated_cost=est_total,
+            status="pending",
+            reason=rec.suggestion,
         )
+        db.add(rec_item)
         existing_product_ids.add(rec.product_id)
+        items_by_product[rec.product_id] = rec_item
         added_count += 1
 
     for raw in manual_items:
@@ -230,8 +340,13 @@ async def create_from_advice(
                 product = manual_by_id.get(int(raw["product_id"]))
             except (TypeError, ValueError):
                 product = None
+        # QA-05：先按标准名/别名匹配商户自有 SKU，命中则找到/补建同名品类，
+        # 采购项同时绑定 sku_id；品类逻辑保持为回退路径（向后兼容）。
+        matched_sku = merchant_skus_by_name.get(name) if name else None
         if not product and name:
             product = manual_by_name.get(name)
+        if not product and matched_sku is not None:
+            product = await _ensure_category_for_sku(db, matched_sku)
         if not product:
             unmatched_names.append(name or "未命名商品")
             continue
@@ -244,41 +359,61 @@ async def create_from_advice(
             unmatched_names.append(name or product.name)
             continue
         matched_manual_count += 1
-        if product.id in existing_product_ids:
+        existing_item = items_by_product.get(product.id)
+        if existing_item is not None and existing_item.status != "purchased":
+            # QA-06：重复商品合并数量而非静默丢弃。
+            # 单价语义：本次提交了新进价 → 整行按新进价重算（摊主最新意图）；
+            # 未提交 → 沿用原行单价；合计同步重算，清单金额保持自洽。
+            user_cost = _parse_user_cost(raw)
+            if user_cost is not None:
+                existing_item.estimated_unit_cost = user_cost
+                existing_item.actual_unit_cost = user_cost
+            line_cost = (
+                existing_item.actual_unit_cost
+                or existing_item.estimated_unit_cost
+                or _to_d(product.default_price)
+            )
+            existing_item.recommended_qty = (existing_item.recommended_qty or Decimal("0")) + qty
+            existing_item.actual_qty = (existing_item.actual_qty or Decimal("0")) + qty
+            existing_item.estimated_cost = (existing_item.actual_qty * line_cost).quantize(
+                Decimal("0.01")
+            )
+            if existing_item.actual_unit_cost is not None:
+                existing_item.actual_cost = (
+                    existing_item.actual_qty * existing_item.actual_unit_cost
+                ).quantize(Decimal("0.01"))
+            merged_count += 1
+            continue
+        if existing_item is not None:
+            # QA-06：已入库（purchased）的历史项不合并，维持旧行为跳过
             continue
         # 优先采用用户手动录入的进价 cost（兼容 actual_unit_cost 字段），
         # 避免摊主输入的进价被丢弃导致后续毛利分析失真。
         default_cost = _to_d(product.default_price)
-        user_cost_raw = raw.get("cost", raw.get("actual_unit_cost"))
-        user_cost: Decimal | None = None
-        if user_cost_raw not in (None, ""):
-            try:
-                cand = _to_d(user_cost_raw)
-                if cand > 0:
-                    user_cost = cand
-            except Exception:
-                user_cost = None
+        user_cost = _parse_user_cost(raw)
         unit_cost = user_cost if user_cost is not None else default_cost
         item_total = (qty * unit_cost).quantize(Decimal("0.01"))
         unit = str(raw.get("unit") or product.unit)[:20]
         source = str(raw.get("from") or raw.get("source") or "手工添加")[:100]
-        db.add(
-            PurchaseItem(
-                list_id=plist.id,
-                merchant_id=merchant_id,
-                product_id=product.id,
-                recommended_qty=qty,
-                actual_qty=qty,
-                unit=unit,
-                estimated_unit_cost=unit_cost,
-                estimated_cost=item_total,
-                # 用户录入进价时同步写入实际单价/小计，保留原始成本数据
-                actual_unit_cost=user_cost if user_cost is not None else None,
-                actual_cost=item_total if user_cost is not None else None,
-                status="pending",
-                reason=source,
-            )
+        manual_item = PurchaseItem(
+            list_id=plist.id,
+            merchant_id=merchant_id,
+            product_id=product.id,
+            # QA-05/QA-35：手动录入命中商户 SKU 时绑定 sku_id，批次/流水可溯源
+            sku_id=matched_sku.id if matched_sku is not None else None,
+            recommended_qty=qty,
+            actual_qty=qty,
+            unit=unit,
+            estimated_unit_cost=unit_cost,
+            estimated_cost=item_total,
+            # 用户录入进价时同步写入实际单价/小计，保留原始成本数据
+            actual_unit_cost=user_cost if user_cost is not None else None,
+            actual_cost=item_total if user_cost is not None else None,
+            status="pending",
+            reason=source,
         )
+        db.add(manual_item)
+        items_by_product[product.id] = manual_item
         existing_product_ids.add(product.id)
         added_count += 1
 
@@ -308,13 +443,16 @@ async def create_from_advice(
     ).quantize(Decimal("0.01"))
     await db.commit()
 
+    # QA-06：合并信息如实回传，前端 toast 不再「假成功」
+    merged_suffix = f"，合并{merged_count}项" if merged_count else ""
     return {
         "code": 0,
-        "message": f"采购清单已更新，新增{added_count}项",
+        "message": f"采购清单已更新，新增{added_count}项{merged_suffix}",
         "data": {
             "list_id": str(plist.id),
             "item_count": plist.item_count,
             "added_count": added_count,
+            "merged_count": merged_count,
             "unmatched_items": unmatched_names,
         },
     }
@@ -827,7 +965,11 @@ async def confirm_acceptance(
 
         product = product_map.get(item.product_id)
         product_name = product.name if product else f"商品{item.product_id}"
-        sku_id = await resolve_sku_id(db, plist.merchant_id, product_id=item.product_id)
+        # QA-35：优先用采购项上已绑定的商户 SKU（QA-05 手动录入路径会写入），
+        # 避免批次/流水溯源只到品类粒度；未绑定时按品类名回退解析。
+        sku_id = item.sku_id or await resolve_sku_id(
+            db, plist.merchant_id, product_id=item.product_id
+        )
 
         # Use accepted_qty if available, otherwise actual_qty (for backward compat)
         qty_to_store = item.accepted_qty if item.accepted_qty is not None else item.actual_qty
@@ -1237,7 +1379,10 @@ async def confirm_purchase(
 
         product = product_map.get(item.product_id)
         product_name = product.name if product else f"商品{item.product_id}"
-        sku_id = await resolve_sku_id(db, plist.merchant_id, product_id=item.product_id)
+        # QA-35：同 confirm_acceptance —— 采购项已绑定的商户 SKU 优先
+        sku_id = item.sku_id or await resolve_sku_id(
+            db, plist.merchant_id, product_id=item.product_id
+        )
 
         batch_label = f"{product_name}-{now.strftime('%m%d%H%M%S')}"
         record = InventoryRecord(

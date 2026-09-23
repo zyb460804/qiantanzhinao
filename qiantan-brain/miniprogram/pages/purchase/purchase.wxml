@@ -175,6 +175,11 @@
       </view>
     </view>
 
+    <!-- 验收失败行内提示（QA-07）：弹层保持打开，摊主改完可直接重试 -->
+    <view wx:if="{{acceptanceMode && acceptanceError}}" class="acceptance-error" style="margin:16rpx 4rpx 0;padding:20rpx 24rpx;color:var(--tomato-ink);background:var(--tomato-soft);border-radius:var(--radius-lg);font-size:24rpx;line-height:1.5;">
+      <text>{{acceptanceError}}</text>
+    </view>
+
     <!-- 验收按钮 -->
     <view wx:if="{{acceptanceMode}}" class="acceptance-bar">
       <button class="btn-secondary" bindtap="exitAcceptance">取消</button>

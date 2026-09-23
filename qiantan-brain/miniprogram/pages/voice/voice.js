@@ -1,6 +1,17 @@
 /**
  * 语音记账页面 v3.2 — 页内纠错卡 / 多意图 / 草稿保护 / 上传进度 / 离线暂存
  *
+ * v3.3 要点（确认卡 / 纠错卡体验增强）：
+ *   - 纠错卡新增「类型」四选一（进货/销售/损耗/支出），提交进 corrections.event_type，
+ *     修正 ASR 把「卖」听成「买」、摊位费被记成进货这类方向错误。
+ *   - 支出(expense)事件展示由 record-card 组件承接（「支/日常支出」，仅金额行）。
+ *   - 词表外品名建议：product 为空但后端给了 product_word 候选词时，卡片下方出
+ *     建议 chips，点击带出纠错卡走 correct→confirm 既有链路（confirm 只上报
+ *     voice_log_id，本地直填后端不认，必须经 corrections.product 才算数）。
+ *   - time_hint 时间语义提示条（如「昨天」→ 记入今天的说明）。
+ *   - 复核 QA「多笔解析最后一张卡被底部导航遮挡需手动滚动」：解析后自动滚动到
+ *     汇总条 + 结果区加大底部留白（.with-records），最后一张卡按钮不再贴 TabBar。
+ *
  * v3.2 要点（低置信兜底路径体验重构）：
  *   - 串行 wx.showModal 纠错弹窗 → 页内纠错卡：商品 chips 点选（解析候选 +
  *     商户 SKU 缓存 + 打字兜底）、数量/金额 digit 数字键盘带单位、
@@ -40,8 +51,15 @@ Page({
     parseWarning: '',          // 后端 warning 字段（如部分内容没听清）
     confirmedCount: 0,         // 多意图已确认笔数
     showRecords: false,        // 确认卡是否可操作（独立于 state，重说录音时保持可点）
+    // ── 纠错卡「类型」四选一（v3.3）：对应 corrections.event_type，与后端枚举严格一致 ──
+    typeOptions: [
+      { value: 'purchase', label: '进货' },
+      { value: 'sale', label: '销售' },
+      { value: 'waste', label: '损耗' },
+      { value: 'expense', label: '支出' },
+    ],
     // ── 页内纠错卡（v3.2）──
-    correction: null,          // {voice_log_id, record, product, quantity, unit, amount, candidates, submitting}
+    correction: null,          // {voice_log_id, record, product, quantity, unit, amount, event_type, candidates, submitting}
   },
 
   // 方言代码与展示名映射（与后端 asr_iflytek.py DIALECT_MAP 权威键严格一致）
@@ -322,6 +340,18 @@ Page({
     return list;
   },
 
+  // QA-36：无意义文本（如「哈哈哈哈哈」）会解析出 product/数量/金额全缺的空事件、
+  // 置信度不足。这类事件不允许按 success 态渲染确认卡——判定口径：
+  // 无商品，或数量与金额全空（支出类契约只有 total_amount，不受影响），或置信度 < 0.8。
+  _isUnrecognizableEvent: function (ev) {
+    if (!ev) return true;
+    var isEmpty = function (v) { return v === undefined || v === null || v === ''; };
+    var noProduct = !ev.product;
+    var noQtyAndAmount = isEmpty(ev.quantity) && isEmpty(ev.total_amount);
+    var lowConfidence = !(Number(ev.confidence) >= 0.8);
+    return noProduct || noQtyAndAmount || lowConfidence;
+  },
+
   // 把 upload / parse-text 的响应落到页面：单条走旧 state 判定，多条按整体置信度。
   _applyParsed: function (data, defaultState) {
     var events = this._extractEvents(data);
@@ -332,14 +362,24 @@ Page({
         allConfident = false; break;
       }
     }
+    // QA-36：单条事件缺关键字段或低置信时按「未能识别」呈现——不给 success 态
+    // （此前 parseText 传入的 defaultState('success') 会覆盖 missing/confidence 判断），
+    // 提示条引导摊主核对卡片或重说；卡片仍可点「修改内容」走纠错链路。
+    var unrecognized = events.length === 1 && this._isUnrecognizableEvent(events[0]);
     var state = events.length > 1
       ? (allConfident ? 'success' : 'confirm_needed')
-      : (defaultState || (allConfident ? 'success' : 'confirm_needed'));
+      : (unrecognized
+        ? 'confirm_needed'
+        : (allConfident ? (defaultState || 'success') : 'confirm_needed'));
+    var warning = data.warning || '';
+    if (unrecognized && !warning) {
+      warning = '这句没认出有效内容（缺商品/数量/金额），请点「修改内容」补全，或重新说一遍';
+    }
     if (events.length > 1) {
       this.setData({
         parsed: events[0],
         parsedEvents: events,
-        parseWarning: data.warning || '',
+        parseWarning: warning,
         confirmedCount: 0,
         showRecords: true,
         state: state,
@@ -348,13 +388,22 @@ Page({
       this.setData({
         parsed: events[0],
         parsedEvents: null,
-        parseWarning: data.warning || '',
+        parseWarning: warning,
         confirmedCount: 0,
         showRecords: true,
         state: state,
       });
     }
     this.loadTodayCount();
+    // 复核修复（QA：多笔解析时最后一张卡的确认按钮被底部导航遮挡需手动滚动）：
+    // 解析完自动滚到汇总条，让第一张确认卡进入视口，摊主不再以为「点了没反应」；
+    // 配合 .with-records 加大的页面底部留白，滚到底后最后一张卡的按钮区域
+    // 在 375×667 / 320×568 都不会被 TabBar 贴边遮挡。
+    if (events.length > 1) {
+      wx.nextTick(function () {
+        wx.pageScrollTo({ selector: '.multi-bar', duration: 250 });
+      });
+    }
   },
 
   // ── 确认入账（单条 / 多意图逐条共用）────────────────
@@ -451,10 +500,10 @@ Page({
     run.then(settle, settle);
   },
 
-  // ── 页内纠错卡（v3.2，替代串行 showModal）────────────
-  // 提交协议与旧版一致：POST /voice/correct
-  //   { voice_log_id, corrections: { product?, quantity?, total_amount? } }
-  // （total_amount 属后端 VoiceCorrection 白名单字段。）
+  // ── 页内纠错卡（v3.2，替代串行 showModal；v3.3 增加类型四选一）────────────
+  // 提交协议：POST /voice/correct
+  //   { voice_log_id, corrections: { product?, quantity?, total_amount?, event_type? } }
+  // （total_amount / event_type 属后端 VoiceCorrection 白名单字段。）
   correctAndConfirm: function (e) {
     var record = (e && e.detail && e.detail.record) || this.data.parsed;
     if (!record || !record.voice_log_id) return;
@@ -463,6 +512,9 @@ Page({
 
   openCorrection: function (record) {
     this._stateBeforeRespeak = this.data.state;
+    // 类型默认取解析值；旧后端若给了未知枚举则不预选，避免「没动类型也悄悄改类型」
+    // （submitCorrection 只在与解析值不同时才提交 corrections.event_type）。
+    var knownTypes = ['purchase', 'sale', 'waste', 'expense'];
     this.setData({
       correction: {
         voice_log_id: record.voice_log_id,
@@ -471,6 +523,7 @@ Page({
         quantity: record.quantity != null ? String(record.quantity) : '',
         unit: record.unit || '斤',
         amount: record.total_amount != null ? String(record.total_amount) : '',
+        event_type: knownTypes.indexOf(record.event_type) >= 0 ? record.event_type : '',
         candidates: this._buildProductCandidates(record),
         submitting: false,
       },
@@ -490,6 +543,9 @@ Page({
       if (name && !seen[name]) { seen[name] = true; list.push(name); }
     }
     if (record && record.product) add(record.product);
+    // 词表外品名候选（v3.3）：product 为空时后端给的剥离数量词后的品名（product_word），
+    // 是纠错时唯一的品名线索，放进 chips 让摊主一键选中。
+    if (record && record.product_word) add(record.product_word);
     var parsedCands = (record && (record.candidates || record.product_candidates)) || [];
     for (var i = 0; i < parsedCands.length; i++) {
       add(typeof parsedCands[i] === 'string' ? parsedCands[i] : parsedCands[i] && parsedCands[i].name);
@@ -500,10 +556,11 @@ Page({
   },
 
   // SKU 名缓存：过期时后台静默刷新，失败不打扰（旧缓存仍可用）。
+  // /catalog/skus 已启用分页（默认 20/页），全量缓存改走 app.fetchAllSkus 循环拉取。
   _refreshSkuCacheIfNeeded: function () {
     if (!storage.isSkuCacheStale()) return;
-    app.request({ url: '/catalog/skus' }).then(function (data) {
-      var names = (data || []).map(function (s) { return s && s.name; });
+    app.fetchAllSkus().then(function (skus) {
+      var names = (skus || []).map(function (s) { return s && s.name; });
       storage.setSkuNames(names);
     }).catch(function () { /* 静默：纠错 chips 还有解析商品名兜底 */ });
   },
@@ -530,6 +587,25 @@ Page({
   },
   onCorrectAmount: function (e) {
     this.setData({ correction: Object.assign({}, this.data.correction, { amount: e.detail.value }) });
+  },
+
+  // ── 类型/方向切换（v3.3）：纠错卡四选一 chips（进货/销售/损耗/支出）──
+  // 数据流：点击 → correction.event_type → submitCorrection 里与解析值比对，
+  // 不同才写入 corrections.event_type → POST /voice/correct → 后端改方向后 confirm。
+  pickTypeChip: function (e) {
+    var value = e.currentTarget.dataset.value;
+    if (!value || !this.data.correction) return;
+    this.setData({ correction: Object.assign({}, this.data.correction, { event_type: value }) });
+  },
+
+  // ── 词表外品名建议（v3.3）：点击候选词即填为商品，并带出纠错卡 ──
+  // 不做本地直填后直接确认：confirm 只上报 voice_log_id，后端不认识本地填的词会
+  // 直接失败（未找到商品/缺字段）。必须走纠错卡「保存并确认」→ corrections.product
+  // 提交给后端，之后 _confirmEvent 的确认链路（含「去添加」建档引导）才走得通。
+  pickSuggestedProduct: function (e) {
+    var ds = (e && e.currentTarget && e.currentTarget.dataset) || {};
+    if (!ds.name) return;
+    this.openCorrection(Object.assign({}, ds.record || this.data.parsed || {}, { product: ds.name }));
   },
 
   // ── 重说这一项：只重录纠错卡这一笔，识别结果自动回填 ──
@@ -591,7 +667,10 @@ Page({
     });
   },
 
-  // 保存纠错并立即确认（协议与旧版完全一致，仅采集方式升级）。
+  // 保存纠错并立即确认（协议与旧版一致，v3.3 起支持类型纠错）。
+  // POST /voice/correct
+  //   { voice_log_id, corrections: { product?, quantity?, total_amount?, event_type? } }
+  // （total_amount / event_type 均属后端 VoiceCorrection 白名单字段，金额 0~1000000。）
   submitCorrection: function () {
     var c = this.data.correction;
     if (!c || c.submitting) return;
@@ -615,11 +694,17 @@ Page({
     if (c.amount !== '' && isNaN(aNum)) {
       wx.showToast({ title: '金额请输入数字', icon: 'none' }); return;
     }
+    // 契约对齐：后端 corrections 金额白名单 0~1000000，前端先拦一次省一次失败往返。
+    if (c.amount !== '' && (aNum < 0 || aNum > 1000000)) {
+      wx.showToast({ title: '金额需在 0~1000000 元之间', icon: 'none' }); return;
+    }
 
     var corrections = {};
     if (product && product !== (record.product || '')) corrections.product = product;
     if (c.quantity !== '' && qNum !== record.quantity) corrections.quantity = qNum;
     if (c.amount !== '' && aNum !== record.total_amount) corrections.total_amount = aNum;
+    // 类型/方向纠错（v3.3）：只在纠错卡里改过且与解析值不同时才提交（四值枚举）。
+    if (c.event_type && c.event_type !== (record.event_type || '')) corrections.event_type = c.event_type;
 
     if (Object.keys(corrections).length === 0) {
       wx.showToast({ title: '没有改动，直接点「确认入账」即可', icon: 'none' });

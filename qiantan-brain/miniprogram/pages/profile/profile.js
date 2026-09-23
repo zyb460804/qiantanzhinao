@@ -7,6 +7,7 @@
 var app = getApp();
 var Theme = require('../../utils/theme');
 var Permissions = require('../../utils/permissions');
+var TimeFormat = require('../../utils/time-format'); // QA2-15 同类：UTC ISO 时间解析/格式化
 
 Page({
   data: {
@@ -155,7 +156,14 @@ Page({
         success: function (res) {
           if (res.confirm) {
             app.exitStaff();
+            // QA2-06：退出后立即重拉本页身份态（身份条/工具格/快捷操作），
+            // 不再依赖切页 onShow 自愈；同时用 owner token 重拉经营快照，
+            // 清掉员工 token 在飞请求 401 竞态留下的「数据加载失败」横幅。
+            self._syncStaffMode();
             self._refreshStaffPresence();
+            self.loadSnapshot();
+            // 设备区在员工身份下可能因权限 403 留下错误态，同样用 owner token 立即重拉
+            self.loadDevices();
             wx.showToast({ title: '已恢复老板身份', icon: 'success' });
           }
         },
@@ -228,6 +236,9 @@ Page({
   // ── ① 经营快照 ──────────────────────────────
   loadSnapshot: function (onSuccess, onError) {
     var self = this;
+    // 代际守卫（QA2-06）：身份切换/退出后旧 token 的在飞请求若 401/后到，
+    // 不允许回写页面（避免刚清掉的错误横幅/旧身份态被旧响应翻回来）。
+    var gen = (this._snapshotGen = (this._snapshotGen || 0) + 1);
     this.setData({ snapshotLoading: true });
 
     Promise.all([
@@ -236,6 +247,7 @@ Page({
       // /reports/daily 不返回 week_total_revenue，改从 /reports/weekly 取 week_revenue
       app.request({ url: '/reports/weekly' }).catch(function () { return null; }),
     ]).then(function (results) {
+      if (gen !== self._snapshotGen) return;
       var dash = results[0];
       var daily = results[1];
       var weekly = results[2];
@@ -276,6 +288,7 @@ Page({
       });
       if (onSuccess) onSuccess();
     }).catch(function () {
+      if (gen !== self._snapshotGen) return;
       self.setData({ snapshotLoading: false, snapshotError: true });
       if (onError) onError();
     });
@@ -302,9 +315,11 @@ Page({
     app.request({ url: '/devices' }).catch(function () { return null; }).then(function (data) {
       if (!data || !Array.isArray(data)) { self.setData({ deviceError: true }); return; }
       var devices = data.slice(0, 2).map(function (d) {
-        var lastBeat = d.last_heartbeat ? new Date(d.last_heartbeat) : null;
-        var minsAgo = lastBeat ? Math.floor((Date.now() - lastBeat.getTime()) / 60000) : null;
-        var status = !lastBeat ? 'offline' : (minsAgo < 5 ? 'online' : (minsAgo < 30 ? 'unstable' : 'offline'));
+        // QA2-15 同类：last_heartbeat 为 UTC ISO 串，new Date() 直析会按本地时区误读 8 小时，
+        // 统一走 utils/time-format 按 UTC 解析真实时刻再算相对时间。
+        var lastBeatTs = TimeFormat.toTimestamp(d.last_heartbeat);
+        var minsAgo = isNaN(lastBeatTs) ? null : Math.floor((Date.now() - lastBeatTs) / 60000);
+        var status = lastBeatTs === null || isNaN(lastBeatTs) ? 'offline' : (minsAgo < 5 ? 'online' : (minsAgo < 30 ? 'unstable' : 'offline'));
         // 后端 /devices 返回字段为 device_name / device_type (app/routers/device.py:42-43)，
         // 同时兼容旧字段 name / type 以防历史调用方破坏。
         var typeLabelMap = { scale: '智能秤', camera: '摄像头', esl: '价签', printer: '打印机' };

@@ -21,6 +21,7 @@ from app.models.environment import EnvironmentRecord
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
 from app.models.product import ProductCategory
+from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 from app.services.batch import count_expiring_batches, get_active_batches
 from app.services.lifecycle import calc_batch_status
@@ -37,25 +38,43 @@ async def _estimate_cogs_twin(
     Sale records populated with unit_cost via FIFO batch consumption are used
     directly. Records without unit_cost fall back to the 30-day purchase average
     for the product.
+
+    QA-01：与 reports._estimate_cogs 同步——退款回库（quantity>0）按
+    qty×unit_cost 从成本中冲减，与日结 _estimate_daily_cogs 口径对齐；
+    quantity=0 的不回库退款无成本影响。
     """
     cogs = 0.0
     unknown_products: dict[int, float] = {}
 
     for r in records:
-        if r.event_type != "sale":
-            continue
-        if r.unit_cost is not None:
-            cogs += abs(float(r.quantity)) * float(r.unit_cost)
-        else:
-            pid = r.product_id
-            unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
+        if r.event_type == "sale":
+            if r.unit_cost is not None:
+                cogs += abs(float(r.quantity)) * float(r.unit_cost)
+            else:
+                pid = r.product_id
+                unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
+        elif r.event_type == "refund":
+            # QA-01：回库退款冲减成本（quantity=0 的不回库退款无影响）
+            refund_qty = float(r.quantity or 0)
+            if refund_qty > 0:
+                if r.unit_cost is not None:
+                    cogs -= refund_qty * float(r.unit_cost)
+                else:
+                    pid = r.product_id
+                    unknown_products[pid] = unknown_products.get(pid, 0) - refund_qty
 
     if unknown_products:
         cutoff = cst_days_ago_bounds_utc(cutoff_days)[0]
+        # QA-15：兜底成本口径改为加权平均 sum(qty×unit_cost)/sum(qty)（按采购
+        # 量加权），与 reports._estimate_cogs 一致——原简单平均在多批次不同
+        # 进价时系统性偏离实际成本。
         cost_query = (
             select(
                 InventoryRecord.product_id,
-                func.avg(InventoryRecord.unit_cost).label("avg_cost"),
+                func.coalesce(
+                    func.sum(InventoryRecord.unit_cost * InventoryRecord.quantity), 0
+                ).label("cost_sum"),
+                func.coalesce(func.sum(InventoryRecord.quantity), 0).label("qty_sum"),
             )
             .where(
                 InventoryRecord.merchant_id == merchant_id,
@@ -68,7 +87,11 @@ async def _estimate_cogs_twin(
             .group_by(InventoryRecord.product_id)
         )
         cost_result = await db.execute(cost_query)
-        avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
+        avg_costs: dict[int, float] = {}
+        for row in cost_result:
+            qty_sum = float(row.qty_sum or 0)
+            if qty_sum > 0:
+                avg_costs[row.product_id] = float(row.cost_sum or 0) / qty_sum
         for pid, qty in unknown_products.items():
             avg_cost = avg_costs.get(pid, 0)
             cogs += qty * avg_cost
@@ -79,11 +102,18 @@ async def _estimate_cogs_twin(
 @router.get("/dashboard", response_model=AnyResponse)
 async def get_dashboard(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
+    # QA-03：经营台看板含利润指标，挂 view_profit 权限（此前 cashier 也可查看）
+    _perm=Depends(require_permission("view_profit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Get homepage dashboard: today's revenue/cost/profit + inventory summary.
 
-    Profit = estimated gross profit (revenue - estimated COGS), not cash flow.
+    经营台三指标统一口径（QA 拍板）：
+      收入 today_revenue  = 净销售额（销售 - 退款，库存台账口径）；
+      成本 today_cost     = 已售成本（COGS，FIFO 实际成本优先，30 日采购均价兜底）；
+      毛利 today_profit   = 收入 - 成本。
+    采购支出（进货全额）单列 today_purchase_cost，不与「成本」混用；
+    cash_balance（现金结余）= 净收入 - 采购支出，仍是现金流口径。
     """
     # event_time 为 naive UTC，日界按 CST 业务日切（审计 C4）
     today_start, _today_end = cst_day_bounds_utc(cst_today())
@@ -97,17 +127,22 @@ async def get_dashboard(
     today_result = await db.execute(today_query)
     today_records = today_result.scalars().all()
 
-    today_revenue = round(
-        sum(float(r.total_amount or 0) for r in today_records if r.event_type == "sale"), 2
+    # 净销售额 = 销售 - 退款（与日结 total_sales、日报 revenue 同口径，P2-5）
+    gross_sales = sum(float(r.total_amount or 0) for r in today_records if r.event_type == "sale")
+    refund_total = sum(
+        float(r.total_amount or 0) for r in today_records if r.event_type == "refund"
     )
-    today_cost = round(
+    today_revenue = round(gross_sales - refund_total, 2)
+    # 采购支出 = 当日进货全额（现金流口径，单独指标，不进毛利计算）
+    today_purchase_cost = round(
         sum(float(r.total_amount or 0) for r in today_records if r.event_type == "purchase"), 2
     )
 
-    # Estimated COGS for accurate gross profit
+    # Estimated COGS: 「成本」指标 = 已售成本（与毛利口径一致）
     estimated_cogs = await _estimate_cogs_twin(db, merchant_id, today_records)
-    estimated_gross_profit = round(today_revenue - estimated_cogs, 2)
-    cash_balance = round(today_revenue - today_cost, 2)
+    today_cost = estimated_cogs
+    estimated_gross_profit = round(today_revenue - today_cost, 2)
+    cash_balance = round(today_revenue - today_purchase_cost, 2)
     today_profit = estimated_gross_profit  # Use gross profit for display
 
     # Total inventory: sum of all non-voided quantity for this merchant
@@ -131,6 +166,8 @@ async def get_dashboard(
             "today_profit": today_profit,
             "estimated_gross_profit": estimated_gross_profit,
             "estimated_cogs": estimated_cogs,
+            "today_purchase_cost": today_purchase_cost,
+            "today_refund_total": round(refund_total, 2),
             "cash_balance": cash_balance,
             "total_inventory_qty": max(0, total_inventory_qty),
             "expiring_count": expiring_count,

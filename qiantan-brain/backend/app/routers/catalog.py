@@ -6,9 +6,9 @@ Models 已存在于 catalog.py，本路由提供摊主日常管理所需的全�
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +26,9 @@ from app.models.catalog import (
     UnitConversion,
 )
 from app.models.merchant import Merchant
-from app.schemas.common import AnyResponse
+from app.models.staff import StaffMember
+from app.routers.staff import PermissionContext, require_permission
+from app.schemas.common import AnyResponse, PaginatedResponse
 from app.services.supplier_scoring import calculate_supplier_score
 
 
@@ -34,13 +36,72 @@ from app.services.supplier_scoring import calculate_supplier_score
 # 导出/追溯二维码等消费端）。创建/更新时统一剥离，而非期望每个消费端转义。
 _DISPLAY_NAME_BAD_CHARS = str.maketrans("", "", "<>\"'`")
 
+# RA-13：零宽/双向控制字符 —— 肉眼不可见，可夹带伪装与混淆（「白\u200b菜」
+# 与「白菜」显示全同但字节不同）。净化时先剥，再做 NFKC 归一化。
+#   \u200b\u200c\u200d  零宽空格/非连接符/连接符
+#   \u2060              词连接符（同族零宽）
+#   \ufeff              零宽不换行空格（BOM）
+#   \u200e\u200f        LRM/RLM 方向标记
+#   \u202a-\u202e       双向格式覆盖
+#   \u2066-\u2069       双向隔离符（复查探针夹带的 \u2066 属此族）
+_INVISIBLE_CHARS = str.maketrans(
+    "",
+    "",
+    "\u200b\u200c\u200d\u2060\ufeff\u200e\u200f"
+    "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069",
+)
+
 
 def _sanitize_display_name(raw) -> str:
-    """剥离名称中的脚本/标签字符并压平空白；全空则返回空串由调用方拒绝。"""
-    import re as _re
+    """剥离名称中的脚本/标签字符并压平空白；全空则返回空串由调用方拒绝。
 
-    name = str(raw or "").translate(_DISPLAY_NAME_BAD_CHARS)
+    RA-13：净化链 = 剥零宽/双向控制字符 → NFKC 归一化 → 剥 <> " ' `。
+    NFKC 把全角 ＜ ＞ ＂ ＇ 折叠为 ASCII（随即被坏字符表剥除），堵住
+    「＜svg onload=…＞」借全角尖括号绕过净化的口子。注意 NFKC 也会把
+    全角数字/字母折叠为半角（１２３→123、ＡＢＣ→ABC）——只影响新写入
+    的展示文本（净化只在创建/更新入口调用），历史数据不做回写清洗。
+    """
+    import re as _re
+    import unicodedata as _ud
+
+    name = str(raw or "").translate(_INVISIBLE_CHARS)
+    name = _ud.normalize("NFKC", name).translate(_DISPLAY_NAME_BAD_CHARS)
     return _re.sub(r"\s+", " ", name).strip()
+
+
+# SKU 售价上限：与 expense.py 费用金额上限同口径（P1-5 修复沿用）。
+_MAX_SALE_PRICE = Decimal("1000000")
+
+
+def _parse_sale_price(raw):
+    """QA-11：安全解析售价 —— None/'' → None；"abc"/"NaN" 等非数字串此前
+    直抛 Decimal InvalidOperation 导致 500（与费用接口 400 防护口径不一致）。
+    现参照 expense.py 对金额的防护模式：先包 try 解析 → 422「售价格式不正确」，
+    再做有限性 + 区间校验（0 ~ 1000000），口径与费用金额一致。
+
+    RA-14：校验顺序与 pos._resolve_unit_price 完全对齐 —— 先取请求值的
+    浮点二进制真实值（Decimal(float(x))，JSON 数字/数字串经 float 解析
+    得到同一 float），ROUND_HALF_UP 量化 2 位后再判 ≤1e6。此前按 str 精确
+    十进制直判，1000000.004 在 catalog 422 而 POS 量化后恰为 1000000.00
+    放行，两端口边界不一致。
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        price = Decimal(float(raw))
+    except (InvalidOperation, TypeError, ValueError, OverflowError):
+        raise HTTPException(status_code=422, detail="售价格式不正确") from None
+    # NaN/Infinity 解析不报错但不可比较/不可入账，与越界售价一并拒绝
+    if not price.is_finite():
+        raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
+    try:
+        price = price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        # 超出 Decimal 上下文精度的天文数字：量化即拒绝，不泄漏为 500
+        raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间") from None
+    if not (Decimal("0") <= price <= _MAX_SALE_PRICE):
+        raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
+    return price
 
 
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
@@ -71,21 +132,52 @@ def _d(v) -> Decimal:
 # SKU 管理
 # ═══════════════════════════════════════════════════════════
 
+# N8：SKU 列表排序白名单（限响应内可排序字段），非法值 422。
+# 附 id 作稳定 tiebreaker，保证分页窗口不因同值行序漂移而重叠/丢行。
+_SKU_ORDERABLE_FIELDS: dict[str, object] = {
+    "name": ProductSKU.name,
+    "category_group": ProductSKU.category_group,
+    "default_sale_price": ProductSKU.default_sale_price,
+    "shelf_life_hours": ProductSKU.shelf_life_hours,
+    "created_at": ProductSKU.created_at,
+}
 
-@router.get("/skus", response_model=AnyResponse)
+
+@router.get("/skus", response_model=PaginatedResponse)
 async def list_skus(
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数，上限 100"),
+    order_by: str = Query("name", description="排序字段（白名单）"),
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    """活跃 SKU 分页列表（N8 修复：此前 page/page_size/order_by 全被忽略、恒返回全量）。
+
+    分页信封沿用项目惯例（PaginatedResponse）：data 仍为列表，
+    meta = {page, limit, total}，与库存流水/AI 动作历史一致。
+    """
+    order_column = _SKU_ORDERABLE_FIELDS.get(order_by)
+    if order_column is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"order_by 仅支持：{'、'.join(_SKU_ORDERABLE_FIELDS)}",
+        )
+
+    filters = (
+        ProductSKU.merchant_id == merchant.id,
+        ProductSKU.is_active == True,  # noqa: E712
+    )
+    total = (
+        await db.execute(select(func.count()).select_from(ProductSKU).where(*filters))
+    ).scalar() or 0
     skus = (
         (
             await db.execute(
                 select(ProductSKU)
-                .where(
-                    ProductSKU.merchant_id == merchant.id,
-                    ProductSKU.is_active == True,  # noqa: E712
-                )
-                .order_by(ProductSKU.name)
+                .where(*filters)
+                .order_by(order_column, ProductSKU.id)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
             )
         )
         .scalars()
@@ -104,6 +196,7 @@ async def list_skus(
             }
             for s in skus
         ],
+        "meta": {"page": page, "limit": page_size, "total": total},
     }
 
 
@@ -152,19 +245,17 @@ async def create_sku(
     # P2-1 修复：名称长度上限（此前 200 字名称可直接落库撑爆列表/卡片）。
     if len(name) > 50:
         raise HTTPException(status_code=422, detail="商品名称不能超过 50 个字")
-    # P1-5 修复：售价上下限（此前 -1 与 1e13 均落库成功）。
-    sale_price = body.get("default_sale_price")
-    if sale_price is not None and sale_price != "":
-        sale_price = Decimal(str(sale_price))
-        if not (Decimal("0") <= sale_price <= Decimal("1000000")):
-            raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
-    else:
-        sale_price = None
+    # QA-28：计量单位长度上限 ≤16 字（此前 300 字任意串可直接落库）。
+    canonical_unit = str(body.get("canonical_unit") or "斤").strip()
+    if len(canonical_unit) > 16:
+        raise HTTPException(status_code=422, detail="计量单位不能超过 16 个字")
+    # P1-5 修复：售价上下限（此前 -1 与 1e13 均落库成功）；QA-11：非数字串 → 422。
+    sale_price = _parse_sale_price(body.get("default_sale_price"))
     sku = ProductSKU(
         merchant_id=merchant.id,
         name=name,
         category_group=body.get("category_group"),
-        canonical_unit=body.get("canonical_unit", "斤"),
+        canonical_unit=canonical_unit,
         shelf_life_hours=body.get("shelf_life_hours", 72),
         default_sale_price=sale_price,
     )
@@ -190,10 +281,18 @@ async def update_sku(
     body: dict,
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
+    # QA-02：改价属高风险操作，此前未挂权限装饰器，cashier 员工可把任意 SKU
+    # 价格 3.5 改成 0.01。现与文件内其他端点同款挂 require_permission("change_price")
+    # （owner/manager 有此权限，cashier 无 → 403）。
+    _perm: PermissionContext = Depends(require_permission("change_price")),
 ):
     sku = await db.get(ProductSKU, sku_id)
     if not sku or sku.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="SKU不存在")
+    if "canonical_unit" in body and body["canonical_unit"] is not None:
+        # QA-28：更新路径同样限制单位长度 ≤16 字。
+        if len(str(body["canonical_unit"]).strip()) > 16:
+            raise HTTPException(status_code=422, detail="计量单位不能超过 16 个字")
     for field in ("category_group", "canonical_unit"):
         if field in body:
             setattr(sku, field, body[field])
@@ -206,15 +305,18 @@ async def update_sku(
         sku.shelf_life_hours = int(body["shelf_life_hours"])
     if "default_sale_price" in body:
         old_price = sku.default_sale_price
-        raw_price = body["default_sale_price"]
-        new_price = None
-        if raw_price is not None and raw_price != "":
-            new_price = Decimal(str(raw_price))
-            # P1-5：更新路径（含 POS 改价）同样拒绝越界售价
-            if not (Decimal("0") <= new_price <= Decimal("1000000")):
-                raise HTTPException(status_code=422, detail="售价必须在 0 ~ 1000000 之间")
+        # QA-11：更新路径同样包 try 解析，非数字串 → 422 而非 500
+        new_price = _parse_sale_price(body["default_sale_price"])
         sku.default_sale_price = new_price
         if old_price and new_price is not None and old_price != new_price:
+            # QA-33：changed_by 记录操作者身份（员工 PIN 登录后 token 携带
+            # staff_id claim，经 require_permission 解析为 _perm.staff_id），
+            # 此前恒写死 "merchant"，越权改价无法追责。取不到员工名时兜底"老板"。
+            operator = "老板"
+            if _perm.staff_id:
+                staff = await db.get(StaffMember, _perm.staff_id)
+                if staff:
+                    operator = staff.name
             db.add(
                 PriceHistory(
                     merchant_id=merchant.id,
@@ -222,7 +324,7 @@ async def update_sku(
                     old_price=old_price,
                     new_price=new_price,
                     reason="manual",
-                    changed_by="merchant",
+                    changed_by=operator,
                 )
             )
     if "is_active" in body:
@@ -256,6 +358,11 @@ async def list_aliases(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # N9：主资源不存在（含跨商户越权探测）→ 404，与 add_alias/更新接口语义一致；
+    # 此前返回 200 空数组，无法区分「没有别名」和「SKU 不存在」。
+    sku = await db.get(ProductSKU, sku_id)
+    if not sku or sku.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="SKU不存在")
     aliases = (
         (
             await db.execute(
@@ -325,6 +432,11 @@ async def list_specs(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # 与 aliases/price-history 同语义：主资源不存在（含跨商户越权探测）→ 404，
+    # 区分「没有规格」和「SKU 不存在」。
+    sku = await db.get(ProductSKU, sku_id)
+    if not sku or sku.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="SKU不存在")
     specs = (
         (
             await db.execute(
@@ -585,6 +697,10 @@ async def sku_price_history(
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
+    # N9：同 aliases —— SKU 不存在 / 不属于本商户 → 404，而非 200 空数组。
+    sku = await db.get(ProductSKU, sku_id)
+    if not sku or sku.merchant_id != merchant.id:
+        raise HTTPException(status_code=404, detail="SKU不存在")
     rows = (
         (
             await db.execute(
@@ -626,6 +742,21 @@ async def list_suppliers(
     db: AsyncSession = Depends(get_db),
 ):
     from app.services.accounts_service import get_supplier_balance
+
+    # QA2-13/RA-12 补口：limit≤0 → 空列表（与 pos-orders/voice-logs/inventory
+    # -history 三域语义一致）。此前 min(limit, 200) 对负数无防护，SQLite 把
+    # LIMIT -N 视作无上限返回全量。
+    if limit <= 0:
+        return {
+            "code": 0,
+            "data": {
+                "items": [],
+                "total": 0,
+                "blacklisted_count": 0,
+                "offset": offset,
+                "limit": 0,
+            },
+        }
 
     base = select(Supplier).where(
         Supplier.merchant_id == merchant.id,
@@ -1005,13 +1136,24 @@ async def create_supplier(
         raise HTTPException(status_code=400, detail="供应商名称不能为空")
     if len(name) > 50:
         raise HTTPException(status_code=422, detail="供应商名称不能超过 50 个字")
+    # QA-08：contact/address 属回显文本，此前未净化，`<script>`/`onerror`/
+    # `' or '1'='1` 等 payload 原样落库（存储型 XSS 清洗不一致）。与名称类
+    # 字段同款净化，保持既有清理强度不减弱。
+    contact = _sanitize_display_name(body.get("contact")) or None
+    address = _sanitize_display_name(body.get("address")) or None
+    # QA-28：最小起订量不允许负数（此前 -5 可直接落库）。
+    min_order_qty = None
+    if body.get("min_order_qty") not in (None, ""):
+        min_order_qty = Decimal(str(body["min_order_qty"]))
+        if min_order_qty < 0:
+            raise HTTPException(status_code=422, detail="最小起订量不能为负数")
     s = Supplier(
         merchant_id=merchant.id,
         name=name,
-        contact=body.get("contact"),
-        address=body.get("address"),
+        contact=contact,
+        address=address,
         business_category=body.get("business_category"),
-        min_order_qty=Decimal(str(body["min_order_qty"])) if body.get("min_order_qty") else None,
+        min_order_qty=min_order_qty,
         lead_time_hours=body.get("lead_time_hours"),
         default_credit_days=body.get("default_credit_days"),
     )
@@ -1031,9 +1173,13 @@ async def update_supplier(
     s = await db.get(Supplier, supplier_id)
     if not s or s.merchant_id != merchant.id:
         raise HTTPException(status_code=404, detail="供应商不存在")
-    for f in ("contact", "address", "business_category"):
-        if f in body:
-            setattr(s, f, body[f])
+    # QA-08：更新路径同样净化 contact/address（与 create 路径同款规则）。
+    if "contact" in body:
+        s.contact = _sanitize_display_name(body["contact"]) or None
+    if "address" in body:
+        s.address = _sanitize_display_name(body["address"]) or None
+    if "business_category" in body:
+        s.business_category = body["business_category"]
     if "name" in body:
         new_name = _sanitize_display_name(body["name"])
         if not new_name:
@@ -1042,7 +1188,13 @@ async def update_supplier(
             raise HTTPException(status_code=422, detail="供应商名称不能超过 50 个字")
         s.name = new_name
     if "min_order_qty" in body:
-        s.min_order_qty = Decimal(str(body["min_order_qty"]))
+        # QA-28：更新路径同样拒绝负数最小起订量。
+        moq = (
+            Decimal(str(body["min_order_qty"])) if body["min_order_qty"] not in (None, "") else None
+        )
+        if moq is not None and moq < 0:
+            raise HTTPException(status_code=422, detail="最小起订量不能为负数")
+        s.min_order_qty = moq
     if "lead_time_hours" in body:
         s.lead_time_hours = int(body["lead_time_hours"])
     if "default_credit_days" in body:

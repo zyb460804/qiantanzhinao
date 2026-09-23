@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Literal, TypedDict
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,10 +21,12 @@ from app.core.timezone import (
 )
 from app.database import get_db
 from app.models.batch import BatchLifecycle
+from app.models.catalog import ProductSKU
 from app.models.inventory import InventoryRecord
 from app.models.product import ProductCategory
 from app.models.recommendation import Recommendation
 from app.models.voice import VoiceLog
+from app.routers.staff import require_permission
 from app.schemas.common import AnyResponse
 
 
@@ -74,25 +76,45 @@ async def _estimate_cogs(
     Sale records populated with unit_cost via FIFO batch consumption are used
     directly. Records without unit_cost fall back to the 30-day purchase average
     for the product.
+
+    QA-01：退款回库（event_type='refund' 且 quantity>0）按 qty×unit_cost 从
+    成本中冲减，与日结 _estimate_daily_cogs 口径对齐——此前只算 sale，
+    回库退款不冲回成本，同日报表/看板与日结的「已售成本」打架；
+    quantity=0 的不回库退款无成本影响。unit_cost 缺失的回库退款在兜底
+    路径按净量冲减（与日结同口径）。
     """
     cogs = 0.0
     unknown_products: dict[int, float] = {}
 
     for r in records:
-        if r.event_type != "sale":
-            continue
-        if r.unit_cost is not None:
-            cogs += abs(float(r.quantity)) * float(r.unit_cost)
-        else:
-            pid = r.product_id
-            unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
+        if r.event_type == "sale":
+            if r.unit_cost is not None:
+                cogs += abs(float(r.quantity)) * float(r.unit_cost)
+            else:
+                pid = r.product_id
+                unknown_products[pid] = unknown_products.get(pid, 0) + abs(float(r.quantity))
+        elif r.event_type == "refund":
+            # QA-01：回库退款冲减成本（quantity=0 的不回库退款无影响）
+            refund_qty = float(r.quantity or 0)
+            if refund_qty > 0:
+                if r.unit_cost is not None:
+                    cogs -= refund_qty * float(r.unit_cost)
+                else:
+                    pid = r.product_id
+                    unknown_products[pid] = unknown_products.get(pid, 0) - refund_qty
 
     if unknown_products:
         cutoff = cst_days_ago_bounds_utc(cutoff_days)[0]
+        # QA-15：兜底成本口径改为加权平均 sum(qty×unit_cost)/sum(qty)（按采购
+        # 量加权）——原简单平均 func.avg(unit_cost) 在多批次不同进价时系统性
+        # 偏离实际成本（实测偏差可达 25%）。
         cost_query = (
             select(
                 InventoryRecord.product_id,
-                func.avg(InventoryRecord.unit_cost).label("avg_cost"),
+                func.coalesce(
+                    func.sum(InventoryRecord.unit_cost * InventoryRecord.quantity), 0
+                ).label("cost_sum"),
+                func.coalesce(func.sum(InventoryRecord.quantity), 0).label("qty_sum"),
             )
             .where(
                 InventoryRecord.merchant_id == merchant_id,
@@ -105,7 +127,11 @@ async def _estimate_cogs(
             .group_by(InventoryRecord.product_id)
         )
         cost_result = await db.execute(cost_query)
-        avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
+        avg_costs: dict[int, float] = {}
+        for row in cost_result:
+            qty_sum = float(row.qty_sum or 0)
+            if qty_sum > 0:
+                avg_costs[row.product_id] = float(row.cost_sum or 0) / qty_sum
         for pid, qty in unknown_products.items():
             avg_cost = avg_costs.get(pid, 0)
             cogs += qty * avg_cost
@@ -113,10 +139,32 @@ async def _estimate_cogs(
     return round(cogs, 2)
 
 
+def _product_display_name(
+    product_id: int,
+    sku_id: uuid.UUID | None,
+    sku_names: dict[uuid.UUID, str],
+    product_names: dict[int, str],
+) -> str:
+    """商品展示名，与 /inventory/current 命名口径统一（QA 对齐项）。
+
+    同一字段来源：优先 ProductSKU.name（inventory/current 的 sku_name），
+    其次 ProductCategory.name（其 product_name），兜底同样为「商品{id}」。
+    修复：slow_moving 此前只查品类表，SKU 商品落兜底名「商品13」，
+    与库存页同一商品显示的 SKU 标准名不一致。
+    """
+    if sku_id is not None:
+        sku_name = sku_names.get(sku_id)
+        if sku_name:
+            return sku_name
+    return product_names.get(product_id, f"商品{product_id}")
+
+
 @router.get("/daily", response_model=AnyResponse)
 async def daily_report(
     date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
+    # QA-03：利润族报表挂 view_profit 权限（此前 cashier 等员工也可查看老板利润）
+    _perm=Depends(require_permission("view_profit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Daily business report — revenue, cost, profit, top products, AI summary.
@@ -174,10 +222,13 @@ async def daily_report(
         revenue_change = round((revenue - yesterday_revenue) / yesterday_revenue * 100, 1)
 
     # --- Voice count for the target CST business day (created_at is naive UTC) ---
+    # QA-32：口径与 /voice/today-count 对齐，只计已入账（confirmed）——此前
+    # pending/parsed 草稿与 voided 也计数，「今日已记 N 笔」与日报数字打架。
     voice_query = select(func.count(VoiceLog.id)).where(
         VoiceLog.merchant_id == merchant_id,
         VoiceLog.created_at >= today_start,
         VoiceLog.created_at < today_end,
+        VoiceLog.status == "confirmed",
     )
     voice_result = await db.execute(voice_query)
     voice_count = int(voice_result.scalar() or 0)
@@ -194,7 +245,7 @@ async def daily_report(
     expiring_result = await db.execute(expiring_query)
     expiring_count = int(expiring_result.scalar() or 0)
 
-    # --- Top 3 products by sales ---
+    # --- Top 3 products by sales（净额口径，QA-14）---
     product_sales: dict[int, dict[str, float]] = {}
     product_ids: set[int] = set()
     for r in today_records:
@@ -205,6 +256,16 @@ async def daily_report(
                 product_sales[pid] = {"qty": 0.0, "revenue": 0.0}
             product_sales[pid]["qty"] += abs(float(r.quantity))
             product_sales[pid]["revenue"] += float(r.total_amount or 0) if r.total_amount else 0
+        elif r.event_type == "refund":
+            # QA-14：退款从销量/营收中冲减——同响应 revenue 已是净额（销售-退款），
+            # 此前 top_products 按原始流水统计，退款订单可永久污染排名。
+            # qty 只冲减回库退款（quantity>0）；不回库退款 quantity=0，仅冲营收。
+            pid = r.product_id
+            product_ids.add(pid)
+            if pid not in product_sales:
+                product_sales[pid] = {"qty": 0.0, "revenue": 0.0}
+            product_sales[pid]["qty"] -= float(r.quantity or 0)
+            product_sales[pid]["revenue"] -= float(r.total_amount or 0) if r.total_amount else 0
 
     product_names = {}
     if product_ids:
@@ -229,17 +290,33 @@ async def daily_report(
     )[:3]
 
     # --- Slow-moving products (in stock but no sales today) ---
+    # 命名口径与 /inventory/current 统一：SKU 标准名优先（sku_id → ProductSKU.name），
+    # 退化品类名，兜底「商品{id}」——见 _product_display_name。
     slow_moving = []
     stock_map: dict[int, float] = {}
+    stock_sku: dict[int, uuid.UUID | None] = {}
+    sku_names: dict[uuid.UUID, str] = {}
+    record_sku_ids = {r.sku_id for r in today_records if r.sku_id is not None}
+    if record_sku_ids:
+        sku_name_result = await db.execute(
+            select(ProductSKU).where(ProductSKU.id.in_(record_sku_ids))
+        )
+        sku_names = {s.id: s.name for s in sku_name_result.scalars().all()}
     for r in today_records:
         pid = r.product_id
         stock_map[pid] = stock_map.get(pid, 0) + float(r.quantity)
+        # 同一商品多行流水时保留任一非空 sku_id（当前 category:sku 一对一）
+        if r.sku_id is not None or pid not in stock_sku:
+            stock_sku[pid] = r.sku_id
     for pid, qty in stock_map.items():
         if qty > 0 and pid not in product_sales:
             slow_moving.append(
                 {
                     "product_id": pid,
-                    "product_name": product_names.get(pid, f"商品{pid}"),
+                    "sku_id": str(stock_sku.get(pid)) if stock_sku.get(pid) else None,
+                    "product_name": _product_display_name(
+                        pid, stock_sku.get(pid), sku_names, product_names
+                    ),
                     "stock_qty": round(qty, 1),
                 }
             )
@@ -315,6 +392,8 @@ async def daily_report(
 async def weekly_report(
     end_date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
+    # QA-03：同 /daily，挂 view_profit 权限
+    _perm=Depends(require_permission("view_profit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Weekly report — 7-day trends, rankings, weather impact, health score.
@@ -322,6 +401,9 @@ async def weekly_report(
     end_date 不传 = 以 CST 今天为窗口最后一天；传历史日期则统计
     [end_date-6, end_date] 共 7 个完整 CST 业务日，对比期为再往前 7 天。
     """
+    # 未来日期统计的是不存在的账期，此前静默返回空数据
+    if end_date and end_date > cst_today():
+        raise HTTPException(status_code=422, detail="end_date 不能晚于今天")
     anchor = end_date or cst_today()
     start_7d = cst_day_bounds_utc(anchor - timedelta(days=6))[0]
     # 窗口上界（含 anchor 全天）。默认 anchor=今天时与旧「无上界」等价；
@@ -506,6 +588,8 @@ async def weekly_report(
 async def trends_report(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     days: int = Query(default=7, ge=1, le=365),
+    # QA-03：同 /daily，挂 view_profit 权限
+    _perm=Depends(require_permission("view_profit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Revenue and profit trends over N days."""
@@ -524,10 +608,14 @@ async def trends_report(
     avg_costs = {}
     if sale_products:
         cutoff = cst_days_ago_bounds_utc(30)[0]
+        # QA-15：与 _estimate_cogs 同步改加权平均 sum(qty×uc)/sum(qty)（按采购量加权）
         cost_query = (
             select(
                 InventoryRecord.product_id,
-                func.avg(InventoryRecord.unit_cost).label("avg_cost"),
+                func.coalesce(
+                    func.sum(InventoryRecord.unit_cost * InventoryRecord.quantity), 0
+                ).label("cost_sum"),
+                func.coalesce(func.sum(InventoryRecord.quantity), 0).label("qty_sum"),
             )
             .where(
                 InventoryRecord.merchant_id == merchant_id,
@@ -539,7 +627,10 @@ async def trends_report(
             .group_by(InventoryRecord.product_id)
         )
         cost_result = await db.execute(cost_query)
-        avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
+        for row in cost_result:
+            qty_sum = float(row.qty_sum or 0)
+            if qty_sum > 0:
+                avg_costs[row.product_id] = float(row.cost_sum or 0) / qty_sum
 
     trends = []
     today = cst_today()
@@ -575,7 +666,9 @@ async def trends_report(
 async def product_ranking(
     merchant_id: uuid.UUID = Depends(get_merchant_id),
     days: int = Query(default=7, ge=1, le=365),
-    metric: str = "revenue",
+    # limit/metric 白名单校验：此前非法值（limit=-5、乱传 metric）静默回退 200
+    limit: int = Query(default=20, ge=1, le=100),
+    metric: str = Query(default="revenue", pattern="^(revenue|sales|waste)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """Product ranking by revenue, sales volume, or waste."""
@@ -639,7 +732,7 @@ async def product_ranking(
         ranking_rows,
         key=lambda row: row[sort_key],
         reverse=True,
-    )
+    )[:limit]
 
     return {"code": 0, "data": ranking}
 
@@ -648,6 +741,8 @@ async def product_ranking(
 async def monthly_report(
     end_date: date | None = None,
     merchant_id: uuid.UUID = Depends(get_merchant_id),
+    # QA-03：同 /daily，挂 view_profit 权限
+    _perm=Depends(require_permission("view_profit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Monthly report — 30-day trends, rankings, waste, health score, AI summary.
@@ -659,6 +754,9 @@ async def monthly_report(
     computes sales ranking, waste ranking, health score, and a data-driven
     AI summary server-side, giving the monthly tab the same depth as weekly.
     """
+    # 与 weekly 同口径：未来日期 422，不静默返回空数据
+    if end_date and end_date > cst_today():
+        raise HTTPException(status_code=422, detail="end_date 不能晚于今天")
     anchor = end_date or cst_today()
     days = 30
     start = cst_day_bounds_utc(anchor - timedelta(days=29))[0]
@@ -705,10 +803,14 @@ async def monthly_report(
     avg_costs = {}
     if sale_products:
         cutoff = cst_days_ago_bounds_utc(60)[0]
+        # QA-15：与 _estimate_cogs 同步改加权平均 sum(qty×uc)/sum(qty)（按采购量加权）
         cost_query = (
             select(
                 InventoryRecord.product_id,
-                func.avg(InventoryRecord.unit_cost).label("avg_cost"),
+                func.coalesce(
+                    func.sum(InventoryRecord.unit_cost * InventoryRecord.quantity), 0
+                ).label("cost_sum"),
+                func.coalesce(func.sum(InventoryRecord.quantity), 0).label("qty_sum"),
             )
             .where(
                 InventoryRecord.merchant_id == merchant_id,
@@ -721,7 +823,10 @@ async def monthly_report(
             .group_by(InventoryRecord.product_id)
         )
         cost_result = await db.execute(cost_query)
-        avg_costs = {row.product_id: float(row.avg_cost) for row in cost_result}
+        for row in cost_result:
+            qty_sum = float(row.qty_sum or 0)
+            if qty_sum > 0:
+                avg_costs[row.product_id] = float(row.cost_sum or 0) / qty_sum
 
     # Daily trends (per CST business day, anchored on end_date)
     daily_trends = []

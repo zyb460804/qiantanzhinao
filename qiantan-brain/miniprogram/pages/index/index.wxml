@@ -41,8 +41,8 @@
           <text class="weather-temp">{{weather.temp_high}}°</text><text>{{weather.weather_type}}</text>
         </view>
       </view>
-      <text class="home-amount-label">今日毛利 · 收入 ¥{{todayRevenue}} · 今日进货 ¥{{todayCost}}</text>
-      <text class="home-amount-note">毛利按已售商品成本估算，与当日进货金额分开算</text>
+      <text class="home-amount-label">今日毛利 · 收入 ¥{{todayRevenue}} · 已售成本 ¥{{todayCost}}</text>
+      <text class="home-amount-note">收入已扣退款，毛利=收入−已售成本；今日采购支出 ¥{{todayPurchaseCost}} 不计入毛利</text>
     </view>
 
     <view class="section-head"><text class="section-title">今日待办</text><text class="section-caption">只展示基于当前数据的提醒</text></view>

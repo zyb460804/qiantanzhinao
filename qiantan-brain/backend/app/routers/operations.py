@@ -183,6 +183,13 @@ async def record_waste(
     if reason not in WASTE_REASONS:
         raise HTTPException(status_code=400, detail=f"无效报损原因: {reason}")
 
+    # QA2-04：日结锁 —— 报损事件时间取服务端 utc_now()，所属 CST 业务日即
+    # cst_today()，该日已 closed → 409 拒写。口径与 pos._check_settlement_locked
+    # 完全一致（直接复用同一函数，含 reopen 后放行的语义）。
+    from app.routers.pos import _check_settlement_locked
+
+    await _check_settlement_locked(db, merchant.id)
+
     # 幂等预检：客户端重试同 idempotency_key 时直接返回原记录，
     # 避免二次 FIFO 扣库存。并发竞态由唯一约束 + 下方 commit 捕获兜底。
     if body.idempotency_key:
@@ -201,7 +208,15 @@ async def record_waste(
     # waste_cost 恒 0。语义与 POS 销售路径一致：全部被消费批次均有成本时
     # 记加权均价与实际 FIFO 成本，任一批次缺成本则置 None（不猜成本））。
     consumption = await consume_batches_fifo_costed(
-        db, merchant.id, product_id, quantity, sku_id=sku_id
+        db,
+        merchant.id,
+        product_id,
+        quantity,
+        sku_id=sku_id,
+        # RA-03：开启无主批次回退 —— 语音/POS 兜底路径产生的批次 sku_id=NULL，
+        # 带 sku_id 报损时按 sku 过滤恒「可用 0」误 409；与 POS/语音/盘点/
+        # offline 同口径（QA2-02 修复清单的"全路径"补漏）。
+        fallback_to_unowned=True,
     )
     consumed = consumption["quantity"]
     if consumed < quantity:

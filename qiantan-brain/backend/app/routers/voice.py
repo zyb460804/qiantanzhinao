@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -18,11 +19,16 @@ from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.batch import BatchLifecycle
 from app.models.catalog import ProductAlias, ProductSKU
+from app.models.expense import Expense
 from app.models.inventory import InventoryRecord
 from app.models.merchant import Merchant
 from app.models.pos import DailySettlement
 from app.models.product import ProductCategory
 from app.models.voice import VoiceLog
+
+# QA-08：语音→费用链路把 ASR 原文未净化写入 expenses.description（存储型 XSS
+# 载体），直接复用 catalog 的名称净化函数剥 <> " ' `，不复制粘贴实现。
+from app.routers.catalog import _sanitize_display_name
 from app.routers.staff import require_permission
 from app.schemas.voice import (
     VoiceConfirmRequest,
@@ -49,7 +55,11 @@ from app.services.voice_ledger import (
     sync_voice_receivables,
     void_voice_confirmed_record,
 )
-from app.services.voice_parser import parse_voice_events
+from app.services.voice_parser import (
+    detect_expense_category,
+    detect_unsupported_waste_report,
+    parse_voice_events,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -86,6 +96,44 @@ _RULES_DIR = Path(__file__).parent.parent / "rules"
 # 修复 C-9：音频上传大小/类型上限（参照 vision.py 的 _MAX_IMAGE_SIZE 模式）。
 _MAX_AUDIO_SIZE = 25 * 1024 * 1024
 _AUDIO_EXT_WHITELIST = {".wav", ".mp3", ".m4a", ".amr", ".aac", ".ogg", ".opus"}
+
+# QA-30：音频魔数嗅探——扩展名/Content-Type 均可伪造（exe 字节改名 .wav 此前
+# 被接受落盘）。按扩展名核对文件头真实格式，不匹配一律拒绝。
+#   WAV=RIFF....WAVE；MP3=ID3 或 MPEG 帧同步(FF Ex)；AAC=ADTS 同步(FF Fx)；
+#   AMR=#!AMR；M4A=偏移4的 ftyp 盒；OGG/OPUS=OggS 容器。
+_AUDIO_MAGIC_CHECKS = {
+    ".wav": lambda b: b[:4] == b"RIFF" and b[8:12] == b"WAVE",
+    ".mp3": lambda b: b[:3] == b"ID3" or (len(b) >= 2 and b[0] == 0xFF and (b[1] & 0xE0) == 0xE0),
+    ".aac": lambda b: len(b) >= 2 and b[0] == 0xFF and (b[1] & 0xF0) == 0xF0,
+    ".amr": lambda b: b[:5] == b"#!AMR",
+    ".m4a": lambda b: len(b) >= 8 and b[4:8] == b"ftyp",
+    ".ogg": lambda b: b[:4] == b"OggS",
+    ".opus": lambda b: b[:4] == b"OggS",
+}
+
+
+def _mp3_carries_executable(audio_bytes: bytes) -> bool:
+    """QA2-11：mp3 容器剥掉 ID3v2 标签后扫描可执行头（B-204 防线补口）。
+
+    ID3v2 头 10 字节，其中字节 6-9 是 synchsafe 编码的标签体大小（每字节
+    仅用低 7 位）；跳过「头 + 标签体」后再看有效载荷的前 4KB 是否携带
+    MZ（DOS/PE 头）或 PE 签名——命中即视为借合法容器夹带可执行内容。
+    """
+    if not audio_bytes.startswith(b"ID3") or len(audio_bytes) < 10:
+        return False
+    tag_size = (
+        ((audio_bytes[6] & 0x7F) << 21)
+        | ((audio_bytes[7] & 0x7F) << 14)
+        | ((audio_bytes[8] & 0x7F) << 7)
+        | (audio_bytes[9] & 0x7F)
+    )
+    payload = audio_bytes[10 + tag_size :]
+    window = payload[:4096]
+    if not window:
+        return False
+    if window.startswith(b"MZ"):
+        return True
+    return b"PE\x00\x00" in window
 
 
 def _load_product_names() -> list[str]:
@@ -195,10 +243,19 @@ async def _load_sku_terms(db: AsyncSession, merchant_id: uuid.UUID) -> list[str]
     return [t for t in [*sku_names, *aliases] if t]
 
 
+def _normalize_sku_key(value: str | None) -> str:
+    """QA2-18：SKU 匹配的归一键 —— 连字符/下划线/空格在口述中不可闻。
+
+    「F测加权菜」与建档名「F测-加权菜」两侧按同规则归一后比对；命中后
+    入账仍用 SKU 原名（product 保留原样，展示不受影响）。
+    """
+    return re.sub(r"[-_\s]+", "", str(value or ""))
+
+
 async def _match_merchant_sku(
     db: AsyncSession, merchant_id: uuid.UUID, word: str | None
 ) -> ProductSKU | None:
-    """按用户原词匹配商户 SKU：标准名精确 → 别名精确 → 模糊包含。"""
+    """按用户原词匹配商户 SKU：标准名精确 → 别名精确 → 模糊包含 → 归一比对。"""
     if not word:
         return None
     w = word.strip()
@@ -237,6 +294,42 @@ async def _match_merchant_sku(
             .limit(1)
         )
         sku = (await db.execute(q_name_like)).scalars().first()
+    # QA2-18：以上字面匹配都未命中时，按归一键（剥 -/_/空格）比对本商户
+    # 活跃 SKU 名与别名——口述「F测加权菜」应命中建档名「F测-加权菜」。
+    if sku is None and len(w) >= 2:
+        key = _normalize_sku_key(w)
+        if key:
+            candidates = (
+                (
+                    await db.execute(
+                        select(ProductSKU).where(
+                            ProductSKU.merchant_id == merchant_id,
+                            ProductSKU.is_active == True,  # noqa: E712
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for cand in candidates:
+                if _normalize_sku_key(cand.name) == key:
+                    sku = cand
+                    break
+        if sku is None and key:
+            alias_rows = (
+                await db.execute(
+                    select(ProductSKU, ProductAlias.alias)
+                    .join(ProductAlias, ProductAlias.sku_id == ProductSKU.id)
+                    .where(
+                        ProductAlias.merchant_id == merchant_id,
+                        ProductSKU.is_active == True,  # noqa: E712
+                    )
+                )
+            ).all()
+            for cand, alias in alias_rows:
+                if _normalize_sku_key(alias) == key:
+                    sku = cand
+                    break
     return sku
 
 
@@ -288,9 +381,29 @@ async def _parse_events_with_context(
 
 
 def _multi_event_warning(events: list[dict]) -> str | None:
-    """多意图提示文案（与小程序端约定字段一字不差）。"""
+    """多意图提示文案（与小程序端约定字段一字不差）。
+
+    QA-25：解析器已支持混合句拆笔并全量返回，旧文案「仅返回第1笔」与实际
+    行为矛盾（前端按 events 全量渲染确认卡），改为如实提示。
+    """
     if len(events) > 1:
-        return f"检测到{len(events)}笔，仅返回第1笔"
+        return f"检测到{len(events)}笔，已全部拆分，请逐笔确认"
+    return None
+
+
+# QA2-12（B-205）：报损话术引导文案。解析器不产出报损事件（见
+# voice_parser.detect_unsupported_waste_report），前端凭该 warning
+# 引导摊主去经营管理页手动报损，而不是留一张误记进货的确认卡。
+_UNSUPPORTED_WASTE_WARNING = "语音报损暂不支持，请在经营管理页手动报损"
+
+
+def _parse_response_warning(events: list[dict], asr_text: str) -> str | None:
+    """解析响应的 warning：多意图提示优先，报损话术兜底引导。"""
+    multi = _multi_event_warning(events)
+    if multi is not None:
+        return multi
+    if not events and detect_unsupported_waste_report(asr_text):
+        return _UNSUPPORTED_WASTE_WARNING
     return None
 
 
@@ -381,6 +494,16 @@ async def upload_voice(
         raise HTTPException(400, f"不支持的音频格式: {ext}")
     if audio.content_type and not audio.content_type.startswith("audio/"):
         raise HTTPException(400, "仅支持音频文件")
+    # QA-30：魔数校验在落盘之前——文件头与扩展名声明格式不符即 400，
+    # 伪造的「.wav」（实为 exe/其他字节）不再被接受保存。
+    magic_check = _AUDIO_MAGIC_CHECKS.get(ext)
+    if magic_check is None or not magic_check(audio_bytes):
+        raise HTTPException(400, "音频文件格式不正确")
+    # QA2-11（B-204）：合法 ID3 头的 mp3 容器此前只验前缀即放行整个文件，
+    # ID3 标签后夹带 MZ/PE 可执行字节可借容器头绕过魔数防线。容器头校验
+    # 通过后剥离 ID3v2 标签（按头部长度字段），再扫标签后的前 4KB。
+    if ext == ".mp3" and _mp3_carries_executable(audio_bytes):
+        raise HTTPException(400, "音频文件格式不正确")
     saved_name = f"{uuid.uuid4()}{ext}"
     saved_path = audio_dir / saved_name
     saved_path.write_bytes(audio_bytes)
@@ -397,6 +520,9 @@ async def upload_voice(
             logger.error("ASR transcription failed: %s", e, exc_info=True)
             asr_text = ""
 
+        if asr_text:
+            # QA2-01：转写原文同款净化后再解析/落库/回显（与 parse-text 入口一致）。
+            asr_text = _sanitize_display_name(asr_text)
         if asr_text:
             events = await _parse_events_with_context(db, merchant.id, asr_text)
     else:
@@ -427,7 +553,7 @@ async def upload_voice(
             "parsed": parsed,
             "event": parsed,
             "events": events,
-            "warning": _multi_event_warning(events),
+            "warning": _parse_response_warning(events, asr_text),
         },
     }
 
@@ -443,9 +569,18 @@ async def parse_text(
     身份来自 token（get_current_merchant），不再信任客户端 merchant_id。
     """
     asr_text = body.text
-    # 空内容（空串/纯空格）直接 422，不再产出垃圾语音记录。
+    # QA2-01：ASR 原文与 SKU 名同款净化（QA-08 只净化了语音→费用的 description
+    # 派生路径，voice_logs.asr_text 本体此前仍原样落库+回显，`<svg onload=…>`、
+    # `' or '1'='1` 等注入串直通存储）。解析、落库、响应回显统一使用净化后文本；
+    # 库内既有 payload 行是回归证据，不做数据清洗。
+    asr_text = _sanitize_display_name(asr_text)
+    # 空内容（空串/纯空格/剥净后为空）直接 422，不再产出垃圾语音记录。
     if not asr_text.strip():
         raise HTTPException(status_code=422, detail="请说出或输入要记的内容")
+    # QA-29：语音文本长度上限（此前 3000 字照单全收入库，对照 SKU 名 50 字上限）。
+    # 净化只删字符不增长，对净化后文本校验即可保证落库长度受控。
+    if len(asr_text) > 500:
+        raise HTTPException(status_code=422, detail="语音内容不能超过500字，请精简后重试")
 
     # SKU 优先：商户 SKU 名称/别名并入词表，命中带 sku_id 并以 SKU 名为 product。
     events = await _parse_events_with_context(db, merchant.id, asr_text)
@@ -456,7 +591,9 @@ async def parse_text(
     logs = await _persist_voice_logs(
         db, merchant_id=merchant.id, asr_text=asr_text, events=events, client_id=body.client_id
     )
-    parsed = events[0]
+    # QA-27：纯「数量+单价」短语不产出事件 → parsed 为 None，仅留一条
+    # pending 记录（与识别失败路径一致），confirm 自然拒绝。
+    parsed = events[0] if events else None
     voice_log = logs[0]
 
     return {
@@ -467,7 +604,7 @@ async def parse_text(
             "parsed": parsed,
             "event": parsed,
             "events": events,
-            "warning": _multi_event_warning(events),
+            "warning": _parse_response_warning(events, asr_text),
         },
     }
 
@@ -499,6 +636,10 @@ async def get_voice_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """Query voice log history for a merchant."""
+    # RA-12（voice 侧补口，对齐 QA2-13 语义）：limit≤0 → 空列表。此前负
+    # limit 直通 SQL，SQLite 把 LIMIT -N 视作无上限返回全量。
+    if limit <= 0:
+        return {"code": 0, "data": [], "meta": {"page": page, "limit": 0}}
     offset = (page - 1) * limit
     query = (
         select(VoiceLog)
@@ -563,6 +704,19 @@ async def correct_voice(
             k: _json_safe(v) for k, v in body.corrections.model_dump(exclude_none=True).items()
         }
 
+        # RA-01：纠错自由文本与 asr_text 同规则净化后再写回 parsed_event ——
+        # 此前 correct 的 product/party_name/unit 原样落库并经 /voice/logs
+        # 回显（`<img src=x onerror=…>白菜` 直通小程序渲染）。净化只删字符
+        # 不增长；product 净化后为空按 422 拒绝（与目录建名口径一致），
+        # party_name/unit 净化后为空视为未指定（None，confirm 走默认口径）。
+        for _text_field in ("party_name", "unit"):
+            if _text_field in updates:
+                updates[_text_field] = _sanitize_display_name(updates[_text_field]) or None
+        if "product" in updates:
+            updates["product"] = _sanitize_display_name(updates["product"])
+            if not updates["product"]:
+                raise HTTPException(status_code=422, detail="商品名称不能为空")
+
         # 商品修正走 SKU 优先解析：命中则以 SKU 标准名入账并带 sku_id。
         if "product" in updates:
             corrected_name = updates["product"]
@@ -603,6 +757,97 @@ async def correct_voice(
     }
 
 
+async def _cleanup_stale_voice_logs(db: AsyncSession, merchant_id: uuid.UUID) -> None:
+    """P2-7：顺带清理本商户 7 天前的 parsed 残留日志（解析失败/未确认的
+    垃圾行此前永久堆积）。best-effort：失败不影响记账主流程。"""
+    from datetime import timedelta as _td
+
+    try:
+        cutoff = utc_now() - _td(days=7)
+        stale = (
+            (
+                await db.execute(
+                    select(VoiceLog).where(
+                        VoiceLog.merchant_id == merchant_id,
+                        VoiceLog.status.in_(("pending", "parsed")),
+                        VoiceLog.created_at < cutoff,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for stale_log in stale:
+            await db.delete(stale_log)
+        if stale:
+            await db.commit()
+    except Exception:  # noqa: BLE001 — 清理失败静默跳过
+        logger.warning("清理过期 parsed 语音日志失败", exc_info=True)
+
+
+async def _confirm_expense_event(db: AsyncSession, log: VoiceLog, parsed: dict) -> dict:
+    """expense 事件确认：归口经营费用（expenses 表），不产生任何库存/销售/成本流水。
+
+    「摊位费花了30块」此前被当成进货 → 错账。费用与商品无关：不建
+    InventoryRecord、不建/核销批次、不落往来账；月报/日报的收入与成本
+    均按 InventoryRecord 聚合，天然不受影响；费用金额经 expenses 表进入
+    月报 expenses/net_profit 口径（复用现有费用模型，最小侵入）。
+
+    撤销锚点：费用行 id 写回 parsed_event.expense_id，void 据此删除费用行，
+    幂等语义与库存事件一致（状态翻转 + 唯一费用行删除）。
+    """
+    total_amount = (
+        parsed.get("total_amount") or parsed.get("total_cost") or parsed.get("total_revenue")
+    )
+    if total_amount is None:
+        raise HTTPException(status_code=400, detail="费用缺少金额，请补全金额后再确认")
+    amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))
+    if amount <= 0 or amount > Decimal("1000000"):
+        raise HTTPException(status_code=400, detail="费用金额必须在 0 到 1000000 之间")
+
+    # 费用归口：解析阶段已带 expense_category；历史行/纠错行回退按 ASR 原文识别
+    category = parsed.get("expense_category") or detect_expense_category(log.asr_text or "")
+    if category not in ("rent", "utility", "labor", "fee", "other"):
+        category = "other"
+
+    # QA-08：ASR 原文未经净化直写 expenses.description（库内曾有
+    # `<script>alert('v')</script>摊位费花了20块`），落库前剥掉 <> " ' `
+    description = _sanitize_display_name(log.asr_text or "")[:200] or None
+
+    expense = Expense(
+        merchant_id=log.merchant_id,
+        category=category,
+        amount=amount,
+        description=description,
+        expense_date=cst_today(),
+    )
+    db.add(expense)
+    await db.flush()
+
+    # JSON 列不能原地改：新 dict + flag_modified 才会生成 UPDATE
+    parsed = {**parsed, "expense_id": str(expense.id)}
+    log.parsed_event = parsed
+    flag_modified(log, "parsed_event")
+    log.status = "confirmed"
+    await db.commit()
+    await _cleanup_stale_voice_logs(db, log.merchant_id)
+
+    return {
+        "code": 0,
+        "message": "记账成功",
+        "data": {
+            "voice_log_id": str(log.id),
+            "event_type": "expense",
+            "product": parsed.get("product_word") or "经营费用",
+            "product_id": None,
+            "quantity": 0,
+            "unit": "元",
+            "total_amount": float(amount),
+            "consumed_from_batches": None,
+        },
+    }
+
+
 @router.post("/confirm", response_model=VoiceConfirmResponse)
 async def confirm_voice(
     body: VoiceConfirmRequest,
@@ -635,21 +880,27 @@ async def confirm_voice(
             "data": {
                 "voice_log_id": str(log.id),
                 "event_type": parsed.get("event_type", "purchase"),
-                "product": parsed.get("product") or parsed.get("product_word") or "未知商品",
+                "product": parsed.get("product")
+                or parsed.get("product_word")
+                or ("经营费用" if parsed.get("event_type") == "expense" else "未知商品"),
                 "product_id": parsed.get("product_id"),
                 "quantity": abs(parsed.get("quantity") or 0),
-                "unit": parsed.get("unit", "斤"),
+                "unit": parsed.get("unit")
+                or ("元" if parsed.get("event_type") == "expense" else "斤"),
                 "total_amount": parsed.get("total_amount") or 0,
                 "consumed_from_batches": None,
                 "idempotent": True,
             },
         }
     event_type = parsed.get("event_type", "purchase")
-    # 修复 C-1：白名单校验 event_type。非 sale/waste/purchase 直接 400，
+    # 修复 C-1：白名单校验 event_type。非 sale/waste/purchase/expense 直接 400，
     # 防止注入任意类型时 else 分支（record_qty=qty 不取 abs）落负库存。
-    ALLOWED_EVENT_TYPES = ("purchase", "sale", "waste")
+    ALLOWED_EVENT_TYPES = ("purchase", "sale", "waste", "expense")
     if event_type not in ALLOWED_EVENT_TYPES:
         raise HTTPException(400, f"不支持的事件类型: {event_type}")
+    # 经营费用分支：不碰库存/批次/往来账，归口 expenses 表（含独立金额校验）
+    if event_type == "expense":
+        return await _confirm_expense_event(db, log, parsed)
     # 保留用户原词：商品未识别时错误提示不再丢失原词（“火龙果”≠“未知商品”）。
     product_word = parsed.get("product_word") or parsed.get("product")
     product_name = parsed.get("product") or product_word or "未知商品"
@@ -782,8 +1033,15 @@ async def confirm_voice(
             unit_cost=unit_cost,
         )
     elif event_type in ("sale", "waste"):
+        # QA2-02（B-202）：语音进货批次 sku_id=NULL，商户事后建档后 SKU 过滤
+        # 恒「可售 0」。与 POS/offline-sync 一致启用无主批次回退消耗。
         consumed_from_batches = await consume_batches_fifo(
-            db, log.merchant_id, product_id, book_qty, sku_id=sku_id
+            db,
+            log.merchant_id,
+            product_id,
+            book_qty,
+            sku_id=sku_id,
+            fallback_to_unowned=True,
         )
         # F3: reject instead of silently under-consuming — otherwise the
         # InventoryRecord (already db.add-ed above) would book a sale/waste
@@ -831,32 +1089,7 @@ async def confirm_voice(
 
     log.status = "confirmed"
     await db.commit()
-
-    # P2-7：顺带清理本商户 7 天前的 parsed 残留日志（解析失败/未确认的
-    # 垃圾行此前永久堆积）。best-effort：失败不影响记账主流程。
-    try:
-        from datetime import timedelta as _td
-
-        cutoff = utc_now() - _td(days=7)
-        stale = (
-            (
-                await db.execute(
-                    select(VoiceLog).where(
-                        VoiceLog.merchant_id == log.merchant_id,
-                        VoiceLog.status.in_(("pending", "parsed")),
-                        VoiceLog.created_at < cutoff,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for stale_log in stale:
-            await db.delete(stale_log)
-        if stale:
-            await db.commit()
-    except Exception:  # noqa: BLE001 — 清理失败静默跳过
-        logger.warning("清理过期 parsed 语音日志失败", exc_info=True)
+    await _cleanup_stale_voice_logs(db, log.merchant_id)
 
     return {
         "code": 0,
@@ -980,9 +1213,13 @@ async def edit_confirmed_record(
 
     parsed = log.parsed_event or {}
     event_type = old_record.event_type
-    new_product_name = body.product or parsed.get("product", "未知商品")
+    # RA-01 同族：edit 的自由文本（product/unit）同样净化后才写回
+    # parsed_event / 冲正记录，净化后为空则回退解析值，不让 payload 落库。
+    _edit_product_input = _sanitize_display_name(body.product) if body.product else None
+    _edit_unit_input = _sanitize_display_name(body.unit) if body.unit else None
+    new_product_name = _edit_product_input or parsed.get("product", "未知商品")
     new_qty = Decimal(str(body.quantity if body.quantity is not None else abs(old_record.quantity)))
-    new_unit = body.unit or old_record.unit
+    new_unit = _edit_unit_input or old_record.unit
     new_unit_cost = body.unit_cost if body.unit_cost is not None else old_record.unit_cost
     new_unit_price = body.unit_price if body.unit_price is not None else old_record.unit_price
     new_total = body.total_amount if body.total_amount is not None else old_record.total_amount
@@ -1083,7 +1320,15 @@ async def edit_confirmed_record(
         )
     elif event_type in ("sale", "waste"):
         requested_qty = Decimal(str(abs(new_qty)))
-        consumed = await consume_batches_fifo(db, log.merchant_id, new_product_id, requested_qty)
+        # QA2-02：冲正卖出与 confirm 同口径——启用无主批次回退消耗。
+        consumed = await consume_batches_fifo(
+            db,
+            log.merchant_id,
+            new_product_id,
+            requested_qty,
+            sku_id=new_sku_id,
+            fallback_to_unowned=True,
+        )
         # F3 对齐 confirm_voice：FIFO 消耗不足即 409（本次事务内的回滚/作废
         # 随请求异常一并回退），防止冲正记录把库存改负。
         if consumed < requested_qty:

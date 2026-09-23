@@ -10,7 +10,7 @@ Page({
   data: {
     merchantName: '', skin: 'noon', greeting: '你好',
     showSkeleton: false, loadError: false, staleData: false,
-    todayRevenue: 0, todayCost: 0, todayProfit: 0, riskScore: 0,
+    todayRevenue: 0, todayCost: 0, todayProfit: 0, todayPurchaseCost: 0, riskScore: 0,
     riskLevel: '低风险', riskColor: '#1b7a44',
     expiringCount: 0, inventoryCategoryCount: 0, inStockCount: 0, lowStockCount: 0,
     weather: null, recentRecords: [],
@@ -259,9 +259,12 @@ Page({
 
     var patch = {
       showSkeleton: false, loadError: false, staleData: false,
+      // 经营台口径：收入=净销售额（扣退款）、成本=已售成本（COGS）、毛利=收入-成本；
+      // 采购支出（进货全额）单列展示，不与成本混用。
       todayRevenue: db ? (Number(db.today_revenue) || 0) : 0,
       todayCost: db ? (Number(db.today_cost) || 0) : 0,
       todayProfit: db ? (Number(db.today_profit) || 0) : 0,
+      todayPurchaseCost: db ? (Number(db.today_purchase_cost) || 0) : 0,
       riskScore: db ? (Number(db.risk_score) || 0) : 0,
       expiringCount: db ? (Number(db.expiring_count) || 0) : 0,
       inventoryCategoryCount: items.length,
@@ -272,7 +275,8 @@ Page({
     // 写缓存
     wx.setStorageSync(CACHE_KEY, { ts: Date.now(),
       todayRevenue: patch.todayRevenue, todayCost: patch.todayCost,
-      todayProfit: patch.todayProfit, riskScore: patch.riskScore,
+      todayProfit: patch.todayProfit, todayPurchaseCost: patch.todayPurchaseCost,
+      riskScore: patch.riskScore,
       expiringCount: patch.expiringCount,
       inventoryCategoryCount: patch.inventoryCategoryCount,
       inStockCount: patch.inStockCount, lowStockCount: patch.lowStockCount,
@@ -293,6 +297,7 @@ Page({
       todayRevenue: cached.todayRevenue || 0,
       todayCost: cached.todayCost || 0,
       todayProfit: cached.todayProfit || 0,
+      todayPurchaseCost: cached.todayPurchaseCost || 0,
       riskScore: cached.riskScore || 0,
       expiringCount: cached.expiringCount || 0,
       inventoryCategoryCount: cached.inventoryCategoryCount || 0,
